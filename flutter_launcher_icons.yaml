@@ -1,0 +1,33 @@
+flutter_launcher_icons:
+  # Android Configuration
+  android: true
+  image_path: "assets/images/logo.png"
+  # Optional: adaptive_icon_background: "#FFFFFF"
+  # Optional: adaptive_icon_foreground: "assets/images/logo_foreground.png"
+
+  # iOS Configuration
+  ios: true
+  image_path_ios: "assets/images/logo.png"
+
+  # Web Configuration
+  web:
+    generate: true
+    image_path: "assets/images/logo.png"
+    background_color: "#FFFFFF"
+    theme_color: "#000000"
+
+  # Windows Configuration
+  windows:
+    generate: true
+    image_path: "assets/images/logo.png"
+    icon_size: 48 # Default sizes are generated automatically
+
+  # macOS Configuration
+  macos:
+    generate: true
+    image_path: "assets/images/logo.png"
+
+  # Linux Configuration
+  linux:
+    generate: true
+    image_path: "assets/images/logo.png"
