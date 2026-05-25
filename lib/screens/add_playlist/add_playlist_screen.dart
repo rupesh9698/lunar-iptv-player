@@ -41,15 +41,123 @@ class _AddPlaylistScreenState extends ConsumerState<AddPlaylistScreen> {
   final _testBtnFocus = FocusNode();
   final _addBtnFocus = FocusNode();
 
+  final _scrollController = ScrollController();
+
   @override
   void initState() {
     super.initState();
+
     _serverCtrl.addListener(_onConnectionFieldChanged);
     _usernameCtrl.addListener(_onConnectionFieldChanged);
     _passwordCtrl.addListener(_onConnectionFieldChanged);
 
+    // ── D-pad navigation set on FocusNode directly ────────────────────────────
+    // FocusNode.onKeyEvent fires BEFORE EditableText processes the arrow key,
+    // which means we correctly intercept it with a single D-pad press.
+    _nameFocus.onKeyEvent = (_, event) {
+      if (event is! KeyDownEvent) return KeyEventResult.ignored;
+      if (event.logicalKey == LogicalKeyboardKey.arrowDown) {
+        _serverFocus.requestFocus();
+        return KeyEventResult.handled;
+      }
+      return KeyEventResult.ignored;
+    };
+
+    _serverFocus.onKeyEvent = (_, event) {
+      if (event is! KeyDownEvent) return KeyEventResult.ignored;
+      if (event.logicalKey == LogicalKeyboardKey.arrowDown) {
+        _usernameFocus.requestFocus();
+        return KeyEventResult.handled;
+      }
+      if (event.logicalKey == LogicalKeyboardKey.arrowUp) {
+        _nameFocus.requestFocus();
+        return KeyEventResult.handled;
+      }
+      return KeyEventResult.ignored;
+    };
+
+    _usernameFocus.onKeyEvent = (_, event) {
+      if (event is! KeyDownEvent) return KeyEventResult.ignored;
+      if (event.logicalKey == LogicalKeyboardKey.arrowDown) {
+        _passwordFocus.requestFocus();
+        return KeyEventResult.handled;
+      }
+      if (event.logicalKey == LogicalKeyboardKey.arrowUp) {
+        _serverFocus.requestFocus();
+        return KeyEventResult.handled;
+      }
+      return KeyEventResult.ignored;
+    };
+
+    _passwordFocus.onKeyEvent = (_, event) {
+      if (event is! KeyDownEvent) return KeyEventResult.ignored;
+      if (event.logicalKey == LogicalKeyboardKey.arrowDown) {
+        _testBtnFocus.requestFocus();
+        return KeyEventResult.handled;
+      }
+      if (event.logicalKey == LogicalKeyboardKey.arrowUp) {
+        _usernameFocus.requestFocus();
+        return KeyEventResult.handled;
+      }
+      return KeyEventResult.ignored;
+    };
+
+    _testBtnFocus.onKeyEvent = (_, event) {
+      if (event is! KeyDownEvent) return KeyEventResult.ignored;
+      if (event.logicalKey == LogicalKeyboardKey.arrowDown) {
+        _addBtnFocus.requestFocus();
+        return KeyEventResult.handled;
+      }
+      if (event.logicalKey == LogicalKeyboardKey.arrowUp) {
+        _passwordFocus.requestFocus();
+        return KeyEventResult.handled;
+      }
+      return KeyEventResult.ignored;
+    };
+
+    _addBtnFocus.onKeyEvent = (_, event) {
+      if (event is! KeyDownEvent) return KeyEventResult.ignored;
+      if (event.logicalKey == LogicalKeyboardKey.arrowUp) {
+        _testBtnFocus.requestFocus();
+        return KeyEventResult.handled;
+      }
+      return KeyEventResult.ignored;
+    };
+
+    // ── Auto-scroll when buttons receive focus ────────────────────────────────
+    _testBtnFocus.addListener(_scrollToTestBtn);
+    _addBtnFocus.addListener(_scrollToAddBtn);
+
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _nameFocus.requestFocus();
+    });
+  }
+
+  void _scrollToTestBtn() {
+    if (!_testBtnFocus.hasFocus) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (_testBtnFocus.context != null) {
+        Scrollable.ensureVisible(
+          _testBtnFocus.context!,
+          duration: const Duration(milliseconds: 350),
+          curve: Curves.easeInOut,
+          alignment: 0.8,
+        );
+      }
+    });
+  }
+
+  void _scrollToAddBtn() {
+    if (!_addBtnFocus.hasFocus) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (_addBtnFocus.context != null) {
+        Scrollable.ensureVisible(
+          _addBtnFocus.context!,
+          duration: const Duration(milliseconds: 350),
+          curve: Curves.easeInOut,
+          alignment: 0.9,
+        );
+      }
     });
   }
 
@@ -59,6 +167,9 @@ class _AddPlaylistScreenState extends ConsumerState<AddPlaylistScreen> {
     _usernameCtrl.removeListener(_onConnectionFieldChanged);
     _passwordCtrl.removeListener(_onConnectionFieldChanged);
 
+    _testBtnFocus.removeListener(_scrollToTestBtn);
+    _addBtnFocus.removeListener(_scrollToAddBtn);
+
     _nameFocus.dispose();
     _serverFocus.dispose();
     _usernameFocus.dispose();
@@ -66,6 +177,7 @@ class _AddPlaylistScreenState extends ConsumerState<AddPlaylistScreen> {
     _passwordVisibilityFocus.dispose();
     _testBtnFocus.dispose();
     _addBtnFocus.dispose();
+    _scrollController.dispose();
 
     _nameCtrl.dispose();
     _serverCtrl.dispose();
@@ -210,6 +322,7 @@ class _AddPlaylistScreenState extends ConsumerState<AddPlaylistScreen> {
               _buildHeader(),
               Expanded(
                 child: SingleChildScrollView(
+                  controller: _scrollController,
                   padding: const EdgeInsets.all(24),
                   child: Center(
                     child: ConstrainedBox(
@@ -369,111 +482,84 @@ class _AddPlaylistScreenState extends ConsumerState<AddPlaylistScreen> {
     String? Function(String?)? validator,
     TextInputType? keyboardType,
   }) {
-    return Focus(
-      onKeyEvent: (node, event) {
-        if (event is KeyDownEvent) {
-          if (event.logicalKey == LogicalKeyboardKey.arrowDown &&
-              nextFocus != null) {
-            nextFocus.requestFocus();
-            return KeyEventResult.handled;
-          }
-        }
-        return KeyEventResult.ignored;
-      },
-      child: TextFormField(
-        controller: controller,
-        focusNode: focusNode,
-        validator: validator,
-        keyboardType: keyboardType,
-        textInputAction: nextFocus != null
-            ? TextInputAction.next
-            : TextInputAction.done,
-        onFieldSubmitted: (_) => nextFocus?.requestFocus(),
-        style: const TextStyle(color: AppTheme.textPrimary, fontSize: 16),
-        decoration: InputDecoration(
-          labelText: label,
-          hintText: hint,
-          prefixIcon: Icon(icon, color: AppTheme.textMuted, size: 22),
-          labelStyle: const TextStyle(color: AppTheme.primary, fontSize: 14),
-          contentPadding: const EdgeInsets.symmetric(
-            vertical: 18,
-            horizontal: 16,
-          ),
-          border: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(14),
-            borderSide: const BorderSide(color: AppTheme.divider),
-          ),
-          enabledBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(14),
-            borderSide: const BorderSide(color: AppTheme.divider),
-          ),
-          focusedBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(14),
-            borderSide: const BorderSide(color: AppTheme.primary, width: 2),
-          ),
+    return TextFormField(
+      controller: controller,
+      focusNode: focusNode,
+      validator: validator,
+      keyboardType: keyboardType,
+      textInputAction: nextFocus != null
+          ? TextInputAction.next
+          : TextInputAction.done,
+      onFieldSubmitted: (_) => nextFocus?.requestFocus(),
+      style: const TextStyle(color: AppTheme.textPrimary, fontSize: 16),
+      decoration: InputDecoration(
+        labelText: label,
+        hintText: hint,
+        prefixIcon: Icon(icon, color: AppTheme.textMuted, size: 22),
+        labelStyle: const TextStyle(color: AppTheme.primary, fontSize: 14),
+        contentPadding: const EdgeInsets.symmetric(
+          vertical: 18,
+          horizontal: 16,
+        ),
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(14),
+          borderSide: const BorderSide(color: AppTheme.divider),
+        ),
+        enabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(14),
+          borderSide: const BorderSide(color: AppTheme.divider),
+        ),
+        focusedBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(14),
+          borderSide: const BorderSide(color: AppTheme.primary, width: 2),
         ),
       ),
     );
   }
 
   Widget _buildPasswordField() {
-    return Focus(
-      onKeyEvent: (node, event) {
-        if (event is KeyDownEvent) {
-          if (event.logicalKey == LogicalKeyboardKey.arrowDown) {
-            _testBtnFocus.requestFocus();
-            return KeyEventResult.handled;
-          }
-          if (event.logicalKey == LogicalKeyboardKey.arrowUp) {
-            _usernameFocus.requestFocus();
-            return KeyEventResult.handled;
-          }
-        }
-        return KeyEventResult.ignored;
-      },
-      child: TextFormField(
-        controller: _passwordCtrl,
-        focusNode: _passwordFocus,
-        obscureText: !_showPassword,
-        style: const TextStyle(color: AppTheme.textPrimary, fontSize: 16),
-        validator: (v) =>
-            (v == null || v.trim().isEmpty) ? 'Password is required' : null,
-        textInputAction: TextInputAction.done,
-        onFieldSubmitted: (_) => _testBtnFocus.requestFocus(),
-        decoration: InputDecoration(
-          labelText: 'Password',
-          hintText: 'Enter password',
-          prefixIcon: const Icon(
-            Icons.lock_outline,
+    return TextFormField(
+      controller: _passwordCtrl,
+      focusNode: _passwordFocus,
+      obscureText: !_showPassword,
+      style: const TextStyle(color: AppTheme.textPrimary, fontSize: 16),
+      validator: (v) =>
+          (v == null || v.trim().isEmpty) ? 'Password is required' : null,
+      textInputAction: TextInputAction.done,
+      onFieldSubmitted: (_) => _testBtnFocus.requestFocus(),
+      decoration: InputDecoration(
+        labelText: 'Password',
+        hintText: 'Enter password',
+        prefixIcon: const Icon(
+          Icons.lock_outline,
+          color: AppTheme.textMuted,
+          size: 22,
+        ),
+        suffixIcon: IconButton(
+          focusNode: _passwordVisibilityFocus,
+          icon: Icon(
+            _showPassword ? Icons.visibility_off : Icons.visibility,
             color: AppTheme.textMuted,
             size: 22,
           ),
-          suffixIcon: IconButton(
-            focusNode: _passwordVisibilityFocus,
-            icon: Icon(
-              _showPassword ? Icons.visibility_off : Icons.visibility,
-              color: AppTheme.textMuted,
-              size: 22,
-            ),
-            onPressed: () => setState(() => _showPassword = !_showPassword),
-          ),
-          labelStyle: const TextStyle(color: AppTheme.primary, fontSize: 14),
-          contentPadding: const EdgeInsets.symmetric(
-            vertical: 18,
-            horizontal: 16,
-          ),
-          border: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(14),
-            borderSide: const BorderSide(color: AppTheme.divider),
-          ),
-          enabledBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(14),
-            borderSide: const BorderSide(color: AppTheme.divider),
-          ),
-          focusedBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(14),
-            borderSide: const BorderSide(color: AppTheme.primary, width: 2),
-          ),
+          onPressed: () => setState(() => _showPassword = !_showPassword),
+        ),
+        labelStyle: const TextStyle(color: AppTheme.primary, fontSize: 14),
+        contentPadding: const EdgeInsets.symmetric(
+          vertical: 18,
+          horizontal: 16,
+        ),
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(14),
+          borderSide: const BorderSide(color: AppTheme.divider),
+        ),
+        enabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(14),
+          borderSide: const BorderSide(color: AppTheme.divider),
+        ),
+        focusedBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(14),
+          borderSide: const BorderSide(color: AppTheme.primary, width: 2),
         ),
       ),
     );
@@ -563,68 +649,35 @@ class _AddPlaylistScreenState extends ConsumerState<AddPlaylistScreen> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Focus(
-          onKeyEvent: (node, event) {
-            if (event is KeyDownEvent) {
-              if (event.logicalKey == LogicalKeyboardKey.arrowUp) {
-                _passwordFocus.requestFocus();
-                return KeyEventResult.handled;
-              }
-              if (event.logicalKey == LogicalKeyboardKey.arrowDown) {
-                _addBtnFocus.requestFocus();
-                return KeyEventResult.handled;
-              }
-            }
-            return KeyEventResult.ignored;
-          },
-          child: OutlinedButton.icon(
-            focusNode: _testBtnFocus,
-            onPressed: _isTesting ? null : _testConnection,
-            icon: _isTesting
-                ? const SizedBox(
-                    width: 16,
-                    height: 16,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  )
-                : const Icon(Icons.network_check, size: 20),
-            label: Text(_isTesting ? 'Testing...' : 'Test Connection'),
-            style: OutlinedButton.styleFrom(
-              foregroundColor: AppTheme.primary,
-              side: const BorderSide(color: AppTheme.primary),
-              padding: const EdgeInsets.symmetric(vertical: 14),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(14),
-              ),
+        OutlinedButton.icon(
+          focusNode: _testBtnFocus,
+          onPressed: _isTesting ? null : _testConnection,
+          icon: _isTesting
+              ? const SizedBox(
+                  width: 16,
+                  height: 16,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
+              : const Icon(Icons.network_check, size: 20),
+          label: Text(_isTesting ? 'Testing...' : 'Test Connection'),
+          style: OutlinedButton.styleFrom(
+            foregroundColor: AppTheme.primary,
+            side: const BorderSide(color: AppTheme.primary),
+            padding: const EdgeInsets.symmetric(vertical: 14),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(14),
             ),
           ),
         ).animate().fadeIn(delay: 100.ms),
 
         const SizedBox(height: 12),
 
-        Focus(
-          onKeyEvent: (node, event) {
-            if (event is KeyDownEvent) {
-              if (event.logicalKey == LogicalKeyboardKey.arrowUp) {
-                _testBtnFocus.requestFocus();
-                return KeyEventResult.handled;
-              }
-            }
-            return KeyEventResult.ignored;
-          },
-          child: Actions(
-            actions: <Type, Action<Intent>>{
-              ActivateIntent: CallbackAction<ActivateIntent>(
-                onInvoke: (intent) => canAdd ? _addPlaylist() : null,
-              ),
-            },
-            child: GradientButton(
-              focusNode: _addBtnFocus,
-              label: 'Add Playlist',
-              icon: Icons.add,
-              onPressed: canAdd ? _addPlaylist : null,
-              isLoading: _isAdding,
-            ),
-          ),
+        GradientButton(
+          focusNode: _addBtnFocus,
+          label: 'Add Playlist',
+          icon: Icons.add,
+          onPressed: canAdd ? _addPlaylist : null,
+          isLoading: _isAdding,
         ).animate().fadeIn(delay: 150.ms),
       ],
     );

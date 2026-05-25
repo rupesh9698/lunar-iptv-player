@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 
@@ -467,6 +468,7 @@ class _ChannelCell extends StatefulWidget {
 
 class _ChannelCellState extends State<_ChannelCell> {
   bool _hovering = false;
+  bool _focused = false;
 
   @override
   Widget build(BuildContext context) {
@@ -475,96 +477,122 @@ class _ChannelCellState extends State<_ChannelCell> {
         widget.channel.num.isNotEmpty &&
         widget.channel.num != '0';
 
-    return MouseRegion(
-      onEnter: (_) => setState(() => _hovering = true),
-      onExit: (_) => setState(() => _hovering = false),
-      child: GestureDetector(
-        onTap: widget.onTap,
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 150),
-          height: 56,
-          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-          decoration: BoxDecoration(
-            color: widget.isSelected
-                ? AppTheme.selectedItem
-                : _hovering
-                ? AppTheme.surfaceVariant
-                : AppTheme.epgFuture,
-            border: const Border(
-              bottom: BorderSide(color: AppTheme.epgBorder, width: 0.5),
+    return Focus(
+      onFocusChange: (f) => setState(() => _focused = f),
+      onKeyEvent: (_, event) {
+        if (event is KeyDownEvent &&
+            (event.logicalKey == LogicalKeyboardKey.select ||
+                event.logicalKey == LogicalKeyboardKey.enter ||
+                event.logicalKey == LogicalKeyboardKey.space ||
+                event.logicalKey == LogicalKeyboardKey.gameButtonA)) {
+          widget.onTap();
+          return KeyEventResult.handled;
+        }
+        // LEFT → back to category sidebar
+        if (event is KeyDownEvent &&
+            event.logicalKey == LogicalKeyboardKey.arrowLeft) {
+          FocusScope.of(context).focusInDirection(TraversalDirection.left);
+          return KeyEventResult.handled;
+        }
+        return KeyEventResult.ignored;
+      },
+      child: MouseRegion(
+        onEnter: (_) => setState(() => _hovering = true),
+        onExit: (_) => setState(() => _hovering = false),
+        child: GestureDetector(
+          onTap: widget.onTap,
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 150),
+            height: 56,
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+            decoration: BoxDecoration(
+              color: widget.isSelected
+                  ? AppTheme.selectedItem
+                  : (_hovering || _focused) // ← ADD _focused
+                  ? AppTheme.surfaceVariant
+                  : AppTheme.epgFuture,
+              border: Border(
+                bottom: const BorderSide(color: AppTheme.epgBorder, width: 0.5),
+                // Focus ring on left edge
+                left: _focused && !widget.isSelected
+                    ? const BorderSide(color: AppTheme.primary, width: 2.5)
+                    : BorderSide.none,
+              ),
             ),
-          ),
-          child: Row(
-            children: [
-              AnimatedContainer(
-                duration: const Duration(milliseconds: 200),
-                width: 3,
-                height: 36,
-                decoration: BoxDecoration(
-                  color: widget.isSelected
-                      ? AppTheme.primary
-                      : Colors.transparent,
-                  borderRadius: BorderRadius.circular(2),
-                ),
-              ),
-              const SizedBox(width: 8),
-              ClipRRect(
-                borderRadius: BorderRadius.circular(6),
-                child: SizedBox(width: 40, height: 32, child: _logo()),
-              ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    if (hasNum)
-                      Text(
-                        'CH ${widget.channel.num}',
-                        style: const TextStyle(
-                          color: AppTheme.textMuted,
-                          fontSize: 8,
-                          fontWeight: FontWeight.w700,
-                          letterSpacing: 0.5,
-                        ),
-                      ),
-                    Text(
-                      widget.channel.name,
-                      style: TextStyle(
-                        color: widget.isSelected
-                            ? AppTheme.textPrimary
-                            : AppTheme.textSecondary,
-                        fontSize: 11,
-                        fontWeight: widget.isSelected
-                            ? FontWeight.w600
-                            : FontWeight.w400,
-                      ),
-                      maxLines: hasNum ? 1 : 2,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  ],
-                ),
-              ),
-              if (_hovering || widget.isFavorite)
-                GestureDetector(
-                  onTap: widget.onFavorite,
-                  child: Icon(
-                    widget.isFavorite ? Icons.favorite : Icons.favorite_border,
-                    size: 14,
-                    color: widget.isFavorite
-                        ? AppTheme.error
-                        : AppTheme.textMuted,
+            child: Row(
+              children: [
+                AnimatedContainer(
+                  duration: const Duration(milliseconds: 200),
+                  width: 3,
+                  height: 36,
+                  decoration: BoxDecoration(
+                    color: widget.isSelected
+                        ? AppTheme.primary
+                        : Colors.transparent,
+                    borderRadius: BorderRadius.circular(2),
                   ),
                 ),
-              if (_hovering || widget.isSelected)
-                Icon(
-                  Icons.play_circle_outline,
-                  size: 16,
-                  color: widget.isSelected
-                      ? AppTheme.primary
-                      : AppTheme.textMuted,
+                const SizedBox(width: 8),
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(6),
+                  child: SizedBox(width: 40, height: 32, child: _logo()),
                 ),
-            ],
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      if (hasNum)
+                        Text(
+                          'CH ${widget.channel.num}',
+                          style: const TextStyle(
+                            color: AppTheme.textMuted,
+                            fontSize: 8,
+                            fontWeight: FontWeight.w700,
+                            letterSpacing: 0.5,
+                          ),
+                        ),
+                      Text(
+                        widget.channel.name,
+                        style: TextStyle(
+                          color: widget.isSelected
+                              ? AppTheme.textPrimary
+                              : AppTheme.textSecondary,
+                          fontSize: 11,
+                          fontWeight: widget.isSelected
+                              ? FontWeight.w600
+                              : FontWeight.w400,
+                        ),
+                        maxLines: hasNum ? 1 : 2,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ],
+                  ),
+                ),
+                if (_hovering || _focused || widget.isFavorite)
+                  GestureDetector(
+                    onTap: widget.onFavorite,
+                    child: Icon(
+                      widget.isFavorite
+                          ? Icons.favorite
+                          : Icons.favorite_border,
+                      size: 14,
+                      color: widget.isFavorite
+                          ? AppTheme.error
+                          : AppTheme.textMuted,
+                    ),
+                  ),
+                if (_hovering || _focused || widget.isSelected)
+                  Icon(
+                    Icons.play_circle_outline,
+                    size: 16,
+                    color: widget.isSelected
+                        ? AppTheme.primary
+                        : AppTheme.textMuted,
+                  ),
+              ],
+            ),
           ),
         ),
       ),

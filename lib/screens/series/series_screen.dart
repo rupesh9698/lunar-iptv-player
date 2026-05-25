@@ -581,13 +581,18 @@ class _SeriesSidebarTileState extends State<_SeriesSidebarTile> {
     return Focus(
       onFocusChange: (f) => setState(() => _focused = f),
       onKeyEvent: (_, event) {
-        if (event is KeyDownEvent &&
-            (event.logicalKey == LogicalKeyboardKey.select ||
-                event.logicalKey == LogicalKeyboardKey.enter ||
-                event.logicalKey == LogicalKeyboardKey.space)) {
-          setState(() => _pressed = true);
-          widget.onTap();
-          return KeyEventResult.handled;
+        if (event is KeyDownEvent) {
+          if (event.logicalKey == LogicalKeyboardKey.select ||
+              event.logicalKey == LogicalKeyboardKey.enter ||
+              event.logicalKey == LogicalKeyboardKey.space) {
+            setState(() => _pressed = true);
+            widget.onTap();
+            return KeyEventResult.handled;
+          }
+          if (event.logicalKey == LogicalKeyboardKey.arrowRight) {
+            FocusScope.of(context).focusInDirection(TraversalDirection.right);
+            return KeyEventResult.handled;
+          }
         }
         if (event is KeyUpEvent) {
           setState(() => _pressed = false);
@@ -687,13 +692,18 @@ class _SeriesCatItemState extends State<_SeriesCatItem> {
     return Focus(
       onFocusChange: (f) => setState(() => _focused = f),
       onKeyEvent: (_, event) {
-        if (event is KeyDownEvent &&
-            (event.logicalKey == LogicalKeyboardKey.select ||
-                event.logicalKey == LogicalKeyboardKey.enter ||
-                event.logicalKey == LogicalKeyboardKey.space)) {
-          setState(() => _pressed = true);
-          widget.onTap();
-          return KeyEventResult.handled;
+        if (event is KeyDownEvent) {
+          if (event.logicalKey == LogicalKeyboardKey.select ||
+              event.logicalKey == LogicalKeyboardKey.enter ||
+              event.logicalKey == LogicalKeyboardKey.space) {
+            setState(() => _pressed = true);
+            widget.onTap();
+            return KeyEventResult.handled;
+          }
+          if (event.logicalKey == LogicalKeyboardKey.arrowRight) {
+            FocusScope.of(context).focusInDirection(TraversalDirection.right);
+            return KeyEventResult.handled;
+          }
         }
         if (event is KeyUpEvent) {
           setState(() => _pressed = false);

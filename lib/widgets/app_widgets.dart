@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:cached_network_image/cached_network_image.dart';
+import 'package:flutter/services.dart';
 import 'package:shimmer/shimmer.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import '../core/theme/app_theme.dart';
@@ -49,136 +50,132 @@ class _PosterCardState extends State<PosterCard> {
       child: GestureDetector(
         onTap: widget.onTap,
         child: AnimatedContainer(
+          duration: const Duration(milliseconds: 200),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(12),
+            boxShadow: _hovered ? AppTheme.primaryShadow : AppTheme.cardShadow,
+          ),
+          child: AnimatedScale(
+            scale: _hovered ? 1.04 : 1.0,
             duration: const Duration(milliseconds: 200),
-            decoration: BoxDecoration(
+            child: ClipRRect(
               borderRadius: BorderRadius.circular(12),
-              boxShadow: _hovered ? AppTheme.primaryShadow : AppTheme.cardShadow,
-            ),
-            child: AnimatedScale(
-              scale: _hovered ? 1.04 : 1.0,
-              duration: const Duration(milliseconds: 200),
-              child: ClipRRect(
-                borderRadius: BorderRadius.circular(12),
-                child: Stack(
-                  fit: StackFit.expand,
-                  children: [
-                    // Poster image
-                    _buildImage(),
+              child: Stack(
+                fit: StackFit.expand,
+                children: [
+                  // Poster image
+                  _buildImage(),
 
-                    // Gradient overlay
-                    const DecoratedBox(
-                      decoration: BoxDecoration(
-                        gradient: AppTheme.darkOverlay,
+                  // Gradient overlay
+                  const DecoratedBox(
+                    decoration: BoxDecoration(gradient: AppTheme.darkOverlay),
+                  ),
+
+                  // Rating badge
+                  if (widget.rating != null && widget.rating! > 0)
+                    Positioned(
+                      top: 8,
+                      right: 8,
+                      child: _RatingBadge(rating: widget.rating!),
+                    ),
+
+                  // Channel number
+                  if (widget.showNumber && widget.number != null)
+                    Positioned(
+                      top: 8,
+                      left: 8,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 8,
+                          vertical: 4,
+                        ),
+                        decoration: BoxDecoration(
+                          color: Colors.black.withValues(alpha: 0.7),
+                          borderRadius: BorderRadius.circular(6),
+                        ),
+                        child: Text(
+                          widget.number!,
+                          style: const TextStyle(
+                            color: AppTheme.textSecondary,
+                            fontSize: 11,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
                       ),
                     ),
 
-                    // Rating badge
-                    if (widget.rating != null && widget.rating! > 0)
-                      Positioned(
-                        top: 8,
-                        right: 8,
-                        child: _RatingBadge(rating: widget.rating!),
-                      ),
+                  // Custom badge
+                  if (widget.badge != null)
+                    Positioned(top: 8, left: 8, child: widget.badge!),
 
-                    // Channel number
-                    if (widget.showNumber && widget.number != null)
-                      Positioned(
-                        top: 8,
-                        left: 8,
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 8, vertical: 4),
+                  // Favorite button
+                  if (widget.onFavorite != null)
+                    Positioned(
+                      bottom: 8,
+                      right: 8,
+                      child: GestureDetector(
+                        onTap: widget.onFavorite,
+                        child: AnimatedContainer(
+                          duration: const Duration(milliseconds: 200),
+                          padding: const EdgeInsets.all(6),
                           decoration: BoxDecoration(
                             color: Colors.black.withValues(alpha: 0.7),
-                            borderRadius: BorderRadius.circular(6),
+                            shape: BoxShape.circle,
                           ),
-                          child: Text(
-                            widget.number!,
-                            style: const TextStyle(
-                              color: AppTheme.textSecondary,
-                              fontSize: 11,
-                              fontWeight: FontWeight.w600,
-                            ),
+                          child: Icon(
+                            widget.isFavorite
+                                ? Icons.favorite
+                                : Icons.favorite_border,
+                            color: widget.isFavorite
+                                ? Colors.red
+                                : AppTheme.textSecondary,
+                            size: 16,
                           ),
-                        ),
-                      ),
-
-                    // Custom badge
-                    if (widget.badge != null)
-                      Positioned(
-                        top: 8,
-                        left: 8,
-                        child: widget.badge!,
-                      ),
-
-                    // Favorite button
-                    if (widget.onFavorite != null)
-                      Positioned(
-                        bottom: 8,
-                        right: 8,
-                        child: GestureDetector(
-                          onTap: widget.onFavorite,
-                          child: AnimatedContainer(
-                            duration: const Duration(milliseconds: 200),
-                            padding: const EdgeInsets.all(6),
-                            decoration: BoxDecoration(
-                              color: Colors.black.withValues(alpha: 0.7),
-                              shape: BoxShape.circle,
-                            ),
-                            child: Icon(
-                              widget.isFavorite
-                                  ? Icons.favorite
-                                  : Icons.favorite_border,
-                              color: widget.isFavorite
-                                  ? Colors.red
-                                  : AppTheme.textSecondary,
-                              size: 16,
-                            ),
-                          ),
-                        ),
-                      ),
-
-                    // Title at bottom
-                    Positioned(
-                      bottom: 0,
-                      left: 0,
-                      right: 0,
-                      child: Padding(
-                        padding: const EdgeInsets.all(10),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Text(
-                              widget.title,
-                              style: const TextStyle(
-                                color: AppTheme.textPrimary,
-                                fontSize: 13,
-                                fontWeight: FontWeight.w600,
-                              ),
-                              maxLines: 2,
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                            if (widget.subtitle != null) ...[
-                              const SizedBox(height: 2),
-                              Text(
-                                widget.subtitle!,
-                                style: const TextStyle(
-                                  color: AppTheme.textSecondary,
-                                  fontSize: 11,
-                                ),
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                            ],
-                          ],
                         ),
                       ),
                     ),
-                  ],
-                ),
+
+                  // Title at bottom
+                  Positioned(
+                    bottom: 0,
+                    left: 0,
+                    right: 0,
+                    child: Padding(
+                      padding: const EdgeInsets.all(10),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(
+                            widget.title,
+                            style: const TextStyle(
+                              color: AppTheme.textPrimary,
+                              fontSize: 13,
+                              fontWeight: FontWeight.w600,
+                            ),
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                          if (widget.subtitle != null) ...[
+                            const SizedBox(height: 2),
+                            Text(
+                              widget.subtitle!,
+                              style: const TextStyle(
+                                color: AppTheme.textSecondary,
+                                fontSize: 11,
+                              ),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ],
+                        ],
+                      ),
+                    ),
+                  ),
+                ],
               ),
             ),
+          ),
         ),
       ),
     ).animate().fadeIn(duration: 300.ms).slideY(begin: 0.05, end: 0);
@@ -291,14 +288,14 @@ class ChannelListTile extends StatelessWidget {
               child: SizedBox(
                 width: 54,
                 height: 40,
-                child: channel.streamIcon != null &&
-                    channel.streamIcon!.isNotEmpty
+                child:
+                    channel.streamIcon != null && channel.streamIcon!.isNotEmpty
                     ? CachedNetworkImage(
-                  imageUrl: channel.streamIcon!,
-                  fit: BoxFit.contain,
-                  placeholder: (_, _) => _logoPlaceholder(),
-                  errorWidget: (_, _, _) => _logoPlaceholder(),
-                )
+                        imageUrl: channel.streamIcon!,
+                        fit: BoxFit.contain,
+                        placeholder: (_, _) => _logoPlaceholder(),
+                        errorWidget: (_, _, _) => _logoPlaceholder(),
+                      )
                     : _logoPlaceholder(),
               ),
             ),
@@ -361,10 +358,7 @@ class ChannelListTile extends StatelessWidget {
                   size: 20,
                 ),
                 padding: EdgeInsets.zero,
-                constraints: const BoxConstraints(
-                  minWidth: 32,
-                  minHeight: 32,
-                ),
+                constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
               ),
           ],
         ),
@@ -387,11 +381,7 @@ class ShimmerGrid extends StatelessWidget {
   final int count;
   final double aspectRatio;
 
-  const ShimmerGrid({
-    super.key,
-    this.count = 12,
-    this.aspectRatio = 2 / 3,
-  });
+  const ShimmerGrid({super.key, this.count = 12, this.aspectRatio = 2 / 3});
 
   @override
   Widget build(BuildContext context) {
@@ -484,7 +474,7 @@ class CategorySidebar extends StatelessWidget {
               child: Divider(color: AppTheme.divider, height: 1),
             ),
             ...visible.map(
-                  (cat) => _SidebarItem(
+              (cat) => _SidebarItem(
                 label: cat.categoryName,
                 icon: Icons.folder_outlined,
                 isSelected: selected?.categoryId == cat.categoryId,
@@ -537,12 +527,7 @@ class _SidebarItemState extends State<_SidebarItem> {
                 : Colors.transparent,
             borderRadius: BorderRadius.circular(10),
             border: widget.isSelected
-                ? Border(
-              left: BorderSide(
-                color: AppTheme.primary,
-                width: 3,
-              ),
-            )
+                ? Border(left: BorderSide(color: AppTheme.primary, width: 3))
                 : null,
           ),
           child: Row(
@@ -670,10 +655,7 @@ class EmptyView extends StatelessWidget {
             style: Theme.of(context).textTheme.bodyMedium,
             textAlign: TextAlign.center,
           ),
-          if (action != null) ...[
-            const SizedBox(height: 24),
-            action!,
-          ],
+          if (action != null) ...[const SizedBox(height: 24), action!],
         ],
       ),
     );
@@ -688,7 +670,7 @@ class GradientButton extends StatefulWidget {
   final VoidCallback? onPressed;
   final IconData? icon;
   final bool isLoading;
-  final FocusNode? focusNode; // Added to support your TV remote navigation loop
+  final FocusNode? focusNode;
 
   const GradientButton({
     super.key,
@@ -696,7 +678,7 @@ class GradientButton extends StatefulWidget {
     this.onPressed,
     this.icon,
     this.isLoading = false,
-    this.focusNode, // Added here
+    this.focusNode,
   });
 
   @override
@@ -704,60 +686,97 @@ class GradientButton extends StatefulWidget {
 }
 
 class _GradientButtonState extends State<GradientButton> {
-  bool _isFocused = false;
+  bool _focused = false;
+  bool _pressed = false;
 
   @override
   Widget build(BuildContext context) {
-    final bool isEnabled = widget.onPressed != null && !widget.isLoading;
-
-    return InkWell(
+    return Focus(
       focusNode: widget.focusNode,
-      onFocusChange: (focused) {
-        setState(() {
-          _isFocused = focused;
-        });
+      onFocusChange: (f) => setState(() => _focused = f),
+      onKeyEvent: (_, event) {
+        if (event is KeyDownEvent &&
+            (event.logicalKey == LogicalKeyboardKey.select ||
+                event.logicalKey == LogicalKeyboardKey.enter ||
+                event.logicalKey == LogicalKeyboardKey.space ||
+                event.logicalKey == LogicalKeyboardKey.gameButtonA)) {
+          if (widget.onPressed != null && !widget.isLoading) {
+            setState(() => _pressed = true);
+            widget.onPressed!();
+          }
+          return KeyEventResult.handled;
+        }
+        if (event is KeyUpEvent) {
+          setState(() => _pressed = false);
+          return KeyEventResult.ignored;
+        }
+        return KeyEventResult.ignored;
       },
-      onTap: isEnabled ? widget.onPressed : null,
-      borderRadius: BorderRadius.circular(14),
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 200),
-        height: 54,
-        decoration: BoxDecoration(
-          gradient: isEnabled ? AppTheme.primaryGradient : null,
-          color: isEnabled ? null : AppTheme.surfaceVariant,
-          borderRadius: BorderRadius.circular(14),
-          // Gives a distinct visual border highlight when a TV user navigates onto it
-          border: _isFocused
-              ? Border.all(color: Colors.white, width: 2)
-              : Border.all(color: Colors.transparent, width: 2),
-          boxShadow: isEnabled ? AppTheme.primaryShadow : [],
-        ),
-        child: Center(
-          child: widget.isLoading
-              ? const SizedBox(
-            width: 24,
-            height: 24,
-            child: CircularProgressIndicator(
-              color: Colors.white,
-              strokeWidth: 2,
-            ),
-          )
-              : Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              if (widget.icon != null) ...[
-                Icon(widget.icon, color: Colors.white, size: 20),
-                const SizedBox(width: 8),
-              ],
-              Text(
-                widget.label,
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontSize: 16,
-                  fontWeight: FontWeight.w700,
-                ),
+      child: MouseRegion(
+        cursor: widget.onPressed != null
+            ? SystemMouseCursors.click
+            : SystemMouseCursors.basic,
+        child: GestureDetector(
+          onTap: widget.isLoading ? null : widget.onPressed,
+          onTapDown: (_) => setState(() => _pressed = true),
+          onTapUp: (_) => setState(() => _pressed = false),
+          onTapCancel: () => setState(() => _pressed = false),
+          child: AnimatedScale(
+            scale: _pressed ? 0.97 : 1.0,
+            duration: const Duration(milliseconds: 150),
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 150),
+              height: 54,
+              decoration: BoxDecoration(
+                gradient: widget.onPressed == null
+                    ? null
+                    : AppTheme.primaryGradient,
+                color: widget.onPressed == null
+                    ? AppTheme.surfaceVariant
+                    : null,
+                borderRadius: BorderRadius.circular(14),
+                boxShadow: widget.onPressed == null
+                    ? []
+                    : AppTheme.primaryShadow,
+                border: _focused
+                    ? Border.all(
+                        color: Colors.white.withValues(alpha: 0.6),
+                        width: 2,
+                      )
+                    : null,
               ),
-            ],
+              child: Center(
+                child: widget.isLoading
+                    ? const SizedBox(
+                        width: 24,
+                        height: 24,
+                        child: CircularProgressIndicator(
+                          color: Colors.white,
+                          strokeWidth: 2,
+                        ),
+                      )
+                    : Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          if (widget.icon != null) ...[
+                            Icon(widget.icon, color: Colors.white, size: 20),
+                            const SizedBox(width: 8),
+                          ],
+                          Text(
+                            widget.label,
+
+                            style: const TextStyle(
+                              color: Colors.white,
+
+                              fontSize: 16,
+
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        ],
+                      ),
+              ),
+            ),
           ),
         ),
       ),
@@ -794,31 +813,35 @@ class SearchBarWidget extends StatelessWidget {
       child: TextField(
         controller: controller,
         onChanged: onChanged,
-        style: const TextStyle(
-          color: AppTheme.textPrimary,
-          fontSize: 15,
-        ),
+        style: const TextStyle(color: AppTheme.textPrimary, fontSize: 15),
         decoration: InputDecoration(
           hintText: hint,
-          hintStyle:
-          const TextStyle(color: AppTheme.textMuted, fontSize: 15),
-          prefixIcon:
-          const Icon(Icons.search, color: AppTheme.textMuted, size: 20),
+          hintStyle: const TextStyle(color: AppTheme.textMuted, fontSize: 15),
+          prefixIcon: const Icon(
+            Icons.search,
+            color: AppTheme.textMuted,
+            size: 20,
+          ),
           suffixIcon: controller.text.isNotEmpty
               ? IconButton(
-            icon: const Icon(Icons.clear,
-                color: AppTheme.textMuted, size: 18),
-            onPressed: () {
-              controller.clear();
-              onClear?.call();
-            },
-          )
+                  icon: const Icon(
+                    Icons.clear,
+                    color: AppTheme.textMuted,
+                    size: 18,
+                  ),
+                  onPressed: () {
+                    controller.clear();
+                    onClear?.call();
+                  },
+                )
               : null,
           border: InputBorder.none,
           focusedBorder: InputBorder.none,
           enabledBorder: InputBorder.none,
-          contentPadding:
-          const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+          contentPadding: const EdgeInsets.symmetric(
+            horizontal: 16,
+            vertical: 12,
+          ),
           isDense: true,
         ),
       ),

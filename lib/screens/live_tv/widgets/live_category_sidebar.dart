@@ -21,8 +21,8 @@ class LiveCategorySidebar extends ConsumerStatefulWidget {
 class _LiveCategorySidebarState extends ConsumerState<LiveCategorySidebar> {
   final _scrollCtrl = ScrollController();
   final _searchCtrl = TextEditingController();
-  String _query     = '';
-  bool _showSearch  = false;
+  String _query = '';
+  bool _showSearch = false;
 
   @override
   void dispose() {
@@ -34,17 +34,17 @@ class _LiveCategorySidebarState extends ConsumerState<LiveCategorySidebar> {
   @override
   Widget build(BuildContext context) {
     final categoriesAsync = ref.watch(liveCategoriesProvider);
-    final selected        = ref.watch(selectedLiveCategoryProvider);
-    final hiddenCats      = ref.watch(hiddenLiveCategoriesProvider);
-    final filter          = ref.watch(liveFilterProvider);
-    final favorites       = ref.watch(liveFavoritesNotifierProvider);
-    final recentIds       = ref.watch(recentlyViewedLiveProvider);
-    final parentalLocked  = ref.watch(parentalLockedLiveCategoriesProvider);
+    final selected = ref.watch(selectedLiveCategoryProvider);
+    final hiddenCats = ref.watch(hiddenLiveCategoriesProvider);
+    final filter = ref.watch(liveFilterProvider);
+    final favorites = ref.watch(liveFavoritesNotifierProvider);
+    final recentIds = ref.watch(recentlyViewedLiveProvider);
+    final parentalLocked = ref.watch(parentalLockedLiveCategoriesProvider);
     final parentalEnabled = StorageService.instance.isParentalEnabled();
 
     // Count per category from ALL streams (not category-filtered)
     final allStreams = ref.watch(liveAllStreamsProvider).value ?? [];
-    final countMap  = <String, int>{};
+    final countMap = <String, int>{};
     for (final s in allStreams) {
       final id = s.categoryId ?? '';
       countMap[id] = (countMap[id] ?? 0) + 1;
@@ -64,9 +64,9 @@ class _LiveCategorySidebarState extends ConsumerState<LiveCategorySidebar> {
                   final filtered = cats.where((c) {
                     if (hiddenCats.contains(c.categoryId)) return false;
                     if (_query.isNotEmpty &&
-                        !c.categoryName
-                            .toLowerCase()
-                            .contains(_query.toLowerCase())) {
+                        !c.categoryName.toLowerCase().contains(
+                          _query.toLowerCase(),
+                        )) {
                       return false;
                     }
                     return true;
@@ -82,12 +82,15 @@ class _LiveCategorySidebarState extends ConsumerState<LiveCategorySidebar> {
                         iconColor: AppTheme.primary,
                         label: 'All Channels',
                         count: allStreams.length,
-                        isSelected: filter == LiveFilter.all && selected == null,
+                        isSelected:
+                            filter == LiveFilter.all && selected == null,
                         onTap: () {
                           ref.read(liveFilterProvider.notifier).state =
                               LiveFilter.all;
-                          ref.read(selectedLiveCategoryProvider.notifier).state =
-                          null;
+                          ref
+                                  .read(selectedLiveCategoryProvider.notifier)
+                                  .state =
+                              null;
                         },
                       ),
 
@@ -101,8 +104,10 @@ class _LiveCategorySidebarState extends ConsumerState<LiveCategorySidebar> {
                         onTap: () {
                           ref.read(liveFilterProvider.notifier).state =
                               LiveFilter.favorites;
-                          ref.read(selectedLiveCategoryProvider.notifier).state =
-                          null;
+                          ref
+                                  .read(selectedLiveCategoryProvider.notifier)
+                                  .state =
+                              null;
                         },
                       ),
 
@@ -116,69 +121,82 @@ class _LiveCategorySidebarState extends ConsumerState<LiveCategorySidebar> {
                         onTap: () {
                           ref.read(liveFilterProvider.notifier).state =
                               LiveFilter.recent;
-                          ref.read(selectedLiveCategoryProvider.notifier).state =
-                          null;
+                          ref
+                                  .read(selectedLiveCategoryProvider.notifier)
+                                  .state =
+                              null;
                         },
                         trailing: recentIds.isNotEmpty
                             ? GestureDetector(
-                          onTap: () {
-                            ref
-                                .read(
-                                recentlyViewedLiveProvider.notifier)
-                                .clear();
-                            if (ref.read(liveFilterProvider) ==
-                                LiveFilter.recent) {
-                              ref
-                                  .read(liveFilterProvider.notifier)
-                                  .state = LiveFilter.all;
-                            }
-                          },
-                          child: const Padding(
-                            padding: EdgeInsets.all(4),
-                            child: Icon(Icons.delete_outline,
-                                size: 14, color: AppTheme.textMuted),
-                          ),
-                        )
+                                onTap: () {
+                                  ref
+                                      .read(recentlyViewedLiveProvider.notifier)
+                                      .clear();
+                                  if (ref.read(liveFilterProvider) ==
+                                      LiveFilter.recent) {
+                                    ref
+                                            .read(liveFilterProvider.notifier)
+                                            .state =
+                                        LiveFilter.all;
+                                  }
+                                },
+                                child: const Padding(
+                                  padding: EdgeInsets.all(4),
+                                  child: Icon(
+                                    Icons.delete_outline,
+                                    size: 14,
+                                    color: AppTheme.textMuted,
+                                  ),
+                                ),
+                              )
                             : null,
                       ),
 
                       // ── Divider + CATEGORIES label ────────────────────
                       const Padding(
-                        padding:
-                        EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                        padding: EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 4,
+                        ),
                         child: Divider(color: AppTheme.divider, height: 1),
                       ),
                       Padding(
-                        padding:
-                        const EdgeInsets.fromLTRB(12, 6, 12, 4),
-                        child: Row(children: [
-                          const Text(
-                            'CATEGORIES',
-                            style: TextStyle(
+                        padding: const EdgeInsets.fromLTRB(12, 6, 12, 4),
+                        child: Row(
+                          children: [
+                            const Text(
+                              'CATEGORIES',
+                              style: TextStyle(
                                 color: AppTheme.textMuted,
                                 fontSize: 9,
                                 fontWeight: FontWeight.w700,
-                                letterSpacing: 1),
-                          ),
-                          const Spacer(),
-                          Text(
-                            '${cats.length}',
-                            style: const TextStyle(
-                                color: AppTheme.textMuted, fontSize: 9),
-                          ),
-                        ]),
+                                letterSpacing: 1,
+                              ),
+                            ),
+                            const Spacer(),
+                            Text(
+                              '${cats.length}',
+                              style: const TextStyle(
+                                color: AppTheme.textMuted,
+                                fontSize: 9,
+                              ),
+                            ),
+                          ],
+                        ),
                       ),
 
                       // ── Category items ────────────────────────────────
                       ...filtered.asMap().entries.map((e) {
-                        final i   = e.key;
+                        final i = e.key;
                         final cat = e.value;
                         return _CategoryTile(
                           category: cat,
-                          isSelected: filter == LiveFilter.all &&
+                          isSelected:
+                              filter == LiveFilter.all &&
                               selected?.categoryId == cat.categoryId,
                           count: countMap[cat.categoryId] ?? 0,
-                          isLocked: parentalEnabled &&
+                          isLocked:
+                              parentalEnabled &&
                               parentalLocked.contains(cat.categoryId),
                           onTap: () => _onCategoryTap(context, cat, selected),
                           onLongPress: () =>
@@ -195,12 +213,15 @@ class _LiveCategorySidebarState extends ConsumerState<LiveCategorySidebar> {
                 },
                 loading: () => const Center(
                   child: CircularProgressIndicator(
-                      color: AppTheme.primary, strokeWidth: 2),
+                    color: AppTheme.primary,
+                    strokeWidth: 2,
+                  ),
                 ),
                 error: (e, _) => Center(
-                  child: Text('Error',
-                      style: const TextStyle(
-                          color: AppTheme.error, fontSize: 12)),
+                  child: Text(
+                    'Error',
+                    style: const TextStyle(color: AppTheme.error, fontSize: 12),
+                  ),
                 ),
               ),
             ),
@@ -215,34 +236,41 @@ class _LiveCategorySidebarState extends ConsumerState<LiveCategorySidebar> {
       height: 52,
       padding: const EdgeInsets.symmetric(horizontal: 12),
       decoration: const BoxDecoration(
-          border: Border(bottom: BorderSide(color: AppTheme.divider))),
-      child: Row(children: [
-        const Icon(Icons.menu, color: AppTheme.textMuted, size: 16),
-        const SizedBox(width: 8),
-        const Expanded(
-            child: Text('Categories',
-                style: TextStyle(
-                    color: AppTheme.textPrimary,
-                    fontSize: 13,
-                    fontWeight: FontWeight.w600))),
-        MouseRegion(
-          cursor: SystemMouseCursors.click,
-          child: GestureDetector(
-            onTap: () => setState(() {
-              _showSearch = !_showSearch;
-              if (!_showSearch) {
-                _searchCtrl.clear();
-                _query = '';
-              }
-            }),
-            child: Icon(
-              _showSearch ? Icons.close : Icons.search,
-              size: 15,
-              color: _showSearch ? AppTheme.primary : AppTheme.textMuted,
+        border: Border(bottom: BorderSide(color: AppTheme.divider)),
+      ),
+      child: Row(
+        children: [
+          const Icon(Icons.menu, color: AppTheme.textMuted, size: 16),
+          const SizedBox(width: 8),
+          const Expanded(
+            child: Text(
+              'Categories',
+              style: TextStyle(
+                color: AppTheme.textPrimary,
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
+              ),
             ),
           ),
-        ),
-      ]),
+          MouseRegion(
+            cursor: SystemMouseCursors.click,
+            child: GestureDetector(
+              onTap: () => setState(() {
+                _showSearch = !_showSearch;
+                if (!_showSearch) {
+                  _searchCtrl.clear();
+                  _query = '';
+                }
+              }),
+              child: Icon(
+                _showSearch ? Icons.close : Icons.search,
+                size: 15,
+                color: _showSearch ? AppTheme.primary : AppTheme.textMuted,
+              ),
+            ),
+          ),
+        ],
+      ),
     );
   }
 
@@ -258,10 +286,8 @@ class _LiveCategorySidebarState extends ConsumerState<LiveCategorySidebar> {
           style: const TextStyle(color: AppTheme.textPrimary, fontSize: 13),
           decoration: const InputDecoration(
             hintText: 'Search categories...',
-            hintStyle:
-            TextStyle(color: AppTheme.textMuted, fontSize: 12),
-            prefixIcon:
-            Icon(Icons.search, size: 14, color: AppTheme.textMuted),
+            hintStyle: TextStyle(color: AppTheme.textMuted, fontSize: 12),
+            prefixIcon: Icon(Icons.search, size: 14, color: AppTheme.textMuted),
             contentPadding: EdgeInsets.symmetric(vertical: 8),
             isDense: true,
           ),
@@ -271,17 +297,17 @@ class _LiveCategorySidebarState extends ConsumerState<LiveCategorySidebar> {
   }
 
   Future<void> _showHideDialog(
-      BuildContext context,
-      XtreamCategory cat,
-      XtreamCategory? selected,
-      ) async {
+    BuildContext context,
+    XtreamCategory cat,
+    XtreamCategory? selected,
+  ) async {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (_) => AlertDialog(
         title: const Text('Hide Category'),
         content: Text(
           'Hide "${cat.categoryName}"?\n\n'
-              'You can restore it in Settings → Content & EPG.',
+          'You can restore it in Settings → Content & EPG.',
         ),
         actions: [
           TextButton(
@@ -289,8 +315,7 @@ class _LiveCategorySidebarState extends ConsumerState<LiveCategorySidebar> {
             child: const Text('Cancel'),
           ),
           ElevatedButton(
-            style: ElevatedButton.styleFrom(
-                backgroundColor: AppTheme.error),
+            style: ElevatedButton.styleFrom(backgroundColor: AppTheme.error),
             onPressed: () => Navigator.pop(context, true),
             child: const Text('Hide'),
           ),
@@ -298,9 +323,7 @@ class _LiveCategorySidebarState extends ConsumerState<LiveCategorySidebar> {
       ),
     );
     if (confirmed == true) {
-      ref
-          .read(hiddenLiveCategoriesProvider.notifier)
-          .toggle(cat.categoryId);
+      ref.read(hiddenLiveCategoriesProvider.notifier).toggle(cat.categoryId);
       if (selected?.categoryId == cat.categoryId) {
         ref.read(selectedLiveCategoryProvider.notifier).state = null;
       }
@@ -308,9 +331,10 @@ class _LiveCategorySidebarState extends ConsumerState<LiveCategorySidebar> {
   }
 
   Future<void> _onCategoryTap(
-      BuildContext context,
-      XtreamCategory cat,
-      XtreamCategory? selected) async {
+    BuildContext context,
+    XtreamCategory cat,
+    XtreamCategory? selected,
+  ) async {
     final isParentalEnabled = StorageService.instance.isParentalEnabled();
     final isLocked = ref
         .read(parentalLockedLiveCategoriesProvider)
@@ -322,17 +346,19 @@ class _LiveCategorySidebarState extends ConsumerState<LiveCategorySidebar> {
     if (isParentalEnabled && isLocked && !isSessionUnlocked) {
       final ok = await _showPinDialog(context);
       if (!ok || !mounted) return;
-      ref.read(parentalSessionUnlockedProvider.notifier).update(
-            (s) => {...s, cat.categoryId},
-      );
+      ref
+          .read(parentalSessionUnlockedProvider.notifier)
+          .update((s) => {...s, cat.categoryId});
     }
 
     if (!mounted) return;
-    final isSameAndAll = selected?.categoryId == cat.categoryId &&
+    final isSameAndAll =
+        selected?.categoryId == cat.categoryId &&
         ref.read(liveFilterProvider) == LiveFilter.all;
     ref.read(liveFilterProvider.notifier).state = LiveFilter.all;
-    ref.read(selectedLiveCategoryProvider.notifier).state =
-    isSameAndAll ? null : cat;
+    ref.read(selectedLiveCategoryProvider.notifier).state = isSameAndAll
+        ? null
+        : cat;
   }
 
   Future<bool> _showPinDialog(BuildContext context) async {
@@ -346,18 +372,19 @@ class _LiveCategorySidebarState extends ConsumerState<LiveCategorySidebar> {
         context: context,
         barrierDismissible: false,
         builder: (ctx) => AlertDialog(
-          title: const Row(children: [
-            Icon(Icons.lock_rounded, color: AppTheme.error, size: 20),
-            SizedBox(width: 8),
-            Text('Parental Control'),
-          ]),
+          title: const Row(
+            children: [
+              Icon(Icons.lock_rounded, color: AppTheme.error, size: 20),
+              SizedBox(width: 8),
+              Text('Parental Control'),
+            ],
+          ),
           content: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
               const Text(
                 'Enter PIN to access this category',
-                style: TextStyle(
-                    color: AppTheme.textSecondary, fontSize: 13),
+                style: TextStyle(color: AppTheme.textSecondary, fontSize: 13),
               ),
               const SizedBox(height: 16),
               TextField(
@@ -368,13 +395,15 @@ class _LiveCategorySidebarState extends ConsumerState<LiveCategorySidebar> {
                 autofocus: true,
                 textAlign: TextAlign.center,
                 style: const TextStyle(
-                    fontSize: 24,
-                    letterSpacing: 8,
-                    fontWeight: FontWeight.w700),
+                  fontSize: 24,
+                  letterSpacing: 8,
+                  fontWeight: FontWeight.w700,
+                ),
                 decoration: const InputDecoration(
-                    counterText: '', hintText: '••••'),
-                onSubmitted: (_) =>
-                    Navigator.pop(ctx, controller.text == pin),
+                  counterText: '',
+                  hintText: '••••',
+                ),
+                onSubmitted: (_) => Navigator.pop(ctx, controller.text == pin),
               ),
             ],
           ),
@@ -384,8 +413,7 @@ class _LiveCategorySidebarState extends ConsumerState<LiveCategorySidebar> {
               child: const Text('Cancel'),
             ),
             ElevatedButton(
-              onPressed: () =>
-                  Navigator.pop(ctx, controller.text == pin),
+              onPressed: () => Navigator.pop(ctx, controller.text == pin),
               child: const Text('Unlock'),
             ),
           ],
@@ -436,7 +464,7 @@ class _SidebarTile extends StatefulWidget {
 }
 
 class _SidebarTileState extends State<_SidebarTile> {
-  bool _hover   = false;
+  bool _hover = false;
   bool _focused = false;
   bool _pressed = false;
 
@@ -445,14 +473,19 @@ class _SidebarTileState extends State<_SidebarTile> {
     return Focus(
       onFocusChange: (f) => setState(() => _focused = f),
       onKeyEvent: (_, event) {
-        if (event is KeyDownEvent &&
-            (event.logicalKey == LogicalKeyboardKey.select ||
-                event.logicalKey == LogicalKeyboardKey.enter  ||
-                event.logicalKey == LogicalKeyboardKey.space  ||
-                event.logicalKey == LogicalKeyboardKey.gameButtonA)) {
-          setState(() => _pressed = true);
-          widget.onTap();
-          return KeyEventResult.handled;
+        if (event is KeyDownEvent) {
+          if (event.logicalKey == LogicalKeyboardKey.select ||
+              event.logicalKey == LogicalKeyboardKey.enter ||
+              event.logicalKey == LogicalKeyboardKey.space ||
+              event.logicalKey == LogicalKeyboardKey.gameButtonA) {
+            setState(() => _pressed = true);
+            widget.onTap();
+            return KeyEventResult.handled;
+          }
+          if (event.logicalKey == LogicalKeyboardKey.arrowRight) {
+            FocusScope.of(context).focusInDirection(TraversalDirection.right);
+            return KeyEventResult.handled;
+          }
         }
         if (event is KeyUpEvent) {
           setState(() => _pressed = false);
@@ -463,20 +496,19 @@ class _SidebarTileState extends State<_SidebarTile> {
       child: MouseRegion(
         cursor: SystemMouseCursors.click,
         onEnter: (_) => setState(() => _hover = true),
-        onExit:  (_) => setState(() {
-          _hover   = false;
+        onExit: (_) => setState(() {
+          _hover = false;
           _pressed = false;
         }),
         child: GestureDetector(
           onTap: widget.onTap,
-          onTapDown:   (_) => setState(() => _pressed = true),
-          onTapUp:     (_) => setState(() => _pressed = false),
-          onTapCancel: ()  => setState(() => _pressed = false),
+          onTapDown: (_) => setState(() => _pressed = true),
+          onTapUp: (_) => setState(() => _pressed = false),
+          onTapCancel: () => setState(() => _pressed = false),
           child: AnimatedContainer(
             duration: const Duration(milliseconds: 150),
             margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-            padding:
-            const EdgeInsets.symmetric(horizontal: 10, vertical: 9),
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 9),
             decoration: BoxDecoration(
               color: widget.isSelected
                   ? AppTheme.selectedItem
@@ -487,39 +519,43 @@ class _SidebarTileState extends State<_SidebarTile> {
                   : Colors.transparent,
               borderRadius: BorderRadius.circular(8),
               border: widget.isSelected
-                  ? Border.all(
-                  color: AppTheme.primary.withValues(alpha: 0.25))
+                  ? Border.all(color: AppTheme.primary.withValues(alpha: 0.25))
                   : (_focused && !widget.isSelected)
                   ? Border.all(
-                  color: Colors.white.withValues(alpha: 0.35),
-                  width: 1.5)
+                      color: Colors.white.withValues(alpha: 0.35),
+                      width: 1.5,
+                    )
                   : null,
             ),
-            child: Row(children: [
-              Icon(widget.icon, size: 15, color: widget.iconColor),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Text(
-                  widget.label,
-                  style: TextStyle(
-                    color: widget.isSelected
-                        ? AppTheme.textPrimary
-                        : AppTheme.textSecondary,
-                    fontSize: 13,
-                    fontWeight: widget.isSelected
-                        ? FontWeight.w600
-                        : FontWeight.w400,
+            child: Row(
+              children: [
+                Icon(widget.icon, size: 15, color: widget.iconColor),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    widget.label,
+                    style: TextStyle(
+                      color: widget.isSelected
+                          ? AppTheme.textPrimary
+                          : AppTheme.textSecondary,
+                      fontSize: 13,
+                      fontWeight: widget.isSelected
+                          ? FontWeight.w600
+                          : FontWeight.w400,
+                    ),
                   ),
                 ),
-              ),
-              if (widget.count != null && widget.count! > 0)
-                Text(
-                  '${widget.count}',
-                  style: const TextStyle(
-                      color: AppTheme.textMuted, fontSize: 10),
-                ),
-              if (widget.trailing != null) widget.trailing!,
-            ]),
+                if (widget.count != null && widget.count! > 0)
+                  Text(
+                    '${widget.count}',
+                    style: const TextStyle(
+                      color: AppTheme.textMuted,
+                      fontSize: 10,
+                    ),
+                  ),
+                if (widget.trailing != null) widget.trailing!,
+              ],
+            ),
           ),
         ),
       ),
@@ -553,7 +589,7 @@ class _CategoryTile extends StatefulWidget {
 }
 
 class _CategoryTileState extends State<_CategoryTile> {
-  bool _hover   = false;
+  bool _hover = false;
   bool _focused = false;
   bool _pressed = false;
 
@@ -562,14 +598,19 @@ class _CategoryTileState extends State<_CategoryTile> {
     return Focus(
       onFocusChange: (f) => setState(() => _focused = f),
       onKeyEvent: (_, event) {
-        if (event is KeyDownEvent &&
-            (event.logicalKey == LogicalKeyboardKey.select ||
-                event.logicalKey == LogicalKeyboardKey.enter  ||
-                event.logicalKey == LogicalKeyboardKey.space  ||
-                event.logicalKey == LogicalKeyboardKey.gameButtonA)) {
-          setState(() => _pressed = true);
-          widget.onTap();
-          return KeyEventResult.handled;
+        if (event is KeyDownEvent) {
+          if (event.logicalKey == LogicalKeyboardKey.select ||
+              event.logicalKey == LogicalKeyboardKey.enter ||
+              event.logicalKey == LogicalKeyboardKey.space ||
+              event.logicalKey == LogicalKeyboardKey.gameButtonA) {
+            setState(() => _pressed = true);
+            widget.onTap();
+            return KeyEventResult.handled;
+          }
+          if (event.logicalKey == LogicalKeyboardKey.arrowRight) {
+            FocusScope.of(context).focusInDirection(TraversalDirection.right);
+            return KeyEventResult.handled;
+          }
         }
         if (event is KeyUpEvent) {
           setState(() => _pressed = false);
@@ -580,16 +621,16 @@ class _CategoryTileState extends State<_CategoryTile> {
       child: MouseRegion(
         cursor: SystemMouseCursors.click,
         onEnter: (_) => setState(() => _hover = true),
-        onExit:  (_) => setState(() {
-          _hover   = false;
+        onExit: (_) => setState(() {
+          _hover = false;
           _pressed = false;
         }),
         child: GestureDetector(
           onTap: widget.onTap,
           onLongPress: widget.onLongPress,
-          onTapDown:   (_) => setState(() => _pressed = true),
-          onTapUp:     (_) => setState(() => _pressed = false),
-          onTapCancel: ()  => setState(() => _pressed = false),
+          onTapDown: (_) => setState(() => _pressed = true),
+          onTapUp: (_) => setState(() => _pressed = false),
+          onTapCancel: () => setState(() => _pressed = false),
           child: AnimatedContainer(
             duration: const Duration(milliseconds: 150),
             margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 1),
@@ -605,63 +646,77 @@ class _CategoryTileState extends State<_CategoryTile> {
               borderRadius: BorderRadius.circular(8),
               border: widget.isSelected
                   ? const Border(
-                  left: BorderSide(color: AppTheme.primary, width: 2))
+                      left: BorderSide(color: AppTheme.primary, width: 2),
+                    )
                   : (_focused && !widget.isSelected)
                   ? Border.all(
-                  color: Colors.white.withValues(alpha: 0.3),
-                  width: 1.5)
+                      color: Colors.white.withValues(alpha: 0.3),
+                      width: 1.5,
+                    )
                   : null,
             ),
-            child: Row(children: [
-              Icon(Icons.folder_outlined,
+            child: Row(
+              children: [
+                Icon(
+                  Icons.folder_outlined,
                   size: 14,
                   color: widget.isSelected
                       ? AppTheme.primary
-                      : AppTheme.textMuted),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Text(
-                  widget.category.categoryName,
-                  style: TextStyle(
-                    color: widget.isSelected
-                        ? AppTheme.textPrimary
-                        : AppTheme.textSecondary,
-                    fontSize: 12,
-                    fontWeight: widget.isSelected
-                        ? FontWeight.w600
-                        : FontWeight.w400,
-                  ),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
+                      : AppTheme.textMuted,
                 ),
-              ),
-              // Parental lock icon
-              if (widget.isLocked)
-                const Padding(
-                  padding: EdgeInsets.only(left: 4),
-                  child: Icon(Icons.lock_rounded,
-                      size: 11, color: AppTheme.error),
-                ),
-              if (widget.count > 0)
-                Padding(
-                  padding: const EdgeInsets.only(left: 4),
+                const SizedBox(width: 8),
+                Expanded(
                   child: Text(
-                    '${widget.count}',
-                    style: const TextStyle(
-                        color: AppTheme.textMuted, fontSize: 10),
+                    widget.category.categoryName,
+                    style: TextStyle(
+                      color: widget.isSelected
+                          ? AppTheme.textPrimary
+                          : AppTheme.textSecondary,
+                      fontSize: 12,
+                      fontWeight: widget.isSelected
+                          ? FontWeight.w600
+                          : FontWeight.w400,
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
                   ),
                 ),
-              // Long-press hint on hover/focus
-              AnimatedOpacity(
-                opacity: (_hover || _focused) ? 1.0 : 0.0,
-                duration: const Duration(milliseconds: 150),
-                child: const Padding(
-                  padding: EdgeInsets.only(left: 4),
-                  child: Icon(Icons.more_vert,
-                      size: 11, color: AppTheme.textMuted),
+                // Parental lock icon
+                if (widget.isLocked)
+                  const Padding(
+                    padding: EdgeInsets.only(left: 4),
+                    child: Icon(
+                      Icons.lock_rounded,
+                      size: 11,
+                      color: AppTheme.error,
+                    ),
+                  ),
+                if (widget.count > 0)
+                  Padding(
+                    padding: const EdgeInsets.only(left: 4),
+                    child: Text(
+                      '${widget.count}',
+                      style: const TextStyle(
+                        color: AppTheme.textMuted,
+                        fontSize: 10,
+                      ),
+                    ),
+                  ),
+                // Long-press hint on hover/focus
+                AnimatedOpacity(
+                  opacity: (_hover || _focused) ? 1.0 : 0.0,
+                  duration: const Duration(milliseconds: 150),
+                  child: const Padding(
+                    padding: EdgeInsets.only(left: 4),
+                    child: Icon(
+                      Icons.more_vert,
+                      size: 11,
+                      color: AppTheme.textMuted,
+                    ),
+                  ),
                 ),
-              ),
-            ]),
+              ],
+            ),
           ),
         ),
       ),
