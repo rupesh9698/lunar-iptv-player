@@ -1,19 +1,24 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 import 'package:media_kit_video/media_kit_video.dart';
+import 'package:cached_network_image/cached_network_image.dart';
 
 import '../../../core/theme/app_theme.dart';
 import '../../../core/utils/platform_utils.dart';
 import '../../../models/xtream_models.dart';
 import '../../../providers/live_player_provider.dart';
 import '../../../providers/live_tv_provider.dart';
+import '../../../services/web_proxy_client.dart';
+import '../../player/widgets/player_channel_guide.dart';
 
 /// Inline player for Live TV.
-/// Uses ONE shared [livePlayerProvider] instance — no reload when
-/// toggling between compact and fullscreen modes.
+/// Compact mode: video (16:9) + info pane.
+/// Maximized mode: full-screen with controls + channel guide.
 class LiveInlinePlayer extends ConsumerStatefulWidget {
   final bool isMaximized;
   final VoidCallback onMaximize;
@@ -35,16 +40,23 @@ class _LiveInlinePlayerState extends ConsumerState<LiveInlinePlayer> {
   Timer? _hideTimer;
   bool _locked = false;
   bool _videoFill = false;
+  bool _showChannelGuide = false;
 
-  // Gesture (maximized only)
+  // Gesture
   bool _isDragging = false;
   bool _dragIsLeft = false;
   bool _showVol = false;
   bool _showBright = false;
   double _brightness = 0.5;
-  final Offset _lastTap = Offset.zero;
+  Offset _lastTap = Offset.zero;
   bool _showSkipLeft = false;
   bool _showSkipRight = false;
+
+  // Channel switching
+  LiveStream? _switchingChannel;
+  int _switchCurrentIndex = -1;
+  int _switchTotalChannels = 0;
+  Timer? _channelSwitchTimer;
 
   @override
   void initState() {
@@ -56,7 +68,10 @@ class _LiveInlinePlayerState extends ConsumerState<LiveInlinePlayer> {
   void didUpdateWidget(LiveInlinePlayer old) {
     super.didUpdateWidget(old);
     if (old.isMaximized != widget.isMaximized) {
-      setState(() => _ctrlVisible = true);
+      setState(() {
+        _ctrlVisible = true;
+        _showChannelGuide = false;
+      });
       _resetHideTimer();
     }
   }
@@ -64,6 +79,7 @@ class _LiveInlinePlayerState extends ConsumerState<LiveInlinePlayer> {
   @override
   void dispose() {
     _hideTimer?.cancel();
+    _channelSwitchTimer?.cancel();
     super.dispose();
   }
 
@@ -79,6 +95,87 @@ class _LiveInlinePlayerState extends ConsumerState<LiveInlinePlayer> {
     if (_locked) return;
     setState(() => _ctrlVisible = !_ctrlVisible);
     if (_ctrlVisible) _resetHideTimer();
+  }
+
+  void _switchChannel(int delta) {
+    final streams = ref.read(filteredLiveStreamsProvider).value;
+    if (streams == null || streams.isEmpty) return;
+    final current = ref.read(selectedChannelProvider);
+    if (current == null) return;
+    final idx = streams.indexWhere((s) => s.streamId == current.streamId);
+    final base = idx < 0 ? 0 : idx;
+    final newIdx = (base + delta).clamp(0, streams.length - 1);
+    if (newIdx == base) return;
+    final newChannel = streams[newIdx];
+
+    ref.read(selectedChannelProvider.notifier).state = newChannel;
+    ref.read(epgCacheProvider.notifier).loadEpg(newChannel.streamId);
+    ref.read(recentlyViewedLiveProvider.notifier).add(newChannel.streamId);
+
+    _channelSwitchTimer?.cancel();
+    if (mounted) {
+      setState(() {
+        _switchingChannel = newChannel;
+        _switchCurrentIndex = newIdx;
+        _switchTotalChannels = streams.length;
+      });
+      _channelSwitchTimer = Timer(const Duration(seconds: 2), () {
+        if (mounted) setState(() => _switchingChannel = null);
+      });
+    }
+  }
+
+  void _onDoubleTap() {
+    if (_locked) return;
+    final w = MediaQuery.of(context).size.width;
+    if (_lastTap.dx < w / 3) {
+      setState(() => _showSkipLeft = true);
+      Future.delayed(const Duration(milliseconds: 700), () {
+        if (mounted) setState(() => _showSkipLeft = false);
+      });
+    } else if (_lastTap.dx > w * 2 / 3) {
+      setState(() => _showSkipRight = true);
+      Future.delayed(const Duration(milliseconds: 700), () {
+        if (mounted) setState(() => _showSkipRight = false);
+      });
+    } else {
+      ref.read(livePlayerProvider.notifier).togglePlayPause();
+    }
+  }
+
+  void _onDragStart(DragStartDetails d) {
+    _isDragging = true;
+    _dragIsLeft = d.localPosition.dx < MediaQuery.of(context).size.width / 2;
+  }
+
+  void _onDragUpdate(DragUpdateDetails d) {
+    if (!_isDragging || _locked) return;
+    final delta = -d.delta.dy / (MediaQuery.of(context).size.height * 0.5);
+    if (_dragIsLeft) {
+      if (PlatformUtils.isMobile) {
+        setState(() {
+          _brightness = (_brightness + delta).clamp(0.0, 1.0);
+          _showBright = true;
+        });
+        PlatformUtils.setBrightness(_brightness);
+      }
+    } else {
+      final nv = (ref.read(livePlayerProvider).volume + delta).clamp(0.0, 1.0);
+      ref.read(livePlayerProvider.notifier).setVolume(nv);
+      setState(() => _showVol = true);
+    }
+  }
+
+  void _onDragEnd(DragEndDetails _) {
+    _isDragging = false;
+    Future.delayed(const Duration(seconds: 1), () {
+      if (mounted) {
+        setState(() {
+          _showVol = false;
+          _showBright = false;
+        });
+      }
+    });
   }
 
   @override
@@ -130,7 +227,7 @@ class _LiveInlinePlayerState extends ConsumerState<LiveInlinePlayer> {
       color: AppTheme.surface,
       child: Row(
         children: [
-          // ── Video (16:9) ────────────────────────────────────────────
+          // Video (16:9)
           AspectRatio(
             aspectRatio: 16 / 9,
             child: _VideoArea(
@@ -143,7 +240,7 @@ class _LiveInlinePlayerState extends ConsumerState<LiveInlinePlayer> {
               overlay: _compactOverlay(ps),
             ),
           ),
-          // ── Info pane ───────────────────────────────────────────────
+          // Info pane
           Expanded(
             child: _InfoPane(
               channel: channel,
@@ -162,7 +259,6 @@ class _LiveInlinePlayerState extends ConsumerState<LiveInlinePlayer> {
     );
   }
 
-  /// Overlay rendered inside the compact video area.
   Widget _compactOverlay(LivePlayerState ps) {
     return Column(
       children: [
@@ -243,172 +339,193 @@ class _LiveInlinePlayerState extends ConsumerState<LiveInlinePlayer> {
     EpgListing? next,
     VideoController? ctrl,
   ) {
-    return Material(
-      color: Colors.black,
-      child: Stack(
-        children: [
-          // ── Video fill ──────────────────────────────────────────────
-          Positioned.fill(
-            child: _VideoArea(
-              ctrl: ctrl,
-              ps: ps,
-              videoFill: _videoFill,
-              ctrlVisible: _ctrlVisible,
-              onTap: _toggleControls,
-              onDoubleTap: _onDoubleTap,
-              onDragStart: _onDragStart,
-              onDragUpdate: _onDragUpdate,
-              onDragEnd: _onDragEnd,
+    return Focus(
+      autofocus: !_showChannelGuide,
+      onKeyEvent: (_, event) {
+        if (event is! KeyDownEvent) return KeyEventResult.ignored;
+
+        if (event.logicalKey == LogicalKeyboardKey.keyG ||
+            (!_ctrlVisible &&
+                event.logicalKey == LogicalKeyboardKey.arrowDown)) {
+          setState(() => _showChannelGuide = !_showChannelGuide);
+          return KeyEventResult.handled;
+        }
+        if (_showChannelGuide) return KeyEventResult.ignored;
+
+        if (event.logicalKey == LogicalKeyboardKey.pageUp ||
+            event.logicalKey == LogicalKeyboardKey.channelUp ||
+            event.logicalKey == LogicalKeyboardKey.arrowUp) {
+          _switchChannel(-1);
+          return KeyEventResult.handled;
+        }
+        if (event.logicalKey == LogicalKeyboardKey.pageDown ||
+            event.logicalKey == LogicalKeyboardKey.channelDown ||
+            event.logicalKey == LogicalKeyboardKey.arrowDown) {
+          _switchChannel(1);
+          return KeyEventResult.handled;
+        }
+        if (event.logicalKey == LogicalKeyboardKey.select ||
+            event.logicalKey == LogicalKeyboardKey.enter ||
+            event.logicalKey == LogicalKeyboardKey.space) {
+          _toggleControls();
+          return KeyEventResult.handled;
+        }
+        if (event.logicalKey == LogicalKeyboardKey.escape ||
+            event.logicalKey == LogicalKeyboardKey.goBack) {
+          widget.onMinimize();
+          return KeyEventResult.handled;
+        }
+        return KeyEventResult.ignored;
+      },
+      child: Material(
+        color: Colors.black,
+        child: Stack(
+          children: [
+            // Video
+            Positioned.fill(
+              child: ps.error == WebProxyClient.webHttpStreamError
+                  ? _WebStreamError(channel: channel)
+                  : _VideoArea(
+                      ctrl: ctrl,
+                      ps: ps,
+                      videoFill: _videoFill,
+                      ctrlVisible: _ctrlVisible,
+                      onTap: _showChannelGuide
+                          ? () => setState(() => _showChannelGuide = false)
+                          : _toggleControls,
+                      onDoubleTap: _showChannelGuide ? null : _onDoubleTap,
+                      onDragStart: _onDragStart,
+                      onDragUpdate: _onDragUpdate,
+                      onDragEnd: _onDragEnd,
+                    ),
             ),
-          ),
 
-          // ── Buffering badge ─────────────────────────────────────────
-          if (ps.isBuffering && ps.error.isEmpty && !ps.isReconnecting)
-            const Positioned(bottom: 80, right: 20, child: _BufferingBadge()),
+            // Buffering
+            if (ps.isBuffering && ps.error.isEmpty && !ps.isReconnecting)
+              const Positioned(bottom: 80, right: 20, child: _BufferingBadge()),
 
-          // ── Reconnect ───────────────────────────────────────────────
-          if (ps.isReconnecting)
-            Center(
-              child: _ReconnectOverlay(
-                attempt: ps.reconnectAttempt,
-                onCancel: () =>
-                    ref.read(livePlayerProvider.notifier).clearError(),
-              ),
-            ),
-
-          // ── Full controls overlay ───────────────────────────────────
-          if (!_locked && ps.error.isEmpty && !ps.isReconnecting)
-            AnimatedOpacity(
-              opacity: _ctrlVisible ? 1.0 : 0.0,
-              duration: const Duration(milliseconds: 250),
-              child: IgnorePointer(
-                ignoring: !_ctrlVisible,
-                child: _MaximizedControls(
-                  channel: channel,
-                  ps: ps,
-                  isVideoFill: _videoFill,
-                  isFavorite: ref
-                      .watch(liveFavoritesNotifierProvider)
-                      .contains(channel?.streamId ?? ''),
-                  onMinimize: widget.onMinimize,
-                  onLock: () => setState(() => _locked = true),
-                  onTogglePlay: () =>
-                      ref.read(livePlayerProvider.notifier).togglePlayPause(),
-                  onVolumeChange: (v) =>
-                      ref.read(livePlayerProvider.notifier).setVolume(v),
-                  onToggleFit: () => setState(() => _videoFill = !_videoFill),
-                  onToggleFav: channel != null
-                      ? () => ref
-                            .read(liveFavoritesNotifierProvider.notifier)
-                            .toggle(channel.streamId)
-                      : null,
+            // Reconnect
+            if (ps.isReconnecting)
+              Center(
+                child: _ReconnectOverlay(
+                  attempt: ps.reconnectAttempt,
+                  onCancel: () =>
+                      ref.read(livePlayerProvider.notifier).clearError(),
                 ),
               ),
-            ),
 
-          // ── Lock overlay ────────────────────────────────────────────
-          if (_locked)
-            _LockOverlay(onUnlock: () => setState(() => _locked = false)),
-
-          // ── Skip indicators ─────────────────────────────────────────
-          if (_showSkipLeft)
-            const Positioned(
-              left: 32,
-              top: 0,
-              bottom: 0,
-              child: Center(child: _SkipIndicator(forward: false)),
-            ),
-          if (_showSkipRight)
-            const Positioned(
-              right: 32,
-              top: 0,
-              bottom: 0,
-              child: Center(child: _SkipIndicator(forward: true)),
-            ),
-
-          // ── Vol / Brightness overlays ───────────────────────────────
-          if (_showVol)
-            Center(
-              child: _GestureOverlay(
-                icon: ps.volume > 0.5
-                    ? Icons.volume_up_rounded
-                    : ps.volume > 0
-                    ? Icons.volume_down_rounded
-                    : Icons.volume_off_rounded,
-                value: ps.volume,
-                color: Colors.white,
+            // Controls overlay
+            if (!_locked &&
+                ps.error.isEmpty &&
+                !ps.isReconnecting &&
+                !_showChannelGuide)
+              AnimatedOpacity(
+                opacity: _ctrlVisible ? 1.0 : 0.0,
+                duration: const Duration(milliseconds: 250),
+                child: IgnorePointer(
+                  ignoring: !_ctrlVisible,
+                  child: _MaximizedControls(
+                    channel: channel,
+                    ps: ps,
+                    isVideoFill: _videoFill,
+                    isFavorite: ref
+                        .watch(liveFavoritesNotifierProvider)
+                        .contains(channel?.streamId ?? ''),
+                    onMinimize: widget.onMinimize,
+                    onLock: () => setState(() => _locked = true),
+                    onTogglePlay: () =>
+                        ref.read(livePlayerProvider.notifier).togglePlayPause(),
+                    onVolumeChange: (v) =>
+                        ref.read(livePlayerProvider.notifier).setVolume(v),
+                    onToggleFit: () => setState(() => _videoFill = !_videoFill),
+                    onToggleFav: channel != null
+                        ? () => ref
+                              .read(liveFavoritesNotifierProvider.notifier)
+                              .toggle(channel.streamId)
+                        : null,
+                    onPrevChannel: () => _switchChannel(-1),
+                    onNextChannel: () => _switchChannel(1),
+                    onToggleGuide: () =>
+                        setState(() => _showChannelGuide = true),
+                  ),
+                ),
               ),
-            ),
-          if (_showBright)
-            Center(
-              child: _GestureOverlay(
-                icon: _brightness > 0.5
-                    ? Icons.brightness_high_rounded
-                    : Icons.brightness_low_rounded,
-                value: _brightness,
-                color: Colors.amber,
+
+            // Lock overlay
+            if (_locked)
+              _LockOverlay(onUnlock: () => setState(() => _locked = false)),
+
+            // Skip indicators
+            if (_showSkipLeft)
+              const Positioned(
+                left: 32,
+                top: 0,
+                bottom: 0,
+                child: Center(child: _SkipIndicator(forward: false)),
               ),
-            ),
-        ],
+            if (_showSkipRight)
+              const Positioned(
+                right: 32,
+                top: 0,
+                bottom: 0,
+                child: Center(child: _SkipIndicator(forward: true)),
+              ),
+
+            // Volume / Brightness
+            if (_showVol)
+              Center(
+                child: _GestureOverlay(
+                  icon: ref.read(livePlayerProvider).volume > 0.5
+                      ? Icons.volume_up_rounded
+                      : ref.read(livePlayerProvider).volume > 0
+                      ? Icons.volume_down_rounded
+                      : Icons.volume_off_rounded,
+                  value: ref.read(livePlayerProvider).volume,
+                  color: Colors.white,
+                ),
+              ),
+            if (_showBright)
+              Center(
+                child: _GestureOverlay(
+                  icon: _brightness > 0.5
+                      ? Icons.brightness_high_rounded
+                      : Icons.brightness_low_rounded,
+                  value: _brightness,
+                  color: Colors.amber,
+                ),
+              ),
+
+            // Channel switch overlay
+            if (_switchingChannel != null)
+              _ChannelSwitchOverlay(
+                channel: _switchingChannel!,
+                currentIndex: _switchCurrentIndex,
+                totalChannels: _switchTotalChannels,
+              ),
+
+            // Channel Guide panel
+            if (_showChannelGuide)
+              Positioned(
+                bottom: 0,
+                left: 0,
+                right: 0,
+                child: PlayerChannelGuide(
+                  onMinimize: () {
+                    setState(() => _showChannelGuide = false);
+                    widget.onMinimize();
+                  },
+                  onClose: () => setState(() => _showChannelGuide = false),
+                ),
+              ),
+          ],
+        ),
       ),
     );
-  }
-
-  // ── Gesture handlers (maximized only) ────────────────────────────────────
-  void _onDoubleTap() {
-    if (_locked) return;
-    final w = MediaQuery.of(context).size.width;
-    if (_lastTap.dx < w / 3) {
-      setState(() => _showSkipLeft = true);
-      Future.delayed(const Duration(milliseconds: 700), () {
-        if (mounted) setState(() => _showSkipLeft = false);
-      });
-    } else if (_lastTap.dx > w * 2 / 3) {
-      setState(() => _showSkipRight = true);
-      Future.delayed(const Duration(milliseconds: 700), () {
-        if (mounted) setState(() => _showSkipRight = false);
-      });
-    } else {
-      ref.read(livePlayerProvider.notifier).togglePlayPause();
-    }
-  }
-
-  void _onDragStart(DragStartDetails d) {
-    if (_locked) return;
-    _isDragging = true;
-    _dragIsLeft = d.localPosition.dx < MediaQuery.of(context).size.width / 2;
-  }
-
-  void _onDragUpdate(DragUpdateDetails d) {
-    if (!_isDragging || _locked) return;
-    final delta = -d.delta.dy / (MediaQuery.of(context).size.height * 0.5);
-    if (_dragIsLeft) {
-      setState(() {
-        _brightness = (_brightness + delta).clamp(0.0, 1.0);
-        _showBright = true;
-      });
-      PlatformUtils.setBrightness(_brightness);
-    } else {
-      final nv = (ref.read(livePlayerProvider).volume + delta).clamp(0.0, 1.0);
-      ref.read(livePlayerProvider.notifier).setVolume(nv);
-      setState(() => _showVol = true);
-    }
-  }
-
-  void _onDragEnd(DragEndDetails _) {
-    _isDragging = false;
-    Future.delayed(const Duration(seconds: 1), () {
-      if (mounted)
-        setState(() {
-          _showVol = false;
-          _showBright = false;
-        });
-    });
   }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// VIDEO AREA — shared by compact and maximized modes
+// VIDEO AREA
 // ─────────────────────────────────────────────────────────────────────────────
 class _VideoArea extends StatelessWidget {
   final VideoController? ctrl;
@@ -420,7 +537,6 @@ class _VideoArea extends StatelessWidget {
   final GestureDragStartCallback? onDragStart;
   final GestureDragUpdateCallback? onDragUpdate;
   final GestureDragEndCallback? onDragEnd;
-  // Optional overlay rendered on top of video (compact controls)
   final Widget? overlay;
 
   const _VideoArea({
@@ -438,7 +554,7 @@ class _VideoArea extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    if (ps.error.isNotEmpty) {
+    if (ps.error.isNotEmpty && ps.error != WebProxyClient.webHttpStreamError) {
       return Container(
         color: Colors.black,
         child: const Column(
@@ -471,14 +587,11 @@ class _VideoArea extends StatelessWidget {
       child: Stack(
         fit: StackFit.expand,
         children: [
-          // Video
           Video(
             controller: ctrl!,
             fit: videoFill ? BoxFit.cover : BoxFit.contain,
             controls: NoVideoControls,
           ),
-
-          // Gesture layer
           Positioned.fill(
             child: GestureDetector(
               behavior: HitTestBehavior.opaque,
@@ -489,8 +602,6 @@ class _VideoArea extends StatelessWidget {
               onVerticalDragEnd: onDragEnd,
             ),
           ),
-
-          // Compact controls overlay (shown over video)
           if (overlay != null)
             Positioned.fill(
               child: AnimatedOpacity(
@@ -517,8 +628,6 @@ class _VideoArea extends StatelessWidget {
                 ),
               ),
             ),
-
-          // Mini buffering (compact only)
           if (ps.isBuffering && overlay != null)
             Positioned(
               bottom: 8,
@@ -546,7 +655,7 @@ class _VideoArea extends StatelessWidget {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// MAXIMIZED CONTROLS OVERLAY
+// MAXIMIZED CONTROLS
 // ─────────────────────────────────────────────────────────────────────────────
 class _MaximizedControls extends StatelessWidget {
   final LiveStream? channel;
@@ -559,6 +668,9 @@ class _MaximizedControls extends StatelessWidget {
   final ValueChanged<double> onVolumeChange;
   final VoidCallback onToggleFit;
   final VoidCallback? onToggleFav;
+  final VoidCallback onPrevChannel;
+  final VoidCallback onNextChannel;
+  final VoidCallback onToggleGuide;
 
   const _MaximizedControls({
     required this.channel,
@@ -571,6 +683,9 @@ class _MaximizedControls extends StatelessWidget {
     required this.onVolumeChange,
     required this.onToggleFit,
     required this.onToggleFav,
+    required this.onPrevChannel,
+    required this.onNextChannel,
+    required this.onToggleGuide,
   });
 
   @override
@@ -592,12 +707,11 @@ class _MaximizedControls extends StatelessWidget {
       child: SafeArea(
         child: Column(
           children: [
-            // ── Top bar ───────────────────────────────────────────────
+            // Top bar
             Padding(
               padding: const EdgeInsets.fromLTRB(4, 4, 12, 4),
               child: Row(
                 children: [
-                  // Minimize back to preview
                   IconButton(
                     onPressed: onMinimize,
                     icon: const Icon(
@@ -670,7 +784,7 @@ class _MaximizedControls extends StatelessWidget {
 
             const Spacer(),
 
-            // ── Center play button ────────────────────────────────────
+            // Center play
             GestureDetector(
               onTap: onTogglePlay,
               child: AnimatedContainer(
@@ -695,7 +809,7 @@ class _MaximizedControls extends StatelessWidget {
 
             const Spacer(),
 
-            // ── Bottom bar ────────────────────────────────────────────
+            // Bottom bar
             Padding(
               padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
               child: Row(
@@ -711,8 +825,22 @@ class _MaximizedControls extends StatelessWidget {
                       size: 30,
                     ),
                   ),
+                  _ChannelBtn(
+                    icon: Icons.skip_previous_rounded,
+                    tooltip: 'Previous Channel',
+                    onTap: onPrevChannel,
+                  ),
+                  _ChannelBtn(
+                    icon: Icons.skip_next_rounded,
+                    tooltip: 'Next Channel',
+                    onTap: onNextChannel,
+                  ),
+                  _ChannelBtn(
+                    icon: Icons.video_library_outlined,
+                    tooltip: 'Channel Guide (G)',
+                    onTap: onToggleGuide,
+                  ),
                   const Spacer(),
-                  // Volume
                   Icon(
                     ps.volume > 0.5 ? Icons.volume_up : Icons.volume_off,
                     color: Colors.white,
@@ -761,7 +889,68 @@ class _MaximizedControls extends StatelessWidget {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// INFO PANE (compact mode — right side of video)
+// CHANNEL BUTTON
+// ─────────────────────────────────────────────────────────────────────────────
+class _ChannelBtn extends StatefulWidget {
+  final IconData icon;
+  final String tooltip;
+  final VoidCallback onTap;
+  const _ChannelBtn({
+    required this.icon,
+    required this.tooltip,
+    required this.onTap,
+  });
+
+  @override
+  State<_ChannelBtn> createState() => _ChannelBtnState();
+}
+
+class _ChannelBtnState extends State<_ChannelBtn> {
+  bool _focused = false;
+
+  @override
+  Widget build(BuildContext context) {
+    return Focus(
+      onFocusChange: (f) => setState(() => _focused = f),
+      onKeyEvent: (_, event) {
+        if (event is KeyDownEvent &&
+            (event.logicalKey == LogicalKeyboardKey.select ||
+                event.logicalKey == LogicalKeyboardKey.enter ||
+                event.logicalKey == LogicalKeyboardKey.space)) {
+          widget.onTap();
+          return KeyEventResult.handled;
+        }
+        return KeyEventResult.ignored;
+      },
+      child: Tooltip(
+        message: widget.tooltip,
+        child: GestureDetector(
+          onTap: widget.onTap,
+          child: MouseRegion(
+            cursor: SystemMouseCursors.click,
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 150),
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: _focused
+                    ? Colors.white.withValues(alpha: 0.2)
+                    : Colors.transparent,
+                border: _focused
+                    ? Border.all(color: Colors.white.withValues(alpha: 0.5))
+                    : null,
+              ),
+              child: Icon(widget.icon, color: Colors.white, size: 24),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// INFO PANE (compact right side)
 // ─────────────────────────────────────────────────────────────────────────────
 class _InfoPane extends StatelessWidget {
   final LiveStream channel;
@@ -789,7 +978,6 @@ class _InfoPane extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Channel name + badges
           Row(
             children: [
               Expanded(
@@ -836,8 +1024,8 @@ class _InfoPane extends StatelessWidget {
                     Row(
                       children: [
                         Text(
-                          '${DateFormat('HH:mm').format(current!.startTime)}'
-                          ' – ${DateFormat('HH:mm').format(current!.endTime)}',
+                          '${DateFormat('HH:mm').format(current!.startTime)} – '
+                          '${DateFormat('HH:mm').format(current!.endTime)}',
                           style: const TextStyle(
                             color: AppTheme.textSecondary,
                             fontSize: 11,
@@ -888,7 +1076,6 @@ class _InfoPane extends StatelessWidget {
                         fontSize: 12,
                       ),
                     ),
-
                   if (next != null) ...[
                     const SizedBox(height: 8),
                     const _Label('UP NEXT'),
@@ -903,8 +1090,8 @@ class _InfoPane extends StatelessWidget {
                       overflow: TextOverflow.ellipsis,
                     ),
                     Text(
-                      '${DateFormat('HH:mm').format(next!.startTime)}'
-                      ' – ${DateFormat('HH:mm').format(next!.endTime)}',
+                      '${DateFormat('HH:mm').format(next!.startTime)} – '
+                      '${DateFormat('HH:mm').format(next!.endTime)}',
                       style: const TextStyle(
                         color: AppTheme.textMuted,
                         fontSize: 11,
@@ -916,26 +1103,153 @@ class _InfoPane extends StatelessWidget {
             ),
           ),
 
-          const SizedBox(height: 4),
+          const SizedBox(height: 8),
 
-          // Watch Now = maximize inline player
           SizedBox(
             width: double.infinity,
-            child: ElevatedButton.icon(
-              onPressed: onWatchNow,
-              icon: const Icon(Icons.fullscreen_rounded, size: 18),
-              label: const Text('Watch Now'),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: AppTheme.primary,
-                foregroundColor: Colors.white,
-                padding: const EdgeInsets.symmetric(vertical: 8),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(10),
-                ),
-              ),
+            child: _FocusableElevatedButton(
+              label: 'Watch Now',
+              icon: Icons.fullscreen_rounded,
+              onTap: onWatchNow,
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// FOCUSABLE ELEVATED BUTTON
+// ─────────────────────────────────────────────────────────────────────────────
+class _FocusableElevatedButton extends StatefulWidget {
+  final String label;
+  final IconData icon;
+  final VoidCallback onTap;
+  const _FocusableElevatedButton({
+    required this.label,
+    required this.icon,
+    required this.onTap,
+  });
+
+  @override
+  State<_FocusableElevatedButton> createState() =>
+      _FocusableElevatedButtonState();
+}
+
+class _FocusableElevatedButtonState extends State<_FocusableElevatedButton> {
+  bool _focused = false;
+
+  @override
+  Widget build(BuildContext context) {
+    return Focus(
+      onFocusChange: (f) => setState(() => _focused = f),
+      onKeyEvent: (_, event) {
+        if (event is KeyDownEvent &&
+            (event.logicalKey == LogicalKeyboardKey.select ||
+                event.logicalKey == LogicalKeyboardKey.enter ||
+                event.logicalKey == LogicalKeyboardKey.space)) {
+          widget.onTap();
+          return KeyEventResult.handled;
+        }
+        return KeyEventResult.ignored;
+      },
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 150),
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(10),
+          border: _focused
+              ? Border.all(color: Colors.white.withValues(alpha: 0.7), width: 2)
+              : null,
+        ),
+        child: ElevatedButton.icon(
+          onPressed: widget.onTap,
+          icon: Icon(widget.icon, size: 18),
+          label: Text(widget.label),
+          style: ElevatedButton.styleFrom(
+            backgroundColor: _focused
+                ? AppTheme.primary.withValues(alpha: 0.9)
+                : AppTheme.primary,
+            foregroundColor: Colors.white,
+            padding: const EdgeInsets.symmetric(vertical: 8),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(10),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// WEB HTTP STREAM ERROR
+// ─────────────────────────────────────────────────────────────────────────────
+class _WebStreamError extends StatelessWidget {
+  final LiveStream? channel;
+  const _WebStreamError({this.channel});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      color: Colors.black,
+      child: Center(
+        child: Container(
+          padding: const EdgeInsets.all(28),
+          constraints: const BoxConstraints(maxWidth: 420),
+          decoration: BoxDecoration(
+            color: AppTheme.surface,
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: AppTheme.divider),
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(
+                Icons.signal_wifi_off_rounded,
+                color: AppTheme.warning,
+                size: 40,
+              ),
+              const SizedBox(height: 16),
+              Text(
+                channel?.name ?? 'Stream',
+                style: const TextStyle(
+                  color: AppTheme.textPrimary,
+                  fontSize: 15,
+                  fontWeight: FontWeight.w700,
+                ),
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 8),
+              const Text(
+                'This channel uses an HTTP stream which browsers\n'
+                'block on HTTPS pages. Use our Android or Windows\n'
+                'app for full streaming support.',
+                style: TextStyle(color: AppTheme.textSecondary, fontSize: 13),
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 20),
+              Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      onPressed: () => context.push('/live-tv'),
+                      icon: const Icon(Icons.arrow_back, size: 16),
+                      label: const Text('Back to Guide'),
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: AppTheme.textSecondary,
+                        side: const BorderSide(color: AppTheme.divider),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }
@@ -1220,4 +1534,116 @@ class _GestureOverlay extends StatelessWidget {
       ],
     ),
   );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// CHANNEL SWITCH OVERLAY
+// ─────────────────────────────────────────────────────────────────────────────
+class _ChannelSwitchOverlay extends StatelessWidget {
+  final LiveStream channel;
+  final int currentIndex;
+  final int totalChannels;
+  const _ChannelSwitchOverlay({
+    required this.channel,
+    required this.currentIndex,
+    required this.totalChannels,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Positioned(
+      right: 20,
+      top: 0,
+      bottom: 0,
+      child: Center(
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 200),
+          constraints: const BoxConstraints(maxWidth: 180),
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: Colors.black.withValues(alpha: 0.82),
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(
+              color: AppTheme.primary.withValues(alpha: 0.5),
+              width: 1.5,
+            ),
+            boxShadow: [
+              BoxShadow(
+                color: AppTheme.primary.withValues(alpha: 0.15),
+                blurRadius: 20,
+              ),
+            ],
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (channel.streamIcon?.isNotEmpty == true)
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(8),
+                  child: CachedNetworkImage(
+                    imageUrl: channel.streamIcon!,
+                    width: 80,
+                    height: 54,
+                    fit: BoxFit.contain,
+                    placeholder: (_, _) =>
+                        const Icon(Icons.tv, color: Colors.white54, size: 32),
+                    errorWidget: (_, _, _) =>
+                        const Icon(Icons.tv, color: Colors.white54, size: 32),
+                  ),
+                )
+              else
+                const Icon(Icons.tv, color: Colors.white54, size: 36),
+              const SizedBox(height: 10),
+              if (channel.num.isNotEmpty && channel.num != '0')
+                Text(
+                  'CH ${channel.num}',
+                  style: const TextStyle(
+                    color: Colors.white54,
+                    fontSize: 11,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              Text(
+                channel.name,
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 13,
+                  fontWeight: FontWeight.w700,
+                ),
+                textAlign: TextAlign.center,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+              ),
+              const SizedBox(height: 6),
+              Container(
+                height: 2,
+                width: 80,
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(1),
+                  color: Colors.white.withValues(alpha: 0.15),
+                ),
+                child: FractionallySizedBox(
+                  alignment: Alignment.centerLeft,
+                  widthFactor: totalChannels > 1
+                      ? currentIndex / (totalChannels - 1)
+                      : 1.0,
+                  child: Container(
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(1),
+                      color: AppTheme.primary,
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                '${currentIndex + 1} / $totalChannels',
+                style: const TextStyle(color: Colors.white38, fontSize: 10),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
 }

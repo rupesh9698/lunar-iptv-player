@@ -94,8 +94,10 @@ class _SeriesScreenState extends ConsumerState<SeriesScreen> {
 
     return PopScope(
       canPop: false,
-      onPopInvokedWithResult: (_, _) =>
-          context.canPop() ? context.pop() : context.go('/home'),
+      onPopInvokedWithResult: (didPop, _) {
+        if (didPop) return;
+        context.go('/home');
+      },
       child: Scaffold(
         backgroundColor: AppTheme.background,
         body: SafeArea(
@@ -143,8 +145,7 @@ class _SeriesTopBar extends ConsumerWidget {
       child: Row(
         children: [
           IconButton(
-            onPressed: () =>
-                context.canPop() ? context.pop() : context.go('/home'),
+            onPressed: () => context.go('/home'),
             icon: const Icon(
               Icons.arrow_back_ios_new,
               color: AppTheme.textSecondary,
@@ -202,6 +203,8 @@ class _SeriesTopBar extends ConsumerWidget {
             ),
           ],
           const Spacer(),
+          _SeriesSortDropdown(),
+          const SizedBox(width: 8),
           _SeriesSearchButton(),
           const SizedBox(width: 8),
           IconButton(
@@ -270,6 +273,35 @@ class _SeriesSearchButtonState extends ConsumerState<_SeriesSearchButton> {
           isDense: true,
         ),
       ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// SORT DROPDOWN
+// ─────────────────────────────────────────────────────────────────────────────
+class _SeriesSortDropdown extends ConsumerWidget {
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final sort = ref.watch(seriesSortProvider);
+    return DropdownButton<SeriesSortBy>(
+      value: sort,
+      underline: const SizedBox.shrink(),
+      dropdownColor: AppTheme.surface,
+      style: const TextStyle(color: AppTheme.textSecondary, fontSize: 13),
+      items: const [
+        DropdownMenuItem(
+            value: SeriesSortBy.defaultOrder, child: Text('Default')),
+        DropdownMenuItem(
+            value: SeriesSortBy.nameAZ, child: Text('A–Z')),
+        DropdownMenuItem(
+            value: SeriesSortBy.nameZA, child: Text('Z–A')),
+        DropdownMenuItem(
+            value: SeriesSortBy.ratingHighLow, child: Text('Top Rated')),
+      ],
+      onChanged: (v) {
+        if (v != null) ref.read(seriesSortProvider.notifier).state = v;
+      },
     );
   }
 }
@@ -883,50 +915,47 @@ class _SeriesPosterCard extends ConsumerStatefulWidget {
 }
 
 class _SeriesPosterCardState extends ConsumerState<_SeriesPosterCard> {
-  bool _hover = false, _focused = false, _pressed = false;
+  bool _hover = false;
+  bool _focused = false;
+  bool _pressed = false;
 
   @override
   Widget build(BuildContext context) {
     final selected = ref.watch(selectedSeriesStreamProvider);
     final isSelected = selected?.seriesId == widget.series.seriesId;
 
-    return Focus(
-      onFocusChange: (f) => setState(() => _focused = f),
-      onKeyEvent: (_, event) {
-        if (event is KeyDownEvent &&
-            (event.logicalKey == LogicalKeyboardKey.select ||
-                event.logicalKey == LogicalKeyboardKey.enter ||
-                event.logicalKey == LogicalKeyboardKey.space)) {
-          setState(() => _pressed = true);
-          ref.read(selectedSeriesStreamProvider.notifier).state = widget.series;
-          return KeyEventResult.handled;
-        }
-        if (event is KeyUpEvent) {
-          setState(() => _pressed = false);
+    return RepaintBoundary(
+      child: Focus(
+        onFocusChange: (f) => setState(() => _focused = f),
+        onKeyEvent: (_, event) {
+          if (event is KeyDownEvent &&
+              (event.logicalKey == LogicalKeyboardKey.select ||
+                  event.logicalKey == LogicalKeyboardKey.enter ||
+                  event.logicalKey == LogicalKeyboardKey.space)) {
+            ref.read(selectedSeriesStreamProvider.notifier).state =
+                widget.series;
+            return KeyEventResult.handled;
+          }
+          if (event is KeyDownEvent &&
+              event.logicalKey == LogicalKeyboardKey.arrowLeft) {
+            FocusScope.of(context).focusInDirection(TraversalDirection.left);
+            return KeyEventResult.handled;
+          }
           return KeyEventResult.ignored;
-        }
-        return KeyEventResult.ignored;
-      },
-      child: MouseRegion(
-        cursor: SystemMouseCursors.click,
-        onEnter: (_) => setState(() => _hover = true),
-        onExit: (_) => setState(() {
-          _hover = false;
-          _pressed = false;
-        }),
-        child: GestureDetector(
-          onTap: () => ref.read(selectedSeriesStreamProvider.notifier).state =
-              widget.series,
-          onTapDown: (_) => setState(() => _pressed = true),
-          onTapUp: (_) => setState(() => _pressed = false),
-          onTapCancel: () => setState(() => _pressed = false),
-          child: AnimatedScale(
-            scale: _pressed
-                ? 0.96
-                : (_hover || _focused)
-                ? 1.04
-                : 1.0,
-            duration: const Duration(milliseconds: 150),
+        },
+        child: MouseRegion(
+          cursor: SystemMouseCursors.click,
+          onEnter: (_) => setState(() => _hover = true),
+          onExit: (_) => setState(() {
+            _hover = false;
+            _pressed = false;
+          }),
+          child: GestureDetector(
+            onTap: () => ref.read(selectedSeriesStreamProvider.notifier).state =
+                widget.series,
+            onTapDown: (_) => setState(() => _pressed = true),
+            onTapUp: (_) => setState(() => _pressed = false),
+            onTapCancel: () => setState(() => _pressed = false),
             child: AnimatedContainer(
               duration: const Duration(milliseconds: 150),
               decoration: BoxDecoration(
@@ -934,12 +963,14 @@ class _SeriesPosterCardState extends ConsumerState<_SeriesPosterCard> {
                 border: Border.all(
                   color: isSelected
                       ? AppTheme.primary
-                      : (_hover || _focused)
+                      : _focused
+                      ? Colors.white.withValues(alpha: 0.6)
+                      : _hover
                       ? AppTheme.primary.withValues(alpha: 0.4)
                       : Colors.transparent,
-                  width: isSelected ? 2 : 1.5,
+                  width: (isSelected || _focused) ? 2.5 : 1.5,
                 ),
-                boxShadow: isSelected
+                boxShadow: (isSelected || _focused)
                     ? [
                         BoxShadow(
                           color: AppTheme.primary.withValues(alpha: 0.25),
@@ -949,56 +980,54 @@ class _SeriesPosterCardState extends ConsumerState<_SeriesPosterCard> {
                       ]
                     : null,
               ),
-              child: ClipRRect(
-                borderRadius: BorderRadius.circular(10),
-                child: Stack(
-                  fit: StackFit.expand,
-                  children: [
-                    PosterImage(
-                      url: widget.series.cover,
-                      rating: widget.series.ratingValue > 0
-                          ? widget.series.ratingValue
-                          : null,
-                    ),
-                    if (_focused && !isSelected)
-                      Container(
-                        decoration: BoxDecoration(
-                          border: Border.all(
-                            color: Colors.white.withValues(alpha: 0.45),
-                            width: 2,
+              child: AnimatedScale(
+                scale: _pressed
+                    ? 0.96
+                    : (_hover || _focused)
+                    ? 1.02
+                    : 1.0,
+                duration: const Duration(milliseconds: 150),
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(10),
+                  child: Stack(
+                    fit: StackFit.expand,
+                    children: [
+                      PosterImage(
+                        url: widget.series.cover,
+                        rating: widget.series.ratingValue > 0
+                            ? widget.series.ratingValue
+                            : null,
+                      ),
+                      Positioned(
+                        bottom: 0,
+                        left: 0,
+                        right: 0,
+                        child: Container(
+                          padding: const EdgeInsets.fromLTRB(6, 16, 6, 6),
+                          decoration: BoxDecoration(
+                            gradient: LinearGradient(
+                              begin: Alignment.topCenter,
+                              end: Alignment.bottomCenter,
+                              colors: [
+                                Colors.transparent,
+                                Colors.black.withValues(alpha: 0.9),
+                              ],
+                            ),
                           ),
-                          borderRadius: BorderRadius.circular(10),
+                          child: Text(
+                            widget.series.name,
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 10,
+                              fontWeight: FontWeight.w500,
+                            ),
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                          ),
                         ),
                       ),
-                    Positioned(
-                      bottom: 0,
-                      left: 0,
-                      right: 0,
-                      child: Container(
-                        padding: const EdgeInsets.fromLTRB(6, 16, 6, 6),
-                        decoration: BoxDecoration(
-                          gradient: LinearGradient(
-                            begin: Alignment.topCenter,
-                            end: Alignment.bottomCenter,
-                            colors: [
-                              Colors.transparent,
-                              Colors.black.withValues(alpha: 0.9),
-                            ],
-                          ),
-                        ),
-                        child: Text(
-                          widget.series.name,
-                          style: const TextStyle(
-                            color: Colors.white,
-                            fontSize: 10,
-                            fontWeight: FontWeight.w500,
-                          ),
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ),
-                    ),
-                  ],
+                    ],
+                  ),
                 ),
               ),
             ),

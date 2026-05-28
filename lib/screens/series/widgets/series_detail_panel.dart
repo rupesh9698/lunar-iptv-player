@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../../../core/theme/app_theme.dart';
 import '../../../core/utils/launcher_utils.dart';
@@ -52,6 +54,7 @@ class SeriesDetailPanel extends ConsumerStatefulWidget {
 class _SeriesDetailPanelState extends ConsumerState<SeriesDetailPanel> {
   String? _selectedSeason;
   String? _lastSeriesId;
+  final _scrollFocus = FocusNode();
 
   List<String> _sortedSeasonKeys(Map<String, List<Episode>> seasons) =>
       seasons.keys.toList()..sort(
@@ -65,6 +68,12 @@ class _SeriesDetailPanelState extends ConsumerState<SeriesDetailPanel> {
     if (mounted) {
       setState(() => _selectedSeason = keys.isNotEmpty ? keys.first : null);
     }
+  }
+
+  @override
+  void dispose() {
+    _scrollFocus.dispose();
+    super.dispose();
   }
 
   @override
@@ -195,75 +204,109 @@ class _SeriesDetailPanelState extends ConsumerState<SeriesDetailPanel> {
         ? (seasons[curSeason] ?? <Episode>[])
         : <Episode>[];
 
-    return CustomScrollView(
-      slivers: [
-        // ── Backdrop hero ────────────────────────────────────────
-        SliverToBoxAdapter(child: _buildHero(series, info, isFav, ref)),
+    return Focus(
+      focusNode: _scrollFocus,
+      onKeyEvent: (_, event) {
+        // Let up/down scroll the list
+        if (event is KeyDownEvent) {
+          final ctrl = PrimaryScrollController.maybeOf(context);
+          if (event.logicalKey == LogicalKeyboardKey.arrowDown) {
+            ctrl?.animateTo(
+              (ctrl.offset + 120).clamp(0.0, ctrl.position.maxScrollExtent),
+              duration: const Duration(milliseconds: 200),
+              curve: Curves.easeOut,
+            );
+            return KeyEventResult.handled;
+          }
+          if (event.logicalKey == LogicalKeyboardKey.arrowUp) {
+            ctrl?.animateTo(
+              (ctrl.offset - 120).clamp(0.0, ctrl.position.maxScrollExtent),
+              duration: const Duration(milliseconds: 200),
+              curve: Curves.easeOut,
+            );
+            return KeyEventResult.handled;
+          }
+        }
+        return KeyEventResult.ignored;
+      },
+      child: CustomScrollView(
+        slivers: [
+          // ── Backdrop hero ────────────────────────────────────────
+          SliverToBoxAdapter(child: _buildHero(series, info, isFav, ref)),
 
-        // ── Meta info ────────────────────────────────────────────
-        SliverToBoxAdapter(child: _buildMeta(series, info)),
+          // ── Meta info ────────────────────────────────────────────
+          SliverToBoxAdapter(child: _buildMeta(series, info)),
 
-        // ── Plot ─────────────────────────────────────────────────
-        if ((info.series.plot ?? series.plot ?? '').isNotEmpty)
+          // ── Plot ─────────────────────────────────────────────────
+          if ((info.series.plot ?? series.plot ?? '').isNotEmpty)
+            SliverToBoxAdapter(
+              child: _buildPlot(info.series.plot ?? series.plot ?? ''),
+            ),
+
+          // ── Available Languages ───────────────────────────────────────────────────
+          SliverToBoxAdapter(child: _buildLanguages(seasons)),
+
+          // ── Cast / Director ──────────────────────────────────────
+          SliverToBoxAdapter(child: _buildCastDirector(series, info)),
+
+          // ── Action buttons ───────────────────────────────────────
           SliverToBoxAdapter(
-            child: _buildPlot(info.series.plot ?? series.plot ?? ''),
+            child: _buildActions(context, ref, series, info, episodes, isFav),
           ),
 
-        // ── Available Languages ───────────────────────────────────────────────────
-        SliverToBoxAdapter(child: _buildLanguages(seasons)),
-
-        // ── Cast / Director ──────────────────────────────────────
-        SliverToBoxAdapter(child: _buildCastDirector(series, info)),
-
-        // ── Action buttons ───────────────────────────────────────
-        SliverToBoxAdapter(
-          child: _buildActions(context, ref, series, info, episodes, isFav),
-        ),
-
-        const SliverToBoxAdapter(
-          child: Padding(
-            padding: EdgeInsets.fromLTRB(16, 16, 16, 8),
-            child: Divider(color: AppTheme.divider, height: 1),
-          ),
-        ),
-
-        // ── Season selector ──────────────────────────────────────
-        if (keys.isNotEmpty)
-          SliverToBoxAdapter(child: _buildSeasonSelector(keys, curSeason)),
-
-        // ── Episodes count ───────────────────────────────────────
-        if (episodes.isNotEmpty)
-          SliverToBoxAdapter(
+          const SliverToBoxAdapter(
             child: Padding(
-              padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
-              child: Text(
-                '${episodes.length} Episode${episodes.length != 1 ? 's' : ''}',
-                style: const TextStyle(
-                  color: AppTheme.textMuted,
-                  fontSize: 11,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
+              padding: EdgeInsets.fromLTRB(16, 16, 16, 8),
+              child: Divider(color: AppTheme.divider, height: 1),
             ),
           ),
 
-        // ── Episode list ──────────────────────────────────────────
-        SliverList(
-          delegate: SliverChildBuilderDelegate((ctx, i) {
-            final ep = episodes[i];
-            return _EpisodeTile(
-              key: ValueKey('ep_${ep.id}'),
-              episode: ep,
-              seriesName: series.name,
-              seriesCover: series.cover,
-              season: curSeason ?? '1',
-              onPlay: () => _playEpisode(context, ref, info, ep),
-            );
-          }, childCount: episodes.length),
-        ),
+          // ── Season selector ──────────────────────────────────────
+          if (keys.isNotEmpty)
+            SliverToBoxAdapter(child: _buildSeasonSelector(keys, curSeason)),
 
-        const SliverToBoxAdapter(child: SizedBox(height: 24)),
-      ],
+          // ── Episodes count ───────────────────────────────────────
+          if (episodes.isNotEmpty)
+            SliverToBoxAdapter(
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+                child: Text(
+                  '${episodes.length} Episode${episodes.length != 1 ? 's' : ''}',
+                  style: const TextStyle(
+                    color: AppTheme.textMuted,
+                    fontSize: 11,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+            ),
+
+          // ── Episode list ──────────────────────────────────────────
+          SliverList(
+            delegate: SliverChildBuilderDelegate((ctx, i) {
+              final ep = episodes[i];
+              return _EpisodeTile(
+                key: ValueKey('ep_${ep.id}'),
+                episode: ep,
+                seriesName: series.name,
+                seriesCover: series.cover,
+                season: curSeason ?? '1',
+                onPlay: () => _playEpisode(context, ref, info, ep),
+                onDownload: () {
+                  final service = ref.read(xtreamServiceProvider);
+                  if (service == null) return;
+                  final url = service.getSeriesUrl(
+                      ep.id, ep.containerExtension ?? 'mkv');
+                  launchUrl(Uri.parse(url),
+                      mode: LaunchMode.externalApplication);
+                },
+              );
+            }, childCount: episodes.length),
+          ),
+
+          const SliverToBoxAdapter(child: SizedBox(height: 24)),
+        ],
+      ),
     );
   }
 
@@ -723,28 +766,10 @@ class _SeriesDetailPanelState extends ConsumerState<SeriesDetailPanel> {
             child: Row(
               children: keys.map((k) {
                 final isSel = k == current;
-                return GestureDetector(
+                return _FocusableSeasonChip(
+                  label: 'Season $k',
+                  isSelected: isSel,
                   onTap: () => setState(() => _selectedSeason = k),
-                  child: AnimatedContainer(
-                    duration: const Duration(milliseconds: 200),
-                    margin: const EdgeInsets.only(right: 8),
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 16,
-                      vertical: 6,
-                    ),
-                    decoration: BoxDecoration(
-                      color: isSel ? AppTheme.primary : AppTheme.surfaceVariant,
-                      borderRadius: BorderRadius.circular(20),
-                    ),
-                    child: Text(
-                      'Season $k',
-                      style: TextStyle(
-                        color: isSel ? Colors.white : AppTheme.textSecondary,
-                        fontSize: 12,
-                        fontWeight: isSel ? FontWeight.w700 : FontWeight.w400,
-                      ),
-                    ),
-                  ),
                 );
               }).toList(),
             ),
@@ -810,6 +835,7 @@ class _EpisodeTile extends StatefulWidget {
   final String? seriesCover;
   final String season;
   final VoidCallback onPlay;
+  final VoidCallback? onDownload;
 
   const _EpisodeTile({
     super.key,
@@ -818,6 +844,7 @@ class _EpisodeTile extends StatefulWidget {
     required this.seriesCover,
     required this.season,
     required this.onPlay,
+    this.onDownload,
   });
 
   @override
@@ -826,108 +853,131 @@ class _EpisodeTile extends StatefulWidget {
 
 class _EpisodeTileState extends State<_EpisodeTile> {
   bool _hovering = false;
+  bool _focused = false;
 
   @override
   Widget build(BuildContext context) {
     final ep = widget.episode;
     final epNum = ep.episodeNum.padLeft(2, '0');
-    // Clean title: "Farzi - S01E01 - Episode 1" → "Episode 1"
     final title = _cleanTitle(ep.title, ep.episodeNum);
     final dur = ep.formattedDuration;
 
-    return MouseRegion(
-      onEnter: (_) => setState(() => _hovering = true),
-      onExit: (_) => setState(() => _hovering = false),
-      child: GestureDetector(
-        onTap: widget.onPlay,
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 150),
-          color: _hovering
-              ? AppTheme.primary.withValues(alpha: 0.08)
-              : Colors.transparent,
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-          child: Row(
-            children: [
-              // Episode number badge
-              Container(
-                width: 38,
-                height: 38,
-                decoration: BoxDecoration(
-                  color: _hovering
-                      ? AppTheme.primary.withValues(alpha: 0.15)
-                      : AppTheme.surfaceVariant,
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                alignment: Alignment.center,
-                child: Text(
-                  'E$epNum',
-                  style: TextStyle(
-                    color: _hovering ? AppTheme.primary : AppTheme.textMuted,
-                    fontSize: 11,
-                    fontWeight: FontWeight.w700,
+    return Focus(
+      onFocusChange: (f) => setState(() => _focused = f),
+      onKeyEvent: (_, event) {
+        if (event is KeyDownEvent &&
+            (event.logicalKey == LogicalKeyboardKey.select ||
+                event.logicalKey == LogicalKeyboardKey.enter ||
+                event.logicalKey == LogicalKeyboardKey.space)) {
+          widget.onPlay();
+          return KeyEventResult.handled;
+        }
+        return KeyEventResult.ignored;
+      },
+      child: MouseRegion(
+        onEnter: (_) => setState(() => _hovering = true),
+        onExit: (_) => setState(() => _hovering = false),
+        child: GestureDetector(
+          onTap: widget.onPlay,
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 150),
+            color: (_hovering || _focused)
+                ? AppTheme.primary.withValues(alpha: 0.08)
+                : Colors.transparent,
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+            // Focus indicator on left edge
+            foregroundDecoration: _focused
+                ? const BoxDecoration(
+                    border: Border(
+                      left: BorderSide(color: AppTheme.primary, width: 3),
+                    ),
+                  )
+                : null,
+            child: Row(
+              children: [
+                Container(
+                  width: 38,
+                  height: 38,
+                  decoration: BoxDecoration(
+                    color: (_hovering || _focused)
+                        ? AppTheme.primary.withValues(alpha: 0.15)
+                        : AppTheme.surfaceVariant,
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  alignment: Alignment.center,
+                  child: Text(
+                    'E$epNum',
+                    style: TextStyle(
+                      color: (_hovering || _focused)
+                          ? AppTheme.primary
+                          : AppTheme.textMuted,
+                      fontSize: 11,
+                      fontWeight: FontWeight.w700,
+                    ),
                   ),
                 ),
-              ),
-
-              const SizedBox(width: 12),
-
-              // Title + duration
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      title,
-                      style: TextStyle(
-                        color: _hovering
-                            ? AppTheme.textPrimary
-                            : AppTheme.textSecondary,
-                        fontSize: 13,
-                        fontWeight: _hovering
-                            ? FontWeight.w600
-                            : FontWeight.w400,
-                      ),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                    if (dur.isNotEmpty)
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
                       Text(
-                        dur,
-                        style: const TextStyle(
-                          color: AppTheme.textMuted,
-                          fontSize: 11,
+                        title,
+                        style: TextStyle(
+                          color: (_hovering || _focused)
+                              ? AppTheme.textPrimary
+                              : AppTheme.textSecondary,
+                          fontSize: 13,
+                          fontWeight: (_hovering || _focused)
+                              ? FontWeight.w600
+                              : FontWeight.w400,
                         ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
                       ),
-                  ],
+                      if (dur.isNotEmpty)
+                        Text(
+                          dur,
+                          style: const TextStyle(
+                            color: AppTheme.textMuted,
+                            fontSize: 11,
+                          ),
+                        ),
+                    ],
+                  ),
                 ),
-              ),
-
-              // Play icon
-              AnimatedContainer(
-                duration: const Duration(milliseconds: 200),
-                width: 32,
-                height: 32,
-                decoration: BoxDecoration(
-                  color: _hovering ? AppTheme.primary : Colors.transparent,
-                  shape: BoxShape.circle,
+                GestureDetector(
+                    onTap: () {
+                      widget.onDownload?.call();
+                    },
+                    child: AnimatedContainer(
+                      duration: const Duration(milliseconds: 200),
+                      width: 32,
+                      height: 32,
+                      decoration: BoxDecoration(
+                        color: (_hovering || _focused)
+                            ? AppTheme.primary
+                            : Colors.transparent,
+                        shape: BoxShape.circle,
+                      ),
+                      child: Icon(
+                        Icons.download_rounded,
+                        size: 18,
+                        color: (_hovering || _focused)
+                            ? Colors.white
+                            : AppTheme.textMuted,
+                      ),
+                    ),
                 ),
-                child: Icon(
-                  Icons.play_arrow_rounded,
-                  size: 18,
-                  color: _hovering ? Colors.white : AppTheme.textMuted,
-                ),
-              ),
-            ],
+              ],
+            ),
           ),
         ),
       ),
     );
   }
 
-  /// Removes the series name prefix from episode title
-  /// "Farzi - S01E01 - Episode 1" → "Episode 1"
   String _cleanTitle(String raw, String epNum) {
-    // Try to extract the last part after " - "
     final parts = raw.split(' - ');
     if (parts.length >= 3) return parts.last.trim();
     if (parts.length == 2) return parts.last.trim();
@@ -968,6 +1018,77 @@ class _InfoLine extends StatelessWidget {
               ),
             ),
           ],
+        ),
+      ),
+    );
+  }
+}
+
+class _FocusableSeasonChip extends StatefulWidget {
+  final String label;
+  final bool isSelected;
+  final VoidCallback onTap;
+
+  const _FocusableSeasonChip({
+    required this.label,
+    required this.isSelected,
+    required this.onTap,
+  });
+
+  @override
+  State<_FocusableSeasonChip> createState() => _FocusableSeasonChipState();
+}
+
+class _FocusableSeasonChipState extends State<_FocusableSeasonChip> {
+  bool _focused = false;
+
+  @override
+  Widget build(BuildContext context) {
+    return Focus(
+      onFocusChange: (f) => setState(() => _focused = f),
+      onKeyEvent: (_, event) {
+        if (event is KeyDownEvent &&
+            (event.logicalKey == LogicalKeyboardKey.select ||
+                event.logicalKey == LogicalKeyboardKey.enter ||
+                event.logicalKey == LogicalKeyboardKey.space)) {
+          widget.onTap();
+          return KeyEventResult.handled;
+        }
+        return KeyEventResult.ignored;
+      },
+      child: MouseRegion(
+        cursor: SystemMouseCursors.click,
+        child: GestureDetector(
+          onTap: widget.onTap,
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 200),
+            margin: const EdgeInsets.only(right: 8),
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+            decoration: BoxDecoration(
+              color: widget.isSelected
+                  ? AppTheme.primary
+                  : AppTheme.surfaceVariant,
+              borderRadius: BorderRadius.circular(20),
+              border: _focused
+                  ? Border.all(
+                      color: Colors.white.withValues(alpha: 0.7),
+                      width: 2,
+                    )
+                  : null,
+            ),
+            child: Text(
+              widget.label,
+              style: TextStyle(
+                color: widget.isSelected || _focused
+                    ? Colors.white
+                    : AppTheme.textSecondary,
+                fontSize: 12,
+                fontWeight: widget.isSelected
+                    ? FontWeight.w700
+                    : FontWeight.w400,
+              ),
+            ),
+          ),
         ),
       ),
     );

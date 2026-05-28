@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:package_info_plus/package_info_plus.dart';
@@ -241,49 +242,73 @@ class _SidebarItemState extends State<_SidebarItem> {
 
   @override
   Widget build(BuildContext context) {
-    return MouseRegion(
-      onEnter: (_) => setState(() => _hovering = true),
-      onExit: (_) => setState(() => _hovering = false),
-      child: GestureDetector(
-        onTap: widget.onTap,
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 150),
-          margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-          decoration: BoxDecoration(
-            color: widget.isSelected
-                ? AppTheme.selectedItem
-                : _hovering
-                ? AppTheme.surface
-                : Colors.transparent,
-            borderRadius: BorderRadius.circular(10),
-            border: widget.isSelected
-                ? Border.all(color: AppTheme.primary.withValues(alpha: 0.3))
-                : null,
-          ),
-          child: Row(
-            children: [
-              Icon(
-                widget.section.icon,
-                size: 18,
-                color: widget.isSelected
-                    ? AppTheme.primary
-                    : AppTheme.textSecondary,
-              ),
-              const SizedBox(width: 10),
-              Text(
-                widget.section.label,
-                style: TextStyle(
+    return Focus(
+      onFocusChange: (f) => setState(() => _hovering = f ? true : _hovering),
+      onKeyEvent: (_, event) {
+        if (event is KeyDownEvent &&
+            (event.logicalKey == LogicalKeyboardKey.select ||
+                event.logicalKey == LogicalKeyboardKey.enter ||
+                event.logicalKey == LogicalKeyboardKey.space)) {
+          widget.onTap();
+          return KeyEventResult.handled;
+        }
+        if (event is KeyDownEvent &&
+            event.logicalKey == LogicalKeyboardKey.arrowRight) {
+          FocusScope.of(context).focusInDirection(TraversalDirection.right);
+          return KeyEventResult.handled;
+        }
+        return KeyEventResult.ignored;
+      },
+      child: MouseRegion(
+        cursor: SystemMouseCursors.click,
+        onEnter: (_) => setState(() => _hovering = true),
+        onExit: (_) => setState(() => _hovering = false),
+        child: GestureDetector(
+          onTap: widget.onTap,
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 150),
+            margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+            decoration: BoxDecoration(
+              color: widget.isSelected
+                  ? AppTheme.selectedItem
+                  : _hovering
+                  ? AppTheme.surface
+                  : Colors.transparent,
+              borderRadius: BorderRadius.circular(10),
+              border: widget.isSelected
+                  ? Border.all(color: AppTheme.primary.withValues(alpha: 0.3))
+                  : _hovering && !widget.isSelected
+                  ? Border.all(
+                      color: Colors.white.withValues(alpha: 0.2),
+                      width: 1.5,
+                    )
+                  : null,
+            ),
+            child: Row(
+              children: [
+                Icon(
+                  widget.section.icon,
+                  size: 18,
                   color: widget.isSelected
-                      ? AppTheme.textPrimary
+                      ? AppTheme.primary
                       : AppTheme.textSecondary,
-                  fontSize: 13,
-                  fontWeight: widget.isSelected
-                      ? FontWeight.w600
-                      : FontWeight.w400,
                 ),
-              ),
-            ],
+                const SizedBox(width: 10),
+                Text(
+                  widget.section.label,
+                  style: TextStyle(
+                    color: widget.isSelected
+                        ? AppTheme.textPrimary
+                        : AppTheme.textSecondary,
+                    fontSize: 13,
+                    fontWeight: widget.isSelected
+                        ? FontWeight.w600
+                        : FontWeight.w400,
+                  ),
+                ),
+              ],
+            ),
           ),
         ),
       ),
@@ -374,54 +399,14 @@ class _SettTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Column(
-      children: [
-        ListTile(
-          onTap: onTap,
-          leading: Container(
-            width: 36,
-            height: 36,
-            decoration: BoxDecoration(
-              color: (iconColor ?? AppTheme.primary).withValues(alpha: 0.12),
-              borderRadius: BorderRadius.circular(10),
-            ),
-            child: Icon(icon, size: 18, color: iconColor ?? AppTheme.primary),
-          ),
-          title: Text(
-            title,
-            style: const TextStyle(color: AppTheme.textPrimary, fontSize: 14),
-          ),
-          subtitle: subtitle != null
-              ? Text(
-                  subtitle!,
-                  style: const TextStyle(
-                    color: AppTheme.textSecondary,
-                    fontSize: 12,
-                  ),
-                )
-              : null,
-          trailing:
-              trailing ??
-              (onTap != null
-                  ? const Icon(
-                      Icons.chevron_right,
-                      color: AppTheme.textMuted,
-                      size: 18,
-                    )
-                  : null),
-          contentPadding: const EdgeInsets.symmetric(
-            horizontal: 16,
-            vertical: 4,
-          ),
-        ),
-        if (showDivider)
-          const Divider(
-            color: AppTheme.divider,
-            height: 1,
-            indent: 68,
-            endIndent: 16,
-          ),
-      ],
+    return _FocusableSettTile(
+      icon: icon,
+      iconColor: iconColor,
+      title: title,
+      subtitle: subtitle,
+      trailing: trailing,
+      onTap: onTap,
+      showDivider: showDivider,
     );
   }
 }
@@ -477,6 +462,28 @@ class _PlaylistsSection extends ConsumerWidget {
               ),
             )
           else ...[
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              child: Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: AppTheme.primary.withValues(alpha: 0.08),
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: AppTheme.primary.withValues(alpha: 0.2)),
+                ),
+                child: const Row(children: [
+                  Icon(Icons.info_outline, color: AppTheme.primary, size: 16),
+                  SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      'Switch or delete playlists from the Home Screen.',
+                      style: TextStyle(color: AppTheme.primary, fontSize: 12),
+                    ),
+                  ),
+                ]),
+              ),
+            ),
+
             _SettCard(
               child: Column(
                 children: playlists.asMap().entries.map((e) {
@@ -487,9 +494,6 @@ class _PlaylistsSection extends ConsumerWidget {
                     playlist: p,
                     isActive: isActive,
                     showDivider: i < playlists.length - 1,
-                    onSetActive: () =>
-                        ref.read(playlistsProvider.notifier).setActive(p.id),
-                    onDelete: () => _confirmDelete(context, ref, p),
                   );
                 }).toList(),
               ),
@@ -528,51 +532,17 @@ class _PlaylistsSection extends ConsumerWidget {
       MaterialPageRoute(builder: (_) => const AddPlaylistScreen()),
     );
   }
-
-  Future<void> _confirmDelete(
-    BuildContext context,
-    WidgetRef ref,
-    Playlist p,
-  ) async {
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Delete Playlist'),
-        content: Text('Remove "${p.name}"?'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('Cancel'),
-          ),
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, true),
-            child: const Text(
-              'Delete',
-              style: TextStyle(color: AppTheme.error),
-            ),
-          ),
-        ],
-      ),
-    );
-    if (ok == true && context.mounted) {
-      ref.read(playlistsProvider.notifier).removePlaylist(p.id);
-    }
-  }
 }
 
 class _PlaylistTile extends StatelessWidget {
   final Playlist playlist;
   final bool isActive;
   final bool showDivider;
-  final VoidCallback onSetActive;
-  final VoidCallback onDelete;
 
   const _PlaylistTile({
     required this.playlist,
     required this.isActive,
     required this.showDivider,
-    required this.onSetActive,
-    required this.onDelete,
   });
 
   @override
@@ -580,7 +550,6 @@ class _PlaylistTile extends StatelessWidget {
     return Column(
       children: [
         ListTile(
-          onTap: onSetActive,
           leading: Container(
             width: 40,
             height: 40,
@@ -638,13 +607,10 @@ class _PlaylistTile extends StatelessWidget {
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
           ),
-          trailing: IconButton(
-            onPressed: onDelete,
-            icon: const Icon(
-              Icons.delete_outline,
-              color: AppTheme.textMuted,
-              size: 18,
-            ),
+          trailing: const Icon(
+            Icons.chevron_right,
+            color: AppTheme.textMuted,
+            size: 18,
           ),
           contentPadding: const EdgeInsets.symmetric(
             horizontal: 16,
@@ -664,6 +630,46 @@ class _PlaylistTile extends StatelessWidget {
 class _AccountSection extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+
+    // Add after the widget's build(BuildContext context) {
+    final playlist = ref.watch(activePlaylistProvider);
+    if (playlist?.isM3u == true) {
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.all(40),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Container(
+                width: 64, height: 64,
+                decoration: BoxDecoration(
+                  color: AppTheme.primary.withValues(alpha: 0.12),
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(Icons.subscriptions_outlined,
+                    color: AppTheme.primary, size: 28),
+              ),
+              const SizedBox(height: 16),
+              const Text('M3U Playlist',
+                  style: TextStyle(color: AppTheme.textPrimary, fontSize: 18,
+                      fontWeight: FontWeight.w700)),
+              const SizedBox(height: 8),
+              Text(playlist?.m3uUrl ?? '',
+                  style: const TextStyle(color: AppTheme.textMuted, fontSize: 11),
+                  textAlign: TextAlign.center, maxLines: 3,
+                  overflow: TextOverflow.ellipsis),
+              const SizedBox(height: 16),
+              const Text(
+                'Account information is not available\nfor M3U playlists.',
+                style: TextStyle(color: AppTheme.textSecondary, fontSize: 13),
+                textAlign: TextAlign.center,
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
     final infoAsync = ref.watch(accountInfoProvider);
 
     return SingleChildScrollView(
@@ -1742,5 +1748,121 @@ class _AboutSectionState extends State<_AboutSection> {
     if (PlatformUtils.isLinux) return 'Linux';
     if (PlatformUtils.isWeb) return 'Web';
     return 'Unknown';
+  }
+}
+
+class _FocusableSettTile extends StatefulWidget {
+  final IconData icon;
+  final Color? iconColor;
+  final String title;
+  final String? subtitle;
+  final Widget? trailing;
+  final VoidCallback? onTap;
+  final bool showDivider;
+
+  const _FocusableSettTile({
+    required this.icon,
+    this.iconColor,
+    required this.title,
+    this.subtitle,
+    this.trailing,
+    this.onTap,
+    this.showDivider = false,
+  });
+
+  @override
+  State<_FocusableSettTile> createState() => _FocusableSettTileState();
+}
+
+class _FocusableSettTileState extends State<_FocusableSettTile> {
+  bool _focused = false;
+
+  @override
+  Widget build(BuildContext context) {
+    return Focus(
+      onFocusChange: (f) => setState(() => _focused = f),
+      onKeyEvent: (_, event) {
+        if (event is KeyDownEvent &&
+            (event.logicalKey == LogicalKeyboardKey.select ||
+                event.logicalKey == LogicalKeyboardKey.enter ||
+                event.logicalKey == LogicalKeyboardKey.space) &&
+            widget.onTap != null) {
+          widget.onTap!();
+          return KeyEventResult.handled;
+        }
+        return KeyEventResult.ignored;
+      },
+      child: Column(
+        children: [
+          AnimatedContainer(
+            duration: const Duration(milliseconds: 150),
+            color: _focused
+                ? AppTheme.primary.withValues(alpha: 0.06)
+                : Colors.transparent,
+            child: ListTile(
+              onTap: widget.onTap,
+              leading: Container(
+                width: 36,
+                height: 36,
+                decoration: BoxDecoration(
+                  color: (widget.iconColor ?? AppTheme.primary).withValues(
+                    alpha: 0.12,
+                  ),
+                  borderRadius: BorderRadius.circular(10),
+                  border: _focused
+                      ? Border.all(
+                          color: AppTheme.primary.withValues(alpha: 0.4),
+                        )
+                      : null,
+                ),
+                child: Icon(
+                  widget.icon,
+                  size: 18,
+                  color: widget.iconColor ?? AppTheme.primary,
+                ),
+              ),
+              title: Text(
+                widget.title,
+                style: TextStyle(
+                  color: _focused ? AppTheme.textPrimary : AppTheme.textPrimary,
+                  fontSize: 14,
+                ),
+              ),
+              subtitle: widget.subtitle != null
+                  ? Text(
+                      widget.subtitle!,
+                      style: const TextStyle(
+                        color: AppTheme.textSecondary,
+                        fontSize: 12,
+                      ),
+                    )
+                  : null,
+              trailing:
+                  widget.trailing ??
+                  (widget.onTap != null
+                      ? Icon(
+                          Icons.chevron_right,
+                          color: _focused
+                              ? AppTheme.primary
+                              : AppTheme.textMuted,
+                          size: 18,
+                        )
+                      : null),
+              contentPadding: const EdgeInsets.symmetric(
+                horizontal: 16,
+                vertical: 4,
+              ),
+            ),
+          ),
+          if (widget.showDivider)
+            const Divider(
+              color: AppTheme.divider,
+              height: 1,
+              indent: 68,
+              endIndent: 16,
+            ),
+        ],
+      ),
+    );
   }
 }

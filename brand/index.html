@@ -1,0 +1,301 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8"/>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+    <title>Lunar IPTV Player – Premium Cross-Platform IPTV</title>
+    <meta name="description" content="Watch Live TV, Movies and Series with Lunar IPTV Player. Available on Android, iOS, Windows, macOS, Linux and Web."/>
+    <link rel="icon" href="logo.png"/>
+    <link rel="preconnect" href="https://fonts.googleapis.com"/>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet"/>
+    <style>
+        *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+        :root{
+          --bg:#0A0C14;--surface:#141824;--card:#1A1F2E;
+          --primary:#4F8EF7;--accent:#7B61FF;--success:#22C55E;
+          --text:#E8EAF2;--text2:#8B90A7;--text3:#4A5068;--divider:#1E2338;
+        }
+        html{scroll-behavior:smooth}
+        body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--text);line-height:1.6;overflow-x:hidden}
+
+        /* NAV */
+        nav{position:fixed;top:0;left:0;right:0;z-index:100;display:flex;align-items:center;
+          padding:16px 40px;background:rgba(10,12,20,.88);backdrop-filter:blur(14px);
+          border-bottom:1px solid var(--divider)}
+        .nav-logo{display:flex;align-items:center;gap:10px;text-decoration:none}
+        .nav-logo img{width:36px;height:36px;border-radius:8px}
+        .nav-logo span{font-size:15px;font-weight:800;color:var(--text);letter-spacing:.5px}
+        .nav-links{margin-left:auto;display:flex;gap:6px;align-items:center}
+        .nav-links a{color:var(--text2);text-decoration:none;font-size:14px;font-weight:500;
+          padding:8px 14px;border-radius:8px;transition:all .2s}
+        .nav-links a:hover{color:var(--text);background:rgba(79,142,247,.1)}
+        .nav-cta{background:var(--primary)!important;color:#fff!important;
+          border-radius:10px!important;font-weight:600!important;
+          padding:9px 18px!important;transition:transform .2s,opacity .2s!important}
+        .nav-cta:hover{opacity:.9!important;transform:translateY(-1px)!important}
+
+        /* HERO */
+        .hero{min-height:100vh;display:flex;flex-direction:column;align-items:center;
+          justify-content:center;text-align:center;padding:120px 24px 80px;position:relative;overflow:hidden}
+        .hero::before{content:'';position:absolute;inset:0;pointer-events:none;
+          background:radial-gradient(ellipse 65% 45% at 50% 0%,rgba(79,142,247,.18),transparent 70%),
+                     radial-gradient(ellipse 40% 30% at 80% 60%,rgba(123,97,255,.12),transparent 60%)}
+        .hero-badge{display:inline-flex;align-items:center;gap:6px;
+          background:rgba(79,142,247,.12);border:1px solid rgba(79,142,247,.3);
+          color:var(--primary);font-size:13px;font-weight:600;padding:6px 14px;
+          border-radius:20px;margin-bottom:28px;animation:fadeUp .6s ease both}
+        .hero-badge::before{content:'';width:7px;height:7px;border-radius:50%;
+          background:var(--success);animation:pulse 2s infinite}
+        @keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
+        @keyframes fadeUp{from{opacity:0;transform:translateY(20px)}to{opacity:1;transform:translateY(0)}}
+        h1{font-size:clamp(38px,6vw,72px);font-weight:900;line-height:1.1;
+          letter-spacing:-1.5px;margin-bottom:20px;animation:fadeUp .7s .1s ease both}
+        h1 span{background:linear-gradient(135deg,var(--primary),var(--accent));
+          -webkit-background-clip:text;-webkit-text-fill-color:transparent}
+        .hero-sub{font-size:clamp(15px,2.5vw,19px);color:var(--text2);
+          max-width:580px;margin:0 auto 40px;animation:fadeUp .7s .2s ease both}
+        .store-row{display:flex;flex-wrap:wrap;gap:16px;justify-content:center;
+          align-items:center;animation:fadeUp .7s .3s ease both;margin-bottom:16px}
+        .store-row a img{height:54px;transition:transform .2s,filter .2s;filter:brightness(.95)}
+        .store-row a:hover img{transform:translateY(-3px);filter:brightness(1.08)}
+        .watch-btn{display:inline-flex;align-items:center;gap:10px;
+          background:linear-gradient(135deg,var(--primary),var(--accent));
+          color:#fff;padding:14px 28px;border-radius:12px;font-size:16px;
+          font-weight:700;text-decoration:none;transition:all .25s;
+          box-shadow:0 8px 30px rgba(79,142,247,.35)}
+        .watch-btn:hover{transform:translateY(-3px);box-shadow:0 12px 40px rgba(79,142,247,.5)}
+        .watch-btn svg{width:20px;height:20px}
+        .hero-note{font-size:12px;color:var(--text3);animation:fadeUp .7s .4s ease both}
+
+        /* SECTION COMMON */
+        .section-label{font-size:11px;font-weight:700;letter-spacing:2px;
+          color:var(--primary);text-transform:uppercase;margin-bottom:10px}
+        .section-title{font-size:clamp(26px,4vw,42px);font-weight:800;
+          letter-spacing:-.5px;margin-bottom:14px}
+        .section-sub{font-size:16px;color:var(--text2);max-width:520px;
+          margin:0 auto 48px}
+
+        /* FEATURES */
+        .features{padding:90px 24px}
+        .features-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));
+          gap:20px;max-width:1100px;margin:0 auto}
+        .feat-card{background:var(--card);border:1px solid var(--divider);
+          border-radius:16px;padding:28px;
+          transition:transform .25s,border-color .25s,box-shadow .25s}
+        .feat-card:hover{transform:translateY(-5px);border-color:rgba(79,142,247,.4);
+          box-shadow:0 14px 40px rgba(79,142,247,.1)}
+        .feat-icon{width:48px;height:48px;border-radius:12px;display:flex;
+          align-items:center;justify-content:center;font-size:22px;margin-bottom:16px}
+        .feat-card h3{font-size:16px;font-weight:700;margin-bottom:8px}
+        .feat-card p{font-size:14px;color:var(--text2);line-height:1.65}
+
+        /* SCREENSHOTS */
+        .screenshots{padding:90px 24px;text-align:center}
+        .screens-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(460px,1fr));
+          gap:24px;max-width:1100px;margin:0 auto}
+        .screen-card{border-radius:20px;overflow:hidden;border:1px solid var(--divider);
+          box-shadow:0 20px 60px rgba(0,0,0,.5);transition:transform .3s,box-shadow .3s}
+        .screen-card:hover{transform:translateY(-6px);
+          box-shadow:0 30px 80px rgba(79,142,247,.15)}
+        .screen-card img{width:100%;display:block;object-fit:cover}
+        .screen-label{background:var(--surface);padding:12px 20px;
+          font-size:14px;font-weight:600;color:var(--text2);
+          display:flex;align-items:center;gap:8px}
+        .screen-dot{width:8px;height:8px;border-radius:50%;background:var(--primary)}
+
+        /* PLATFORMS */
+        .platforms{padding:90px 24px;text-align:center}
+        .plat-row{display:flex;flex-wrap:wrap;gap:14px;
+          justify-content:center;max-width:800px;margin:0 auto}
+        .plat-chip{display:flex;align-items:center;gap:10px;background:var(--card);
+          border:1px solid var(--divider);padding:14px 22px;border-radius:50px;
+          font-size:15px;font-weight:600;transition:all .2s}
+        .plat-chip:hover{border-color:var(--primary);color:var(--primary);transform:translateY(-2px)}
+        .plat-chip span{font-size:20px}
+
+        /* CTA */
+        .cta-section{padding:90px 24px;text-align:center}
+        .cta-box{max-width:700px;margin:0 auto;
+          background:linear-gradient(135deg,rgba(79,142,247,.12),rgba(123,97,255,.08));
+          border:1px solid rgba(79,142,247,.25);border-radius:24px;padding:60px 40px}
+        .cta-box h2{font-size:34px;font-weight:800;margin-bottom:14px}
+        .cta-box p{color:var(--text2);margin-bottom:36px;font-size:16px}
+
+        /* FOOTER */
+        footer{border-top:1px solid var(--divider);padding:36px 40px 24px;
+          display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:16px}
+        .footer-logo{display:flex;align-items:center;gap:10px}
+        .footer-logo img{width:28px;height:28px;border-radius:6px}
+        .footer-logo span{font-size:14px;font-weight:700}
+        footer p{font-size:13px;color:var(--text3)}
+        .footer-links{display:flex;gap:20px}
+        .footer-links a{font-size:13px;color:var(--text2);text-decoration:none;transition:color .2s}
+        .footer-links a:hover{color:var(--primary)}
+
+        @media(max-width:640px){
+          nav{padding:14px 20px}.nav-links{display:none}
+          .screens-grid{grid-template-columns:1fr}
+          footer{flex-direction:column;text-align:center}
+          .footer-links{justify-content:center}
+          .cta-box{padding:40px 24px}
+        }
+    </style>
+</head>
+<body>
+
+<!-- NAV -->
+<nav>
+    <a class="nav-logo" href="#">
+        <img src="logo.png" alt="Lunar IPTV"/>
+        <span>Lunar IPTV Player</span>
+    </a>
+    <div class="nav-links">
+        <a href="#features">Features</a>
+        <a href="#screenshots">Screenshots</a>
+        <a href="#platforms">Platforms</a>
+        <a href="https://github.com/Rupesh9698/lunar-iptv-player" target="_blank">GitHub</a>
+        <a href="https://lunar-iptv-app.web.app" target="_blank" class="nav-cta">▶ Watch Now</a>
+    </div>
+</nav>
+
+<!-- HERO -->
+<section class="hero">
+    <div class="hero-badge">🚀 Now available on all platforms</div>
+    <h1>Watch Anything.<br/><span>Anywhere. Free.</span></h1>
+    <p class="hero-sub">
+        Stream Live TV, Movies and Series from your Xtream Codes playlist
+        with a beautiful, blazing-fast interface — on every device.
+    </p>
+    <div class="store-row">
+        <a href="https://play.google.com/store/apps/details?id=com.iptv.lunar" target="_blank">
+            <img src="https://play.google.com/intl/en_us/badges/static/images/badges/en_badge_web_generic.png" alt="Get it on Google Play"/>
+        </a>
+        <a href="https://apps.microsoft.com/detail/9pfjx05nf64l?hl" target="_blank">
+            <img src="https://get.microsoft.com/images/en-us%20dark.svg" alt="Get it from Microsoft Store"/>
+        </a>
+    </div>
+    <a class="watch-btn" href="https://lunar-iptv-app.web.app" target="_blank">
+        <svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
+        Watch Now in Browser
+    </a>
+    <br/><br/>
+    <p class="hero-note">Free to use · No subscription required · Bring your own playlist</p>
+</section>
+
+<!-- FEATURES -->
+<section class="features" id="features">
+    <div style="text-align:center">
+        <div class="section-label">Features</div>
+        <h2 class="section-title">Everything you need</h2>
+        <p class="section-sub">Packed with features designed for every viewer and every device.</p>
+    </div>
+    <div class="features-grid">
+        <div class="feat-card">
+            <div class="feat-icon" style="background:rgba(79,142,247,.15)">📺</div>
+            <h3>Live TV + EPG</h3>
+            <p>Full Xtream Codes API with real-time EPG timeline, channel numbers, inline mini-player and background refresh.</p>
+        </div>
+        <div class="feat-card">
+            <div class="feat-icon" style="background:rgba(34,197,94,.15)">🎬</div>
+            <h3>Movies & Series</h3>
+            <p>Rich detail panels with ratings, trailers, language badges, cast info, expandable synopsis and trailer support.</p>
+        </div>
+        <div class="feat-card">
+            <div class="feat-icon" style="background:rgba(245,158,11,.15)">⭐</div>
+            <h3>Favorites & History</h3>
+            <p>Bookmark channels, movies and series. Recently Viewed, Recently Added and Favorites always at hand.</p>
+        </div>
+        <div class="feat-card">
+            <div class="feat-icon" style="background:rgba(239,68,68,.15)">🎮</div>
+            <h3>Android TV Ready</h3>
+            <p>Full D-pad navigation on Android TV. Every screen and every button reachable with Up/Down/Left/Right/OK.</p>
+        </div>
+        <div class="feat-card">
+            <div class="feat-icon" style="background:rgba(123,97,255,.15)">🔒</div>
+            <h3>Parental Control</h3>
+            <p>PIN-protect individual Live TV categories. Children can't unlock or disable without your PIN.</p>
+        </div>
+        <div class="feat-card">
+            <div class="feat-icon" style="background:rgba(79,142,247,.15)">⚡</div>
+            <h3>Optimized Performance</h3>
+            <p>Smart caching, hardware-accelerated playback and lazy image loading for smooth experience on every device.</p>
+        </div>
+    </div>
+</section>
+
+<!-- SCREENSHOTS -->
+<section class="screenshots" id="screenshots">
+    <div class="section-label">Screenshots</div>
+    <h2 class="section-title">Beautiful on every screen</h2>
+    <p class="section-sub">A consistent, polished experience across all platforms and input methods.</p>
+    <div class="screens-grid">
+        <div class="screen-card">
+            <img src="screenshots/home_screen.png" alt="Home Screen" loading="lazy"/>
+            <div class="screen-label"><span class="screen-dot"></span>Home</div>
+        </div>
+        <div class="screen-card">
+            <img src="screenshots/live_tv_screen.png" alt="Live TV Screen" loading="lazy"/>
+            <div class="screen-label"><span class="screen-dot"></span>Live TV</div>
+        </div>
+        <div class="screen-card">
+            <img src="screenshots/movies_screen.png" alt="Movies Screen" loading="lazy"/>
+            <div class="screen-label"><span class="screen-dot"></span>Movies</div>
+        </div>
+        <div class="screen-card">
+            <img src="screenshots/series_screen.png" alt="Series Screen" loading="lazy"/>
+            <div class="screen-label"><span class="screen-dot"></span>Series</div>
+        </div>
+    </div>
+</section>
+
+<!-- PLATFORMS -->
+<section class="platforms" id="platforms">
+    <div class="section-label">Platforms</div>
+    <h2 class="section-title">One app, every platform</h2>
+    <p class="section-sub" style="margin-bottom:40px">Built with Flutter — the same beautiful UI everywhere.</p>
+    <div class="plat-row">
+        <div class="plat-chip"><span>🤖</span>Android TV &amp; Phone</div>
+        <div class="plat-chip"><span>🍎</span>iPhone &amp; iPad</div>
+        <div class="plat-chip"><span>🪟</span>Windows</div>
+        <div class="plat-chip"><span>🐧</span>Linux</div>
+        <div class="plat-chip"><span>🍏</span>macOS</div>
+        <div class="plat-chip"><span>🌐</span>Web Browser</div>
+    </div>
+</section>
+
+<!-- CTA -->
+<section class="cta-section">
+    <div class="cta-box">
+        <h2>Ready to watch?</h2>
+        <p>Download Lunar IPTV Player for free and bring your own playlist.</p>
+        <div class="store-row" style="margin-bottom:16px">
+            <a href="https://play.google.com/store/apps/details?id=com.iptv.lunar" target="_blank">
+                <img src="https://play.google.com/intl/en_us/badges/static/images/badges/en_badge_web_generic.png" alt="Google Play"/>
+            </a>
+            <a href="https://apps.microsoft.com/detail/9pfjx05nf64l?hl" target="_blank">
+                <img src="https://get.microsoft.com/images/en-us%20dark.svg" alt="Microsoft Store"/>
+            </a>
+        </div>
+        <a class="watch-btn" href="https://lunar-iptv-app.web.app" target="_blank">
+            <svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
+            Watch in Browser
+        </a>
+    </div>
+</section>
+
+<!-- FOOTER -->
+<footer>
+    <div class="footer-logo">
+        <img src="logo.png" alt="Lunar IPTV"/>
+        <span>Lunar IPTV Player</span>
+    </div>
+    <p>© 2025 Lunar IPTV Player. All rights reserved.</p>
+    <div class="footer-links">
+        <a href="https://github.com/Rupesh9698/lunar-iptv-player" target="_blank">GitHub</a>
+        <a href="https://github.com/Rupesh9698/lunar-iptv-player/issues" target="_blank">Support</a>
+        <a href="https://sites.google.com/view/lunar-iptv-player" target="_blank">Privacy</a>
+    </div>
+</footer>
+
+</body>
+</html>

@@ -1,5 +1,6 @@
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 
@@ -14,9 +15,9 @@ class ChannelInfoPanel extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final channel  = ref.watch(selectedChannelProvider);
+    final channel = ref.watch(selectedChannelProvider);
     final epgCache = ref.watch(epgCacheProvider);
-    final favorites= ref.watch(liveFavoritesNotifierProvider);
+    final favorites = ref.watch(liveFavoritesNotifierProvider);
 
     return SizedBox(
       width: width,
@@ -25,12 +26,12 @@ class ChannelInfoPanel extends ConsumerWidget {
         child: channel == null
             ? _buildEmpty()
             : _buildInfo(
-          context,
-          ref,
-          channel,
-          epgCache[channel.streamId] ?? [],
-          favorites.contains(channel.streamId),
-        ),
+                context,
+                ref,
+                channel,
+                epgCache[channel.streamId] ?? [],
+                favorites.contains(channel.streamId),
+              ),
       ),
     );
   }
@@ -40,15 +41,11 @@ class ChannelInfoPanel extends ConsumerWidget {
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Icon(Icons.tv_outlined,
-              color: AppTheme.textMuted, size: 48),
+          Icon(Icons.tv_outlined, color: AppTheme.textMuted, size: 48),
           SizedBox(height: 12),
           Text(
             'Select a channel\nto see info',
-            style: TextStyle(
-              color: AppTheme.textSecondary,
-              fontSize: 13,
-            ),
+            style: TextStyle(color: AppTheme.textSecondary, fontSize: 13),
             textAlign: TextAlign.center,
           ),
         ],
@@ -57,14 +54,14 @@ class ChannelInfoPanel extends ConsumerWidget {
   }
 
   Widget _buildInfo(
-      BuildContext context,
-      WidgetRef ref,
-      LiveStream channel,
-      List<EpgListing> epg,
-      bool isFavorite,
-      ) {
+    BuildContext context,
+    WidgetRef ref,
+    LiveStream channel,
+    List<EpgListing> epg,
+    bool isFavorite,
+  ) {
     final current = epg.isNotEmpty ? epg.first : null;
-    final next    = epg.length > 1 ? epg[1] : null;
+    final next = epg.length > 1 ? epg[1] : null;
 
     return SingleChildScrollView(
       padding: const EdgeInsets.all(0),
@@ -72,16 +69,12 @@ class ChannelInfoPanel extends ConsumerWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           // ── Channel Logo + Name ──────────────────────────────
-          _buildChannelHeader(
-              context, ref, channel, isFavorite),
+          _buildChannelHeader(context, ref, channel, isFavorite),
 
           const Divider(color: AppTheme.divider, height: 1),
 
           // ── Now Playing ──────────────────────────────────────
-          if (current != null)
-            _buildNowPlaying(current)
-          else
-            _buildNoEpg(),
+          if (current != null) _buildNowPlaying(current) else _buildNoEpg(),
 
           const Divider(color: AppTheme.divider, height: 1),
 
@@ -98,11 +91,11 @@ class ChannelInfoPanel extends ConsumerWidget {
   }
 
   Widget _buildChannelHeader(
-      BuildContext context,
-      WidgetRef ref,
-      LiveStream channel,
-      bool isFavorite,
-      ) {
+    BuildContext context,
+    WidgetRef ref,
+    LiveStream channel,
+    bool isFavorite,
+  ) {
     return Padding(
       padding: const EdgeInsets.all(14),
       child: Column(
@@ -120,17 +113,14 @@ class ChannelInfoPanel extends ConsumerWidget {
                   color: AppTheme.surfaceVariant,
                   child: channel.streamIcon != null
                       ? CachedNetworkImage(
-                    imageUrl: channel.streamIcon!,
-                    fit: BoxFit.contain,
-                    placeholder: (_, _) => const Icon(
-                        Icons.tv,
-                        color: AppTheme.textMuted),
-                    errorWidget: (_, _, _) =>
-                    const Icon(Icons.tv,
-                        color: AppTheme.textMuted),
-                  )
-                      : const Icon(Icons.tv,
-                      color: AppTheme.textMuted),
+                          imageUrl: channel.streamIcon!,
+                          fit: BoxFit.contain,
+                          placeholder: (_, _) =>
+                              const Icon(Icons.tv, color: AppTheme.textMuted),
+                          errorWidget: (_, _, _) =>
+                              const Icon(Icons.tv, color: AppTheme.textMuted),
+                        )
+                      : const Icon(Icons.tv, color: AppTheme.textMuted),
                 ),
               ),
               const SizedBox(width: 10),
@@ -179,12 +169,8 @@ class ChannelInfoPanel extends ConsumerWidget {
                     borderRadius: BorderRadius.circular(8),
                   ),
                   child: Icon(
-                    isFavorite
-                        ? Icons.favorite
-                        : Icons.favorite_border,
-                    color: isFavorite
-                        ? AppTheme.error
-                        : AppTheme.textMuted,
+                    isFavorite ? Icons.favorite : Icons.favorite_border,
+                    color: isFavorite ? AppTheme.error : AppTheme.textMuted,
                     size: 16,
                   ),
                 ),
@@ -200,16 +186,16 @@ class ChannelInfoPanel extends ConsumerWidget {
               _LiveBadge(),
               const SizedBox(width: 8),
               // Channel number
-              if (channel.num.isNotEmpty &&
-                  channel.num != '0')
+              if (channel.num.isNotEmpty && channel.num != '0')
                 Container(
                   padding: const EdgeInsets.symmetric(
-                      horizontal: 6, vertical: 2),
+                    horizontal: 6,
+                    vertical: 2,
+                  ),
                   decoration: BoxDecoration(
                     color: AppTheme.surfaceVariant,
                     borderRadius: BorderRadius.circular(4),
-                    border:
-                    Border.all(color: AppTheme.divider),
+                    border: Border.all(color: AppTheme.divider),
                   ),
                   child: Text(
                     'CH ${channel.num}',
@@ -228,11 +214,10 @@ class ChannelInfoPanel extends ConsumerWidget {
   }
 
   Widget _buildNowPlaying(EpgListing show) {
-    final timeStr = '${DateFormat('HH:mm').format(show.startTime)} '
+    final timeStr =
+        '${DateFormat('HH:mm').format(show.startTime)} '
         '– ${DateFormat('HH:mm').format(show.endTime)}';
-    final remaining = show.endTime
-        .difference(DateTime.now())
-        .inMinutes;
+    final remaining = show.endTime.difference(DateTime.now()).inMinutes;
 
     return Padding(
       padding: const EdgeInsets.all(14),
@@ -282,10 +267,7 @@ class ChannelInfoPanel extends ConsumerWidget {
               const Spacer(),
               Text(
                 '${remaining > 0 ? remaining : 0} min',
-                style: const TextStyle(
-                  color: AppTheme.textMuted,
-                  fontSize: 11,
-                ),
+                style: const TextStyle(color: AppTheme.textMuted, fontSize: 11),
               ),
             ],
           ),
@@ -297,10 +279,8 @@ class ChannelInfoPanel extends ConsumerWidget {
             child: LinearProgressIndicator(
               value: show.progress,
               minHeight: 4,
-              backgroundColor:
-              AppTheme.primary.withValues(alpha: 0.15),
-              valueColor: const AlwaysStoppedAnimation<Color>(
-                  AppTheme.primary),
+              backgroundColor: AppTheme.primary.withValues(alpha: 0.15),
+              valueColor: const AlwaysStoppedAnimation<Color>(AppTheme.primary),
             ),
           ),
           const SizedBox(height: 8),
@@ -323,7 +303,8 @@ class ChannelInfoPanel extends ConsumerWidget {
   }
 
   Widget _buildUpNext(EpgListing show) {
-    final timeStr = '${DateFormat('HH:mm').format(show.startTime)} '
+    final timeStr =
+        '${DateFormat('HH:mm').format(show.startTime)} '
         '– ${DateFormat('HH:mm').format(show.endTime)}';
 
     return Padding(
@@ -354,10 +335,7 @@ class ChannelInfoPanel extends ConsumerWidget {
           const SizedBox(height: 2),
           Text(
             timeStr,
-            style: const TextStyle(
-              color: AppTheme.textMuted,
-              fontSize: 11,
-            ),
+            style: const TextStyle(color: AppTheme.textMuted, fontSize: 11),
           ),
         ],
       ),
@@ -382,10 +360,7 @@ class ChannelInfoPanel extends ConsumerWidget {
           SizedBox(height: 8),
           Text(
             'No EPG information',
-            style: TextStyle(
-              color: AppTheme.textSecondary,
-              fontSize: 13,
-            ),
+            style: TextStyle(color: AppTheme.textSecondary, fontSize: 13),
           ),
         ],
       ),
@@ -393,25 +368,16 @@ class ChannelInfoPanel extends ConsumerWidget {
   }
 
   Widget _buildActions(
-      BuildContext context,
-      WidgetRef ref,
-      LiveStream channel,
-      ) {
+    BuildContext context,
+    WidgetRef ref,
+    LiveStream channel,
+  ) {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 14),
       child: SizedBox(
         width: double.infinity,
-        child: ElevatedButton.icon(
-          onPressed: () => playChannel(context, ref, channel),
-          icon: const Icon(Icons.play_arrow, size: 20),
-          label: const Text('Watch Now'),
-          style: ElevatedButton.styleFrom(
-            backgroundColor: AppTheme.primary,
-            foregroundColor: Colors.white,
-            padding: const EdgeInsets.symmetric(vertical: 12),
-            shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(10)),
-          ),
+        child: _FocusWatchButton(
+          onTap: () => playChannel(context, ref, channel),
         ),
       ),
     );
@@ -423,8 +389,7 @@ class _LiveBadge extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.symmetric(
-          horizontal: 8, vertical: 3),
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
       decoration: BoxDecoration(
         color: AppTheme.error,
         borderRadius: BorderRadius.circular(6),
@@ -451,6 +416,60 @@ class _LiveBadge extends StatelessWidget {
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+class _FocusWatchButton extends StatefulWidget {
+  final VoidCallback onTap;
+  const _FocusWatchButton({required this.onTap});
+
+  @override
+  State<_FocusWatchButton> createState() => _FocusWatchButtonState();
+}
+
+class _FocusWatchButtonState extends State<_FocusWatchButton> {
+  bool _focused = false;
+
+  @override
+  Widget build(BuildContext context) {
+    return Focus(
+      onFocusChange: (f) => setState(() => _focused = f),
+      onKeyEvent: (_, event) {
+        if (event is KeyDownEvent &&
+            (event.logicalKey == LogicalKeyboardKey.select ||
+                event.logicalKey == LogicalKeyboardKey.enter ||
+                event.logicalKey == LogicalKeyboardKey.space)) {
+          widget.onTap();
+          return KeyEventResult.handled;
+        }
+        return KeyEventResult.ignored;
+      },
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 150),
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(10),
+          border: _focused
+              ? Border.all(
+                  color: Colors.white.withValues(alpha: 0.7),
+                  width: 2.5,
+                )
+              : null,
+        ),
+        child: ElevatedButton.icon(
+          onPressed: widget.onTap,
+          icon: const Icon(Icons.play_arrow, size: 20),
+          label: const Text('Watch Now'),
+          style: ElevatedButton.styleFrom(
+            backgroundColor: AppTheme.primary,
+            foregroundColor: Colors.white,
+            padding: const EdgeInsets.symmetric(vertical: 12),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(10),
+            ),
+          ),
+        ),
       ),
     );
   }

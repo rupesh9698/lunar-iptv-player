@@ -202,6 +202,27 @@ class CacheService {
           _contentBox?.containsKey(_k(_kVodCats)) == true ||
           _contentBox?.containsKey(_k(_kSeriesCats)) == true;
 
+  // ── Content flags (what content types this playlist has) ─────────────────
+
+  Future<void> saveContentFlags({
+    required bool hasLive,
+    required bool hasVod,
+    required bool hasSeries,
+  }) async {
+    await _metaBox?.put(_k('has_live'),   hasLive);
+    await _metaBox?.put(_k('has_vod'),    hasVod);
+    await _metaBox?.put(_k('has_series'), hasSeries);
+  }
+
+  /// Returns content availability flags.
+  /// Defaults to true (show all) for playlists without saved flags (backward compat).
+  ({bool hasLive, bool hasVod, bool hasSeries}) getContentFlags() {
+    final hasLive   = _metaBox?.get(_k('has_live'))   as bool? ?? true;
+    final hasVod    = _metaBox?.get(_k('has_vod'))    as bool? ?? true;
+    final hasSeries = _metaBox?.get(_k('has_series')) as bool? ?? true;
+    return (hasLive: hasLive, hasVod: hasVod, hasSeries: hasSeries);
+  }
+
   Future<void> clearAll() async {
     final keys = [
       _kLiveCats, _kLiveStreams, _kVodCats, _kVodStreams,
@@ -240,16 +261,17 @@ class CacheService {
   // In _encodeStreams static method, replace the map with:
   static String _encodeStreams(List<LiveStream> s) => jsonEncode(s
       .map((c) => {
-    'num': c.num,
-    'name': c.name,
-    'stream_type': c.streamType,
-    'stream_id': c.streamId,
-    'stream_icon': c.streamIcon ?? '',
+    'num':            c.num,
+    'name':           c.name,
+    'stream_type':    c.streamType,
+    'stream_id':      c.streamId,
+    'stream_icon':    c.streamIcon ?? '',
     'epg_channel_id': c.epgChannelId ?? '',
-    'added': c.added ?? '',
-    'category_id': c.categoryId ?? '',
-    'custom_sid': c.customSid ?? '',
-    'tv_archive': c.tvArchive ?? 0,
+    'added':          c.added ?? '',
+    'category_id':    c.categoryId ?? '',
+    'custom_sid':     c.customSid ?? '',
+    'tv_archive':     c.tvArchive ?? 0,
+    'direct_source':  c.directSource ?? '',
   })
       .toList());
 

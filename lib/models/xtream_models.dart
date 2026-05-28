@@ -7,6 +7,8 @@ int _parseInt(dynamic v, [int d = 0]) {
   return int.tryParse(v.toString()) ?? d;
 }
 
+enum PlaylistType { xtream, m3u }
+
 // ============================================================
 // PLAYLIST MODEL
 // ============================================================
@@ -19,25 +21,43 @@ class Playlist {
   final DateTime addedAt;
   DateTime? lastUpdated;
   bool isActive;
+  final PlaylistType type;
+  final String? m3uUrl;
 
   Playlist({
     required this.id,
     required this.name,
-    required this.serverUrl,
-    required this.username,
-    required this.password,
+    this.serverUrl = '',
+    this.username = '',
+    this.password = '',
     required this.addedAt,
     this.lastUpdated,
     this.isActive = false,
+    this.type = PlaylistType.xtream,
+    this.m3uUrl,
   });
 
+  bool get isM3u     => type == PlaylistType.m3u;
+  bool get isXtream  => type == PlaylistType.xtream;
+
+  /// Returns the playback URL for a live channel.
+  /// M3U: uses directSource stored in the channel.
+  /// Xtream: constructs from server/username/password.
+  String getChannelUrl(LiveStream channel, {String format = 'ts'}) {
+    if (isM3u) return channel.directSource ?? '';
+    return getLiveStreamUrl(channel.streamId, format: format);
+  }
+
   String get baseUrl {
+    if (isM3u) return '';
     final url = serverUrl.endsWith('/') ? serverUrl : '$serverUrl/';
     return url;
   }
 
-  String get playerApiUrl =>
-      '${baseUrl}player_api.php?username=$username&password=$password';
+  String get playerApiUrl {
+    if (isM3u) return '';
+    return '${baseUrl}player_api.php?username=$username&password=$password';
+  }
 
   String getLiveStreamUrl(String streamId, {String format = 'ts'}) =>
       '${baseUrl}live/$username/$password/$streamId.$format';
@@ -57,19 +77,25 @@ class Playlist {
     'addedAt': addedAt.toIso8601String(),
     'lastUpdated': lastUpdated?.toIso8601String(),
     'isActive': isActive,
+    'type': type == PlaylistType.m3u ? 'm3u' : 'xtream',
+    'm3uUrl': m3uUrl,
   };
 
   factory Playlist.fromMap(Map<dynamic, dynamic> map) => Playlist(
-    id: map['id'] as String,
-    name: map['name'] as String,
-    serverUrl: map['serverUrl'] as String,
-    username: map['username'] as String,
-    password: map['password'] as String,
-    addedAt: DateTime.parse(map['addedAt'] as String),
+    id:          map['id'] as String,
+    name:        map['name'] as String,
+    serverUrl:   (map['serverUrl'] as String?) ?? '',
+    username:    (map['username'] as String?) ?? '',
+    password:    (map['password'] as String?) ?? '',
+    addedAt:     DateTime.parse(map['addedAt'] as String),
     lastUpdated: map['lastUpdated'] != null
         ? DateTime.parse(map['lastUpdated'] as String)
         : null,
-    isActive: map['isActive'] as bool? ?? false,
+    isActive:    map['isActive'] as bool? ?? false,
+    type: (map['type'] as String?) == 'm3u'
+        ? PlaylistType.m3u
+        : PlaylistType.xtream,
+    m3uUrl: map['m3uUrl'] as String?,
   );
 }
 

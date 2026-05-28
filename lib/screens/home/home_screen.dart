@@ -48,19 +48,11 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   }
 
   Widget _buildHome() {
-    final accountAsync = ref.watch(accountInfoProvider);
-    final cache = CacheService.instance;
-    final lastUpdate = cache.lastUpdatedLive();
-
     return UpgradeAlert(
       showIgnore: true,
       showLater: true,
       barrierDismissible: false,
-      upgrader: Upgrader(
-        // Check once every 3 days — don't nag the user
-        durationUntilAlertAgain: const Duration(days: 1),
-      ),
-      // Don't show update dialog on loading/error states
+      upgrader: Upgrader(durationUntilAlertAgain: const Duration(days: 1)),
       navigatorKey: GlobalKey<NavigatorState>(),
       child: PopScope(
         canPop: false,
@@ -70,16 +62,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
           body: SafeArea(
             child: Row(
               children: [
-                SizedBox(
-                  width: 280,
-                  child: _LeftPanel(
-                    accountAsync: accountAsync,
-                    lastUpdate: lastUpdate,
-                    onRefresh: () => context.go('/sync', extra: 'manual'),
-                  ),
-                ),
+                const SizedBox(width: 280, child: _LeftPanel()),
                 const VerticalDivider(color: AppTheme.divider, width: 1),
-                Expanded(child: _RightPanel(cache: cache)),
+                Expanded(child: _RightPanel(cache: CacheService.instance)),
               ],
             ),
           ),
@@ -155,30 +140,25 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   }
 }
 
+/// ─────────────────────────────────────────────────────────────────────────────
+// LEFT PANEL — playlist list + switcher
 // ─────────────────────────────────────────────────────────────────────────────
-// LEFT PANEL
-// ─────────────────────────────────────────────────────────────────────────────
-class _LeftPanel extends StatelessWidget {
-  final AsyncValue<AccountInfo?> accountAsync;
-  final DateTime? lastUpdate;
-  final VoidCallback onRefresh;
-
-  const _LeftPanel({
-    required this.accountAsync,
-    required this.lastUpdate,
-    required this.onRefresh,
-  });
+class _LeftPanel extends ConsumerWidget {
+  const _LeftPanel();
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    final playlists = ref.watch(playlistsProvider);
+    final activePl = ref.watch(activePlaylistProvider);
+
     return Container(
       color: AppTheme.sidebarBg,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Logo + clock
+          // ── Logo + Clock ──────────────────────────────────────────────
           Padding(
-            padding: const EdgeInsets.fromLTRB(20, 20, 20, 0),
+            padding: const EdgeInsets.fromLTRB(20, 20, 20, 16),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
@@ -193,18 +173,22 @@ class _LeftPanel extends StatelessWidget {
                       ),
                     ),
                     const SizedBox(width: 10),
-                    const Text(
-                      'Lunar IPTV Player',
-                      style: TextStyle(
-                        color: AppTheme.textPrimary,
-                        fontSize: 15,
-                        fontWeight: FontWeight.w800,
-                        letterSpacing: 2,
+                    const Flexible(
+                      child: Text(
+                        'Lunar IPTV Player',
+                        style: TextStyle(
+                          color: AppTheme.textPrimary,
+                          fontSize: 14,
+                          fontWeight: FontWeight.w800,
+                          letterSpacing: 1.5,
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
                       ),
                     ),
                   ],
                 ).animate().fadeIn(duration: 500.ms).slideX(begin: -0.15),
-                const SizedBox(height: 20),
+                const SizedBox(height: 16),
                 const _LiveClock()
                     .animate()
                     .fadeIn(delay: 150.ms, duration: 500.ms)
@@ -213,47 +197,343 @@ class _LeftPanel extends StatelessWidget {
             ),
           ),
 
-          const Spacer(),
+          const Divider(color: AppTheme.divider, height: 1),
 
-          // Account + buttons
+          // ── Playlists label ───────────────────────────────────────────
+          const Padding(
+            padding: EdgeInsets.fromLTRB(20, 12, 20, 4),
+            child: Text(
+              'PLAYLISTS',
+              style: TextStyle(
+                color: AppTheme.textMuted,
+                fontSize: 9,
+                fontWeight: FontWeight.w700,
+                letterSpacing: 1.5,
+              ),
+            ),
+          ),
+
+          // ── Scrollable playlist list ──────────────────────────────────
+          Expanded(
+            child: playlists.isEmpty
+                ? const Center(
+                    child: Text(
+                      'No playlists',
+                      style: TextStyle(color: AppTheme.textMuted, fontSize: 13),
+                    ),
+                  )
+                : ListView.builder(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 8,
+                      vertical: 4,
+                    ),
+                    itemCount: playlists.length,
+                    itemBuilder: (ctx, i) {
+                      final pl = playlists[i];
+                      final isActive = pl.id == activePl?.id;
+                      return _PlaylistItem(
+                        key: ValueKey(pl.id),
+                        playlist: pl,
+                        isActive: isActive,
+                        onTap: () => _switchPlaylist(ctx, ref, pl, activePl),
+                        onDelete: () => _deletePlaylist(ctx, ref, pl),
+                      ).animate().fadeIn(
+                        delay: Duration(milliseconds: 60 * i),
+                        duration: 300.ms,
+                      );
+                    },
+                  ),
+          ),
+
+          // ── Add Playlist button ───────────────────────────────────────
           Padding(
-            padding: const EdgeInsets.all(20),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                accountAsync.when(
-                  data: (info) => info != null
-                      ? _AccountCard(info: info, lastUpdate: lastUpdate)
-                      : const SizedBox.shrink(),
-                  loading: () => const SizedBox.shrink(),
-                  error: (_, _) => const SizedBox.shrink(),
-                ),
-                const SizedBox(height: 12),
-                OutlinedButton.icon(
-                      onPressed: () => Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (_) => const AddPlaylistScreen(),
+            padding: const EdgeInsets.all(16),
+            child: SizedBox(
+              width: double.infinity,
+              child:
+                  OutlinedButton.icon(
+                        onPressed: () => Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) => const AddPlaylistScreen(),
+                          ),
                         ),
-                      ),
-                      icon: const Icon(Icons.add, size: 16),
-                      label: const Text('Add Playlist'),
-                      style: OutlinedButton.styleFrom(
-                        foregroundColor: AppTheme.primary,
-                        side: const BorderSide(color: AppTheme.primary),
-                        padding: const EdgeInsets.symmetric(vertical: 10),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(10),
+                        icon: const Icon(Icons.add, size: 16),
+                        label: const Text('Add Playlist'),
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: AppTheme.primary,
+                          side: const BorderSide(color: AppTheme.primary),
+                          padding: const EdgeInsets.symmetric(vertical: 10),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(10),
+                          ),
                         ),
-                      ),
-                    )
-                    .animate()
-                    .fadeIn(delay: 300.ms, duration: 400.ms)
-                    .slideY(begin: 0.2),
-              ],
+                      )
+                      .animate()
+                      .fadeIn(delay: 300.ms, duration: 400.ms)
+                      .slideY(begin: 0.2),
             ),
           ),
         ],
+      ),
+    );
+  }
+
+  Future<void> _switchPlaylist(
+    BuildContext context,
+    WidgetRef ref,
+    Playlist playlist,
+    Playlist? current,
+  ) async {
+    if (playlist.id == current?.id) return;
+    if (!context.mounted) return;
+
+    // Update cache context BEFORE switching providers
+    CacheService.instance.setActivePlaylist(playlist.id);
+    await ref.read(playlistsProvider.notifier).setActive(playlist.id);
+
+    // Invalidate all content so they reload from new playlist's cache
+    ref.invalidate(accountInfoProvider);
+    ref.invalidate(liveCategoriesProvider);
+    ref.invalidate(liveStreamsProvider);
+    ref.invalidate(vodCategoriesProvider);
+    ref.invalidate(vodStreamsProvider);
+    ref.invalidate(seriesCategoriesProvider);
+    ref.invalidate(seriesListProvider);
+    ref.read(cacheLastSyncProvider.notifier).state = DateTime.now();
+  }
+
+  Future<void> _deletePlaylist(
+    BuildContext context,
+    WidgetRef ref,
+    Playlist playlist,
+  ) async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: AppTheme.surface,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Row(
+          children: [
+            Icon(Icons.delete_outline_rounded, color: AppTheme.error, size: 22),
+            SizedBox(width: 10),
+            Text(
+              'Delete Playlist',
+              style: TextStyle(
+                color: AppTheme.textPrimary,
+                fontSize: 17,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ],
+        ),
+        content: Text(
+          'Delete "${playlist.name}"?\n\nThis action cannot be undone.',
+          style: const TextStyle(color: AppTheme.textSecondary, fontSize: 13),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppTheme.error,
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(10),
+              ),
+            ),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+    if (confirm != true || !context.mounted) return;
+
+    await ref.read(playlistsProvider.notifier).removePlaylist(playlist.id);
+
+    // Auto-switch to first remaining playlist
+    final remaining = ref.read(playlistsProvider);
+    if (remaining.isNotEmpty && ref.read(activePlaylistProvider) == null) {
+      CacheService.instance.setActivePlaylist(remaining.first.id);
+      await ref.read(playlistsProvider.notifier).setActive(remaining.first.id);
+    }
+
+    ref.invalidate(accountInfoProvider);
+    ref.read(cacheLastSyncProvider.notifier).state = DateTime.now();
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PLAYLIST ITEM — in left panel list
+// ─────────────────────────────────────────────────────────────────────────────
+class _PlaylistItem extends StatefulWidget {
+  final Playlist playlist;
+  final bool isActive;
+  final VoidCallback onTap;
+  final VoidCallback onDelete;
+
+  const _PlaylistItem({
+    super.key,
+    required this.playlist,
+    required this.isActive,
+    required this.onTap,
+    required this.onDelete,
+  });
+
+  @override
+  State<_PlaylistItem> createState() => _PlaylistItemState();
+}
+
+class _PlaylistItemState extends State<_PlaylistItem> {
+  bool _hover = false;
+  bool _focused = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final pl = widget.playlist;
+
+    return Focus(
+      onFocusChange: (f) => setState(() => _focused = f),
+      onKeyEvent: (_, event) {
+        if (event is KeyDownEvent &&
+            (event.logicalKey == LogicalKeyboardKey.select ||
+                event.logicalKey == LogicalKeyboardKey.enter ||
+                event.logicalKey == LogicalKeyboardKey.space)) {
+          widget.onTap();
+          return KeyEventResult.handled;
+        }
+        return KeyEventResult.ignored;
+      },
+      child: MouseRegion(
+        cursor: SystemMouseCursors.click,
+        onEnter: (_) => setState(() => _hover = true),
+        onExit: (_) => setState(() => _hover = false),
+        child: GestureDetector(
+          onTap: widget.onTap,
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 150),
+            margin: const EdgeInsets.symmetric(vertical: 2),
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
+            decoration: BoxDecoration(
+              color: widget.isActive
+                  ? AppTheme.selectedItem
+                  : (_hover || _focused)
+                  ? AppTheme.surface
+                  : Colors.transparent,
+              borderRadius: BorderRadius.circular(10),
+              border: widget.isActive
+                  ? Border.all(color: AppTheme.primary.withValues(alpha: 0.35))
+                  : _focused
+                  ? Border.all(color: Colors.white.withValues(alpha: 0.2))
+                  : null,
+            ),
+            child: Row(
+              children: [
+                // Type icon
+                Container(
+                  width: 32,
+                  height: 32,
+                  decoration: BoxDecoration(
+                    color: widget.isActive
+                        ? AppTheme.primary.withValues(alpha: 0.18)
+                        : AppTheme.surfaceVariant,
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Icon(
+                    pl.isM3u
+                        ? Icons.subscriptions_outlined
+                        : Icons.api_outlined,
+                    size: 16,
+                    color: widget.isActive
+                        ? AppTheme.primary
+                        : AppTheme.textMuted,
+                  ),
+                ),
+                const SizedBox(width: 10),
+
+                // Name + URL
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        pl.name,
+                        style: TextStyle(
+                          color: widget.isActive
+                              ? AppTheme.textPrimary
+                              : AppTheme.textSecondary,
+                          fontSize: 13,
+                          fontWeight: widget.isActive
+                              ? FontWeight.w600
+                              : FontWeight.w400,
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      Text(
+                        pl.isM3u ? (pl.m3uUrl ?? 'M3U Playlist') : pl.serverUrl,
+                        style: const TextStyle(
+                          color: AppTheme.textMuted,
+                          fontSize: 10,
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ],
+                  ),
+                ),
+
+                // Active chip
+                if (widget.isActive) ...[
+                  const SizedBox(width: 4),
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 5,
+                      vertical: 2,
+                    ),
+                    decoration: BoxDecoration(
+                      color: AppTheme.success.withValues(alpha: 0.15),
+                      borderRadius: BorderRadius.circular(4),
+                      border: Border.all(
+                        color: AppTheme.success.withValues(alpha: 0.3),
+                      ),
+                    ),
+                    child: const Text(
+                      'Active',
+                      style: TextStyle(
+                        color: AppTheme.success,
+                        fontSize: 9,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ),
+                ],
+
+                // Delete (appears on hover/focus)
+                AnimatedOpacity(
+                  opacity: (_hover || _focused) ? 1.0 : 0.0,
+                  duration: const Duration(milliseconds: 150),
+                  child: GestureDetector(
+                    onTap: widget.onDelete,
+                    child: Padding(
+                      padding: const EdgeInsets.only(left: 6),
+                      child: Icon(
+                        Icons.delete_outline_rounded,
+                        size: 15,
+                        color: (_hover || _focused)
+                            ? AppTheme.error
+                            : Colors.transparent,
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
       ),
     );
   }
@@ -264,6 +544,7 @@ class _LeftPanel extends StatelessWidget {
 // ─────────────────────────────────────────────────────────────────────────────
 class _LiveClock extends StatefulWidget {
   const _LiveClock();
+
   @override
   State<_LiveClock> createState() => _LiveClockState();
 }
@@ -309,130 +590,17 @@ class _LiveClockState extends State<_LiveClock> {
   }
 }
 
-class _AccountCard extends StatelessWidget {
-  final AccountInfo info;
-  final DateTime? lastUpdate;
-  const _AccountCard({required this.info, this.lastUpdate});
-
-  @override
-  Widget build(BuildContext context) {
-    final u = info.userInfo;
-    final exp = u.expirationDate;
-    return Container(
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: AppTheme.surface,
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: AppTheme.divider),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Container(
-                width: 36,
-                height: 36,
-                decoration: BoxDecoration(
-                  color: AppTheme.primary.withValues(alpha: 0.12),
-                  shape: BoxShape.circle,
-                ),
-                child: const Icon(
-                  Icons.person,
-                  color: AppTheme.primary,
-                  size: 18,
-                ),
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      u.username,
-                      style: const TextStyle(
-                        color: AppTheme.textPrimary,
-                        fontSize: 13,
-                        fontWeight: FontWeight.w600,
-                      ),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                    if (exp != null)
-                      Text(
-                        'Exp: ${DateFormat('dd MMM yy').format(exp)}',
-                        style: TextStyle(
-                          color: u.isExpired
-                              ? AppTheme.error
-                              : AppTheme.textMuted,
-                          fontSize: 11,
-                        ),
-                      ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 10),
-          Row(
-            children: [
-              _StatusBadge(
-                u.status == 'Active' ? AppTheme.success : AppTheme.error,
-                u.status,
-              ),
-              const Spacer(),
-              if (lastUpdate != null)
-                Text(
-                  _timeAgo(lastUpdate!),
-                  style: const TextStyle(
-                    color: AppTheme.textMuted,
-                    fontSize: 10,
-                  ),
-                ),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-
-  String _timeAgo(DateTime dt) {
-    final diff = DateTime.now().difference(dt);
-    if (diff.inSeconds < 60) return 'Just now';
-    if (diff.inMinutes < 60) return '${diff.inMinutes}m ago';
-    if (diff.inHours < 24) return '${diff.inHours}h ago';
-    return DateFormat('dd MMM').format(dt);
-  }
-}
-
-class _StatusBadge extends StatelessWidget {
-  final Color color;
-  final String label;
-  const _StatusBadge(this.color, this.label);
-
-  @override
-  Widget build(BuildContext context) => Container(
-    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-    decoration: BoxDecoration(
-      color: color.withValues(alpha: 0.12),
-      borderRadius: BorderRadius.circular(20),
-    ),
-    child: Text(
-      label,
-      style: TextStyle(color: color, fontSize: 11, fontWeight: FontWeight.w600),
-    ),
-  );
-}
-
 // ─────────────────────────────────────────────────────────────────────────────
-// RIGHT PANEL — SCROLLABLE nav cards
+// RIGHT PANEL — SCROLLABLE nav cards (ConsumerWidget to access ref)
 // ─────────────────────────────────────────────────────────────────────────────
-class _RightPanel extends StatelessWidget {
+class _RightPanel extends ConsumerWidget {
   final CacheService cache;
   const _RightPanel({required this.cache});
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    final flags = ref.watch(contentFlagsProvider);
+
     return SingleChildScrollView(
       padding: const EdgeInsets.all(24),
       child: Column(
@@ -446,7 +614,6 @@ class _RightPanel extends StatelessWidget {
               fontWeight: FontWeight.w700,
             ),
           ).animate().fadeIn(duration: 400.ms).slideX(begin: -0.1),
-
           const SizedBox(height: 20),
 
           GridView.count(
@@ -457,6 +624,7 @@ class _RightPanel extends StatelessWidget {
             shrinkWrap: true,
             physics: const NeverScrollableScrollPhysics(),
             children: [
+              // Live TV — always show
               _NavCard(
                     label: 'Live TV',
                     sublabel: _buildSublabel(
@@ -475,39 +643,47 @@ class _RightPanel extends StatelessWidget {
                   .fadeIn(delay: 0.ms, duration: 450.ms)
                   .slideY(begin: 0.18, curve: Curves.easeOutCubic),
 
-              _NavCard(
-                    label: 'Movies',
-                    sublabel: _buildSublabel(cache.lastUpdatedVod(), 'movies'),
-                    icon: Icons.movie_rounded,
-                    gradient: const LinearGradient(
-                      colors: [Color(0xFF6A1B9A), Color(0xFFAB47BC)],
-                      begin: Alignment.topLeft,
-                      end: Alignment.bottomRight,
-                    ),
-                    onTap: () => context.push('/movies'),
-                  )
-                  .animate()
-                  .fadeIn(delay: 100.ms, duration: 450.ms)
-                  .slideY(begin: 0.18, curve: Curves.easeOutCubic),
+              // Movies — hide for M3U or Xtream without VOD data
+              if (flags.hasVod)
+                _NavCard(
+                      label: 'Movies',
+                      sublabel: _buildSublabel(
+                        cache.lastUpdatedVod(),
+                        'movies',
+                      ),
+                      icon: Icons.movie_rounded,
+                      gradient: const LinearGradient(
+                        colors: [Color(0xFF6A1B9A), Color(0xFFAB47BC)],
+                        begin: Alignment.topLeft,
+                        end: Alignment.bottomRight,
+                      ),
+                      onTap: () => context.push('/movies'),
+                    )
+                    .animate()
+                    .fadeIn(delay: 100.ms, duration: 450.ms)
+                    .slideY(begin: 0.18, curve: Curves.easeOutCubic),
 
-              _NavCard(
-                    label: 'Series',
-                    sublabel: _buildSublabel(
-                      cache.lastUpdatedSeries(),
-                      'series',
-                    ),
-                    icon: Icons.video_library_rounded,
-                    gradient: const LinearGradient(
-                      colors: [Color(0xFF1B5E20), Color(0xFF66BB6A)],
-                      begin: Alignment.topLeft,
-                      end: Alignment.bottomRight,
-                    ),
-                    onTap: () => context.push('/series'),
-                  )
-                  .animate()
-                  .fadeIn(delay: 200.ms, duration: 450.ms)
-                  .slideY(begin: 0.18, curve: Curves.easeOutCubic),
+              // Series — hide for M3U or Xtream without series data
+              if (flags.hasSeries)
+                _NavCard(
+                      label: 'Series',
+                      sublabel: _buildSublabel(
+                        cache.lastUpdatedSeries(),
+                        'series',
+                      ),
+                      icon: Icons.video_library_rounded,
+                      gradient: const LinearGradient(
+                        colors: [Color(0xFF1B5E20), Color(0xFF66BB6A)],
+                        begin: Alignment.topLeft,
+                        end: Alignment.bottomRight,
+                      ),
+                      onTap: () => context.push('/series'),
+                    )
+                    .animate()
+                    .fadeIn(delay: 200.ms, duration: 450.ms)
+                    .slideY(begin: 0.18, curve: Curves.easeOutCubic),
 
+              // Settings — always show
               _NavCard(
                     label: 'Settings',
                     sublabel: 'Preferences & Account',

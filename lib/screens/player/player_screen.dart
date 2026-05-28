@@ -4,13 +4,16 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
 import 'package:media_kit_video/media_kit_video_controls/src/controls/extensions/duration.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../../core/theme/app_theme.dart';
 import '../../core/utils/platform_utils.dart';
 import '../../providers/live_tv_provider.dart';
+import '../../services/web_proxy_client.dart';
 
 class PlayerScreen extends ConsumerStatefulWidget {
   final String title;
@@ -111,32 +114,49 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
 
   // ── Player init with IPTV optimizations ──────────────────────────────
   Future<void> _initPlayer() async {
+    // On web, HTTP media streams are blocked by Chrome (Mixed Content)
+    if (WebProxyClient.isWebHttpStream(widget.url)) {
+      if (mounted) {
+        setState(() {
+          _error = WebProxyClient.webHttpStreamError;
+          _buffering = false;
+        });
+      }
+      return;
+    }
+
     _player = Player();
     _ctrl = VideoController(_player);
 
     // Configure MPV properties safely
     await _setMpvProp('network-timeout', '20');
     if (_isLive) {
+      // Low-spec friendly live settings
       await _setMpvProp('cache', 'yes');
-      await _setMpvProp('cache-secs', '15');
+      await _setMpvProp('cache-secs', '8');
       await _setMpvProp('cache-initial', '0');
       await _setMpvProp('cache-pause', 'no');
-      await _setMpvProp('demuxer-max-bytes', '50MiB');
+      await _setMpvProp('cache-pause-initial', 'no');
+      await _setMpvProp('demuxer-max-bytes', '20MiB'); // ← reduced for low RAM
       await _setMpvProp(
         'stream-lavf-o',
         'reconnect=1,reconnect_at_eof=1,reconnect_streamed=1,'
-            'reconnect_delay_max=5,timeout=20000000,rw_timeout=5000000',
+            'reconnect_delay_max=5,timeout=20000000',
       );
     } else {
       await _setMpvProp('cache', 'yes');
-      await _setMpvProp('cache-secs', '120');
+      await _setMpvProp('cache-secs', '60');
       await _setMpvProp('cache-initial', '1000000');
-      await _setMpvProp('demuxer-max-bytes', '100MiB');
-      await _setMpvProp('demuxer-readahead-secs', '30');
+      await _setMpvProp('demuxer-max-bytes', '40MiB'); // ← reduced
+      await _setMpvProp('demuxer-readahead-secs', '20');
       await _setMpvProp('prefetch-playlist', 'yes');
     }
+    // Universal low-spec optimizations
     await _setMpvProp('hwdec', 'auto-safe');
     await _setMpvProp('video-sync', 'audio');
+    await _setMpvProp('framedrop', 'vo'); // ← drop frames under load
+    await _setMpvProp('vd-lavc-threads', '2'); // ← limit decode threads
+    await _setMpvProp('audio-buffer', '0.2'); // ← smaller audio buffer
 
     _subs.addAll([
       _player.stream.playing.listen((v) {
@@ -400,14 +420,19 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
   Widget build(BuildContext context) {
     return PopScope(
       canPop: false,
-      onPopInvokedWithResult: (_, _) {
-        // Disable gesture handling BEFORE animation starts to prevent bleed-through
+      onPopInvokedWithResult: (didPop, _) {
+        if (didPop) return;
         if (mounted) setState(() => _playerDisposed = true);
         _exitImmersive();
         try {
           _player.stop();
         } catch (_) {}
-        Navigator.of(context).pop();
+        // Always use Navigator.pop so we return to calling screen (not home)
+        if (context.canPop()) {
+          Navigator.of(context).pop();
+        } else {
+          context.go('/home');
+        }
       },
       child: Scaffold(
         backgroundColor: Colors.black,
@@ -417,6 +442,8 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
             _error.isNotEmpty
                 ? _ErrorView(
                     title: widget.title,
+                    url: widget.url,
+                    errorMsg: _error,
                     isLive: _isLive,
                     onRetry: _retry,
                   )
@@ -884,33 +911,58 @@ class _TopBar extends StatelessWidget {
   }
 }
 
-class _CenterPlay extends StatelessWidget {
+class _CenterPlay extends StatefulWidget {
   final bool playing;
   final VoidCallback onTap;
   const _CenterPlay({required this.playing, required this.onTap});
 
   @override
-  Widget build(BuildContext context) => GestureDetector(
-    onTap: onTap,
-    child: AnimatedContainer(
-      duration: const Duration(milliseconds: 200),
-      width: 60,
-      height: 60,
-      decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.18),
-        shape: BoxShape.circle,
-        border: Border.all(
-          color: Colors.white.withValues(alpha: 0.35),
-          width: 1.5,
+  State<_CenterPlay> createState() => _CenterPlayState();
+}
+
+class _CenterPlayState extends State<_CenterPlay> {
+  bool _focused = false;
+
+  @override
+  Widget build(BuildContext context) {
+    return Focus(
+      autofocus: true,
+      onFocusChange: (f) => setState(() => _focused = f),
+      onKeyEvent: (_, event) {
+        if (event is KeyDownEvent &&
+            (event.logicalKey == LogicalKeyboardKey.select ||
+                event.logicalKey == LogicalKeyboardKey.enter ||
+                event.logicalKey == LogicalKeyboardKey.space)) {
+          widget.onTap();
+          return KeyEventResult.handled;
+        }
+        return KeyEventResult.ignored;
+      },
+      child: GestureDetector(
+        onTap: widget.onTap,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 200),
+          width: 60,
+          height: 60,
+          decoration: BoxDecoration(
+            color: Colors.white.withValues(alpha: 0.18),
+            shape: BoxShape.circle,
+            border: Border.all(
+              color: _focused
+                  ? AppTheme.primary
+                  : Colors.white.withValues(alpha: 0.35),
+              width: _focused ? 3 : 1.5,
+            ),
+          ),
+          child: Icon(
+            widget.playing ? Icons.pause_rounded : Icons.play_arrow_rounded,
+            color: Colors.white,
+            size: 34,
+          ),
         ),
       ),
-      child: Icon(
-        playing ? Icons.pause_rounded : Icons.play_arrow_rounded,
-        color: Colors.white,
-        size: 34,
-      ),
-    ),
-  );
+    );
+  }
 }
 
 class _BottomBar extends StatelessWidget {
@@ -1208,16 +1260,70 @@ class _GestureOverlay extends StatelessWidget {
 // ─────────────────────────────────────────────────────────────────────────────
 class _ErrorView extends StatelessWidget {
   final String title;
+  final String url;
+  final String errorMsg;
   final bool isLive;
   final VoidCallback onRetry;
+
   const _ErrorView({
     required this.title,
+    required this.url,
+    required this.errorMsg,
     required this.isLive,
     required this.onRetry,
   });
 
   @override
   Widget build(BuildContext context) {
+    // Web HTTP stream special case
+    if (errorMsg == WebProxyClient.webHttpStreamError) {
+      return SafeArea(
+        child: Column(children: [
+          Row(children: [
+            IconButton(
+              onPressed: () { _exitCtx(context); Navigator.of(context).pop(); },
+              icon: const Icon(Icons.arrow_back_ios_new, color: Colors.white, size: 20),
+            ),
+            Expanded(
+              child: Text(title,
+                  style: const TextStyle(color: Colors.white, fontSize: 15,
+                      fontWeight: FontWeight.w600),
+                  maxLines: 1, overflow: TextOverflow.ellipsis),
+            ),
+          ]),
+          const Spacer(),
+          const Icon(Icons.no_encryption_outlined, color: AppTheme.warning, size: 48),
+          const SizedBox(height: 16),
+          const Text('HTTP Stream — Not Supported in Browser',
+              style: TextStyle(color: Colors.white, fontSize: 18,
+                  fontWeight: FontWeight.w700), textAlign: TextAlign.center),
+          const SizedBox(height: 10),
+          const Padding(
+            padding: EdgeInsets.symmetric(horizontal: 32),
+            child: Text(
+              'Chrome blocks HTTP streams on HTTPS pages.\n'
+                  'Use the Android or Windows app for full streaming,\n'
+                  'or open the link below to watch/download directly.',
+              style: TextStyle(color: Colors.white54, fontSize: 13),
+              textAlign: TextAlign.center,
+            ),
+          ),
+          const SizedBox(height: 24),
+          ElevatedButton.icon(
+            onPressed: () => launchUrl(Uri.parse(url),
+                mode: LaunchMode.externalApplication),
+            icon: const Icon(Icons.open_in_new),
+            label: const Text('Open / Download in Browser'),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppTheme.primary,
+              padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 13),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
+            ),
+          ),
+          const Spacer(),
+        ]),
+      );
+    }
     return SafeArea(
       child: Column(
         children: [

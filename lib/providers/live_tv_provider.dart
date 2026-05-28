@@ -34,32 +34,44 @@ class ShowChannelNumberNotifier extends StateNotifier<bool> {
 const _kLastLiveCategoryKey = 'last_live_category_id';
 const _kLastLiveChannelKey = 'last_live_channel_id';
 
+// ── Last Watched Live — per playlist ─────────────────────────────────────────
 typedef _LastWatched = ({String? categoryId, String? channelId});
 
 final lastWatchedLiveProvider =
-    StateNotifierProvider<LastWatchedLiveNotifier, _LastWatched>(
-      (ref) => LastWatchedLiveNotifier(),
-    );
+    StateNotifierProvider<LastWatchedLiveNotifier, _LastWatched>((ref) {
+      // Re-creates with correct data when active playlist changes
+      final playlistId = ref.watch(activePlaylistProvider)?.id ?? 'default';
+      return LastWatchedLiveNotifier(playlistId: playlistId);
+    });
 
 class LastWatchedLiveNotifier extends StateNotifier<_LastWatched> {
-  LastWatchedLiveNotifier()
-    : super((
-        categoryId:
-            StorageService.instance.getSetting(_kLastLiveCategoryKey)
-                as String?,
-        channelId:
-            StorageService.instance.getSetting(_kLastLiveChannelKey) as String?,
-      ));
+  final String playlistId;
+
+  LastWatchedLiveNotifier({required this.playlistId})
+    : super(_load(playlistId));
+
+  static _LastWatched _load(String pid) => (
+    categoryId:
+        StorageService.instance.getSetting('last_live_cat_$pid') as String?,
+    channelId:
+        StorageService.instance.getSetting('last_live_ch_$pid') as String?,
+  );
 
   Future<void> save({String? categoryId, String? channelId}) async {
-    await StorageService.instance.setSetting(_kLastLiveCategoryKey, categoryId);
-    await StorageService.instance.setSetting(_kLastLiveChannelKey, channelId);
+    await StorageService.instance.setSetting(
+      'last_live_cat_$playlistId',
+      categoryId,
+    );
+    await StorageService.instance.setSetting(
+      'last_live_ch_$playlistId',
+      channelId,
+    );
     state = (categoryId: categoryId, channelId: channelId);
   }
 
   Future<void> clear() async {
-    await StorageService.instance.setSetting(_kLastLiveCategoryKey, null);
-    await StorageService.instance.setSetting(_kLastLiveChannelKey, null);
+    await StorageService.instance.setSetting('last_live_cat_$playlistId', null);
+    await StorageService.instance.setSetting('last_live_ch_$playlistId', null);
     state = (categoryId: null, channelId: null);
   }
 }
@@ -186,7 +198,7 @@ enum LiveFilter { all, favorites, recent }
 
 final liveFilterProvider = StateProvider<LiveFilter>((ref) => LiveFilter.all);
 
-// ── Filtered Live Streams ─────────────────────────────────────────────────────
+// ── Filtered Live Streams — respects hidden & parental-locked categories ──────
 final filteredLiveStreamsProvider = Provider<AsyncValue<List<LiveStream>>>((
   ref,
 ) {
@@ -194,10 +206,30 @@ final filteredLiveStreamsProvider = Provider<AsyncValue<List<LiveStream>>>((
   final query = ref.watch(liveSearchQueryProvider).toLowerCase().trim();
   final favorites = ref.watch(liveFavoritesNotifierProvider);
   final recentIds = ref.watch(recentlyViewedLiveProvider);
+  final hiddenCats = ref.watch(hiddenLiveCategoriesProvider);
+  final lockedCats = ref.watch(parentalLockedLiveCategoriesProvider);
+  final sessionUnlocked = ref.watch(parentalSessionUnlockedProvider);
+  final parentalEnabled = StorageService.instance.isParentalEnabled();
+
+  // Categories whose channels should be hidden everywhere (All Channels, Favorites, Recent)
+  final blockedCatIds = <String>{
+    ...hiddenCats,
+    if (parentalEnabled)
+      ...lockedCats.where((id) => !sessionUnlocked.contains(id)),
+  };
+
+  List<LiveStream> applyBlock(List<LiveStream> list) {
+    if (blockedCatIds.isEmpty) return list;
+    return list.where((s) {
+      final catId = s.categoryId ?? '';
+      return catId.isEmpty || !blockedCatIds.contains(catId);
+    }).toList();
+  }
 
   List<LiveStream> search(List<LiveStream> list) {
-    if (query.isEmpty) return list;
-    return list.where((s) => s.name.toLowerCase().contains(query)).toList();
+    final blocked = applyBlock(list);
+    if (query.isEmpty) return blocked;
+    return blocked.where((s) => s.name.toLowerCase().contains(query)).toList();
   }
 
   switch (filter) {
@@ -219,6 +251,7 @@ final filteredLiveStreamsProvider = Provider<AsyncValue<List<LiveStream>>>((
       });
 
     case LiveFilter.all:
+      // When viewing ALL channels, also filter by hidden/locked categories
       return ref
           .watch(liveStreamsProvider)
           .whenData((streams) => search(streams));

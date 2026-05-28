@@ -13,6 +13,7 @@ import '../../providers/app_providers.dart';
 import '../../providers/live_player_provider.dart';
 import '../../providers/live_tv_provider.dart';
 import '../../services/cache_service.dart';
+import '../../services/m3u_service.dart';
 import '../../services/storage_service.dart';
 import 'widgets/epg_timeline.dart';
 import 'widgets/live_category_sidebar.dart';
@@ -42,11 +43,21 @@ class _LiveTVScreenState extends ConsumerState<LiveTVScreen> {
   @override
   void initState() {
     super.initState();
+
+    // CRITICAL: Set correct playlist cache context BEFORE any cache access
+    final playlist = ref.read(activePlaylistProvider);
+    if (playlist != null) {
+      CacheService.instance.setActivePlaylist(playlist.id);
+    }
+
     final cache = CacheService.instance;
     final streams = cache.loadLiveStreams(ignoreExpiry: true);
     _hasCache = streams?.isNotEmpty ?? false;
-    final isStale = cache.isLiveStale();
-    _isRefreshing = !_hasCache || isStale;
+
+    // M3U: only refresh when cache is empty (don't stale-expire like Xtream)
+    // Xtream: refresh when cache is empty OR older than 24h
+    final isM3u = playlist?.isM3u ?? false;
+    _isRefreshing = !_hasCache || (!isM3u && cache.isLiveStale());
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _keyboardFocus.requestFocus();
@@ -60,6 +71,53 @@ class _LiveTVScreenState extends ConsumerState<LiveTVScreen> {
 
   // ── Refresh with retry ────────────────────────────────────────────────
   Future<void> _doRefresh() async {
+    final playlist = ref.read(activePlaylistProvider);
+    // ── M3U refresh ────────────────────────────────────────────────────────────
+    if (playlist?.isM3u == true) {
+      final url = playlist!.m3uUrl;
+      if (url == null || url.isEmpty) {
+        if (!_hasCache && mounted) {
+          context.go('/home');
+        } else if (mounted) {
+          setState(() => _isRefreshing = false);
+        }
+        return;
+      }
+
+      bool success = false;
+      for (int i = 0; i < 3 && !success; i++) {
+        if (i > 0) await Future.delayed(const Duration(seconds: 3));
+        try {
+          final (cats, streams) = await M3uService.fetchAndParse(
+            url,
+          ).timeout(const Duration(seconds: 90));
+          await CacheService.instance.saveLiveCategories(cats);
+          await CacheService.instance.saveLiveStreams(streams);
+          await CacheService.instance.saveContentFlags(
+            hasLive: streams.isNotEmpty,
+            hasVod: false,
+            hasSeries: false,
+          );
+          ref.invalidate(liveCategoriesProvider);
+          ref.invalidate(liveStreamsProvider);
+          success = true;
+        } catch (_) {}
+      }
+
+      if (!mounted) return;
+      if (!success && !_hasCache) {
+        context.go('/home');
+      } else {
+        setState(() {
+          _isRefreshing = false;
+          if (success) _hasCache = true;
+        });
+        if (!_hasRestored) _restoreFromLastWatched();
+      }
+      return;
+    }
+
+    // ── Xtream refresh (existing code unchanged below) ─────────────────────────
     final service = ref.read(xtreamServiceProvider);
     if (service == null) {
       if (!_hasCache && mounted) {
@@ -285,11 +343,13 @@ class _LiveTVScreenState extends ConsumerState<LiveTVScreen> {
     // ── Auto-load channel in inline player when selection changes ──────────
     ref.listen<LiveStream?>(selectedChannelProvider, (prev, next) {
       if (next == null || next.streamId == prev?.streamId) return;
-      final service = ref.read(xtreamServiceProvider);
-      if (service == null) return;
-      ref
-          .read(livePlayerProvider.notifier)
-          .openChannel(service.getLiveUrl(next.streamId));
+
+      // Works for both Xtream (constructs URL) and M3U (uses directSource)
+      final playlist = ref.read(activePlaylistProvider);
+      final url = playlist?.getChannelUrl(next) ?? '';
+      if (url.isEmpty) return;
+
+      ref.read(livePlayerProvider.notifier).openChannel(url);
       ref.read(recentlyViewedLiveProvider.notifier).add(next.streamId);
     });
 
@@ -307,16 +367,16 @@ class _LiveTVScreenState extends ConsumerState<LiveTVScreen> {
       onKeyEvent: _handleKeyEvent,
       child: PopScope(
         canPop: false,
-        onPopInvokedWithResult: (_, _) {
+        onPopInvokedWithResult: (didPop, _) {
+          if (didPop) return;
           if (isMaximized) {
             ref.read(livePlayerMaximizedProvider.notifier).state = false;
             return;
           }
-          // Stop player before leaving so audio doesn't bleed
           try {
             ref.read(livePlayerProvider.notifier).stop();
           } catch (_) {}
-          context.canPop() ? context.pop() : context.go('/home');
+          context.go('/home');
         },
         child: Scaffold(
           backgroundColor: AppTheme.background,
@@ -783,15 +843,11 @@ class _DesktopTopBar extends ConsumerWidget {
       padding: const EdgeInsets.symmetric(horizontal: 16),
       child: Row(
         children: [
-          IconButton(
-            onPressed: () =>
-                context.canPop() ? context.pop() : context.go('/home'),
-            icon: const Icon(
-              Icons.arrow_back_ios_new,
-              color: AppTheme.textSecondary,
-              size: 16,
-            ),
+          _FocusableIconButton(
+            icon: Icons.arrow_back_ios_new,
+            iconColor: AppTheme.textSecondary,
             tooltip: 'Back to Home',
+            onTap: () => context.go('/home'),
           ),
           const Icon(Icons.tv_outlined, color: AppTheme.primary, size: 18),
           const SizedBox(width: 8),
@@ -856,7 +912,79 @@ class _DesktopTopBar extends ConsumerWidget {
   }
 }
 
-class _TopBtn extends StatelessWidget {
+// ─────────────────────────────────────────────────────────────────────────────
+// FOCUSABLE ICON BUTTON — TV remote + touch + mouse
+// ─────────────────────────────────────────────────────────────────────────────
+class _FocusableIconButton extends StatefulWidget {
+  final IconData icon;
+  final Color iconColor;
+  final String tooltip;
+  final VoidCallback onTap;
+
+  const _FocusableIconButton({
+    required this.icon,
+    required this.iconColor,
+    required this.tooltip,
+    required this.onTap,
+  });
+
+  @override
+  State<_FocusableIconButton> createState() => _FocusableIconButtonState();
+}
+
+class _FocusableIconButtonState extends State<_FocusableIconButton> {
+  bool _focused = false;
+
+  @override
+  Widget build(BuildContext context) {
+    return Focus(
+      onFocusChange: (f) => setState(() => _focused = f),
+      onKeyEvent: (_, event) {
+        if (event is KeyDownEvent &&
+            (event.logicalKey == LogicalKeyboardKey.select ||
+                event.logicalKey == LogicalKeyboardKey.enter ||
+                event.logicalKey == LogicalKeyboardKey.space)) {
+          widget.onTap();
+          return KeyEventResult.handled;
+        }
+        return KeyEventResult.ignored;
+      },
+      child: Tooltip(
+        message: widget.tooltip,
+        child: MouseRegion(
+          cursor: SystemMouseCursors.click,
+          child: GestureDetector(
+            onTap: widget.onTap,
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 150),
+              width: 36,
+              height: 36,
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(8),
+                border: _focused
+                    ? Border.all(
+                        color: AppTheme.primary.withValues(alpha: 0.7),
+                        width: 2,
+                      )
+                    : null,
+                color: _focused
+                    ? AppTheme.primary.withValues(alpha: 0.12)
+                    : Colors.transparent,
+              ),
+              child: Icon(
+                widget.icon,
+                size: 16,
+                color: _focused ? AppTheme.primary : widget.iconColor,
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _TopBtn extends StatefulWidget {
   final IconData icon;
   final String tooltip;
   final bool isActive;
@@ -870,28 +998,69 @@ class _TopBtn extends StatelessWidget {
   });
 
   @override
+  State<_TopBtn> createState() => _TopBtnState();
+}
+
+class _TopBtnState extends State<_TopBtn> {
+  bool _focused = false;
+  bool _pressed = false;
+
+  @override
   Widget build(BuildContext context) {
-    return Tooltip(
-      message: tooltip,
-      child: GestureDetector(
-        onTap: onTap,
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 200),
-          width: 32,
-          height: 32,
-          decoration: BoxDecoration(
-            color: isActive
-                ? AppTheme.primary.withValues(alpha: 0.15)
-                : Colors.transparent,
-            borderRadius: BorderRadius.circular(8),
-            border: isActive
-                ? Border.all(color: AppTheme.primary.withValues(alpha: 0.3))
-                : null,
-          ),
-          child: Icon(
-            icon,
-            size: 18,
-            color: isActive ? AppTheme.primary : AppTheme.textSecondary,
+    return Focus(
+      onFocusChange: (f) => setState(() => _focused = f),
+      onKeyEvent: (_, event) {
+        if (event is KeyDownEvent &&
+            (event.logicalKey == LogicalKeyboardKey.select ||
+                event.logicalKey == LogicalKeyboardKey.enter ||
+                event.logicalKey == LogicalKeyboardKey.space)) {
+          setState(() => _pressed = true);
+          widget.onTap();
+          return KeyEventResult.handled;
+        }
+        if (event is KeyUpEvent) {
+          setState(() => _pressed = false);
+          return KeyEventResult.ignored;
+        }
+        return KeyEventResult.ignored;
+      },
+      child: Tooltip(
+        message: widget.tooltip,
+        child: MouseRegion(
+          cursor: SystemMouseCursors.click,
+          child: GestureDetector(
+            onTap: widget.onTap,
+            onTapDown: (_) => setState(() => _pressed = true),
+            onTapUp: (_) => setState(() => _pressed = false),
+            onTapCancel: () => setState(() => _pressed = false),
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 150),
+              width: 32,
+              height: 32,
+              decoration: BoxDecoration(
+                color: widget.isActive || _focused
+                    ? AppTheme.primary.withValues(alpha: 0.20)
+                    : _pressed
+                    ? AppTheme.primary.withValues(alpha: 0.12)
+                    : Colors.transparent,
+                borderRadius: BorderRadius.circular(8),
+                border: _focused
+                    ? Border.all(
+                        color: AppTheme.primary.withValues(alpha: 0.8),
+                        width: 2,
+                      )
+                    : widget.isActive
+                    ? Border.all(color: AppTheme.primary.withValues(alpha: 0.3))
+                    : null,
+              ),
+              child: Icon(
+                widget.icon,
+                size: 18,
+                color: (widget.isActive || _focused)
+                    ? AppTheme.primary
+                    : AppTheme.textSecondary,
+              ),
+            ),
           ),
         ),
       ),

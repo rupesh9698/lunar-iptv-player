@@ -1,8 +1,11 @@
 import 'dart:async';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:lunar_iptv_player/services/stream_proxy_service.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
+
+import '../services/web_proxy_client.dart';
 
 // ── Player State ──────────────────────────────────────────────────────────────
 class LivePlayerState {
@@ -38,18 +41,17 @@ class LivePlayerState {
     String? currentUrl,
     int? reconnectAttempt,
     bool? isReconnecting,
-  }) =>
-      LivePlayerState(
-        isInitialized: isInitialized ?? this.isInitialized,
-        isPlaying: isPlaying ?? this.isPlaying,
-        isBuffering: isBuffering ?? this.isBuffering,
-        error: error ?? this.error,
-        quality: quality ?? this.quality,
-        volume: volume ?? this.volume,
-        currentUrl: currentUrl ?? this.currentUrl,
-        reconnectAttempt: reconnectAttempt ?? this.reconnectAttempt,
-        isReconnecting: isReconnecting ?? this.isReconnecting,
-      );
+  }) => LivePlayerState(
+    isInitialized: isInitialized ?? this.isInitialized,
+    isPlaying: isPlaying ?? this.isPlaying,
+    isBuffering: isBuffering ?? this.isBuffering,
+    error: error ?? this.error,
+    quality: quality ?? this.quality,
+    volume: volume ?? this.volume,
+    currentUrl: currentUrl ?? this.currentUrl,
+    reconnectAttempt: reconnectAttempt ?? this.reconnectAttempt,
+    isReconnecting: isReconnecting ?? this.isReconnecting,
+  );
 }
 
 // ── Notifier ──────────────────────────────────────────────────────────────────
@@ -108,16 +110,21 @@ class LivePlayerNotifier extends StateNotifier<LivePlayerState> {
     _ensureInitialized();
     _reconnectTimer?.cancel();
     if (!mounted) return;
+
+    // On web, proxy HTTP streams through Cloud Run (HLS/TS compatible)
+    final resolvedUrl = StreamProxyService.resolveStream(url);
+
     state = state.copyWith(
-      currentUrl: url,
+      currentUrl: resolvedUrl,
       error: '',
       reconnectAttempt: 0,
       isReconnecting: false,
       isBuffering: true,
       quality: '',
     );
+
     await _configureMpv();
-    await _player!.open(Media(url));
+    await _player!.open(Media(resolvedUrl));
     await _player!.setVolume(state.volume * 100);
   }
 
@@ -126,17 +133,21 @@ class LivePlayerNotifier extends StateNotifier<LivePlayerState> {
       final p = _player as dynamic;
       await p.setProperty('network-timeout', '20');
       await p.setProperty('cache', 'yes');
-      await p.setProperty('cache-secs', '15');
+      await p.setProperty('cache-secs', '8');
       await p.setProperty('cache-initial', '0');
       await p.setProperty('cache-pause', 'no');
       await p.setProperty('cache-pause-initial', 'no');
-      await p.setProperty('demuxer-max-bytes', '50MiB');
-      await p.setProperty('demuxer-readahead-secs', '10');
-      await p.setProperty('stream-lavf-o',
-          'reconnect=1,reconnect_at_eof=1,reconnect_streamed=1,'
-              'reconnect_delay_max=5,timeout=20000000,rw_timeout=5000000');
+      await p.setProperty('demuxer-max-bytes', '20MiB'); // ← low RAM friendly
+      await p.setProperty(
+        'stream-lavf-o',
+        'reconnect=1,reconnect_at_eof=1,reconnect_streamed=1,'
+            'reconnect_delay_max=5,timeout=20000000',
+      );
       await p.setProperty('hwdec', 'auto-safe');
       await p.setProperty('video-sync', 'audio');
+      await p.setProperty('framedrop', 'vo'); // ← drop frames under load
+      await p.setProperty('vd-lavc-threads', '2');
+      await p.setProperty('audio-buffer', '0.2');
     } catch (_) {}
   }
 
@@ -146,7 +157,10 @@ class LivePlayerNotifier extends StateNotifier<LivePlayerState> {
     if (attempt < _maxReconnects && state.currentUrl != null) {
       final next = attempt + 1;
       state = state.copyWith(
-          isReconnecting: true, reconnectAttempt: next, error: '');
+        isReconnecting: true,
+        reconnectAttempt: next,
+        error: '',
+      );
       _reconnectTimer?.cancel();
       _reconnectTimer = Timer(Duration(seconds: next * 3), () {
         if (!mounted || state.currentUrl == null) return;
@@ -155,7 +169,9 @@ class LivePlayerNotifier extends StateNotifier<LivePlayerState> {
       });
     } else {
       state = state.copyWith(
-          error: 'Stream unavailable', isReconnecting: false);
+        error: 'Stream unavailable',
+        isReconnecting: false,
+      );
     }
   }
 
@@ -204,6 +220,6 @@ class LivePlayerNotifier extends StateNotifier<LivePlayerState> {
 
 // ── Provider ──────────────────────────────────────────────────────────────────
 final livePlayerProvider =
-StateNotifierProvider<LivePlayerNotifier, LivePlayerState>(
+    StateNotifierProvider<LivePlayerNotifier, LivePlayerState>(
       (ref) => LivePlayerNotifier(),
-);
+    );

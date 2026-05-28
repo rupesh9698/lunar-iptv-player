@@ -9,6 +9,7 @@ import 'package:intl/intl.dart';
 import '../../core/theme/app_theme.dart';
 import '../../providers/app_providers.dart';
 import '../../services/cache_service.dart';
+import '../../services/m3u_service.dart';
 
 enum _FetchStatus { idle, loading, done, failed }
 
@@ -31,7 +32,7 @@ class SyncScreen extends ConsumerStatefulWidget {
 }
 
 class _SyncScreenState extends ConsumerState<SyncScreen> {
-  late final List<_SyncItem> _items = [
+  List<_SyncItem> _items = [
     _SyncItem('Live TV', Icons.tv_outlined),
     _SyncItem('Movies', Icons.video_library_outlined),
     _SyncItem('Series', Icons.theaters_outlined),
@@ -48,9 +49,7 @@ class _SyncScreenState extends ConsumerState<SyncScreen> {
   void initState() {
     super.initState();
     _clockTimer = Timer.periodic(
-      const Duration(seconds: 1),
-      (_) => setState(() => _now = DateTime.now()),
-    );
+        const Duration(seconds: 1), (_) => setState(() => _now = DateTime.now()));
     WidgetsBinding.instance.addPostFrameCallback((_) => _runSync());
   }
 
@@ -94,96 +93,128 @@ class _SyncScreenState extends ConsumerState<SyncScreen> {
   }
 
   Future<void> _runSync() async {
-    final service = ref.read(xtreamServiceProvider);
-    if (service == null) {
+    final playlist = ref.read(activePlaylistProvider);
+    if (playlist == null) {
       if (mounted) context.go('/home');
       return;
     }
 
+    // Set cache context for this playlist
+    CacheService.instance.setActivePlaylist(playlist.id);
+
     setState(() => _hasAnyFailure = false);
     final cache = CacheService.instance;
 
-    // ── Live TV ────────────────────────────────────────────────────────
-    if (widget.isManualRefresh || cache.isLiveStale()) {
-      await _step(0, 'Fetching Live TV channels...', () async {
-        final cats = await _withRetry(
-          () => service.getLiveCategories(),
-          operationName: 'Live TV Categories',
-        );
-        final ch = await _withRetry(
-          () => service.getLiveStreams(),
-          operationName: 'Live TV Streams',
-        );
-        await cache.saveLiveCategories(cats);
-        await cache.saveLiveStreams(ch);
-        _items[0].subtitle = '${ch.length} channels';
+    if (playlist.isM3u) {
+      // ── M3U sync ────────────────────────────────────────────────────────
+      setState(() {
+        _items = [_SyncItem('Live TV (M3U)', Icons.subscriptions_outlined)];
       });
+
+      if (widget.isManualRefresh || cache.isLiveStale()) {
+        await _step(0, 'Fetching M3U playlist...', () async {
+          final m3uUrl = playlist.m3uUrl!;
+          final (cats, streams) = await M3uService.fetchAndParse(m3uUrl);
+          await cache.saveLiveCategories(cats);
+          await cache.saveLiveStreams(streams);
+          await cache.saveContentFlags(
+              hasLive: streams.isNotEmpty, hasVod: false, hasSeries: false);
+          _items[0].subtitle = '${streams.length} channels · ${cats.length} categories';
+        });
+      } else {
+        _markDone(0);
+      }
+
+      ref.invalidate(liveCategoriesProvider);
+      ref.invalidate(liveStreamsProvider);
     } else {
-      _markDone(0);
+      // ── Xtream sync ─────────────────────────────────────────────────────
+      setState(() {
+        _items = [
+          _SyncItem('Live TV', Icons.tv_outlined),
+          _SyncItem('Movies',  Icons.video_library_outlined),
+          _SyncItem('Series',  Icons.theaters_outlined),
+        ];
+      });
+
+      final service = ref.read(xtreamServiceProvider);
+      if (service == null) {
+        if (mounted) context.go('/home');
+        return;
+      }
+
+      bool hasLive = false, hasVod = false, hasSeries = false;
+
+      // Live TV
+      if (widget.isManualRefresh || cache.isLiveStale()) {
+        await _step(0, 'Fetching Live TV channels...', () async {
+          final cats = await _withRetry(
+                  () => service.getLiveCategories(), operationName: 'Live TV Categories');
+          final ch = await _withRetry(
+                  () => service.getLiveStreams(),    operationName: 'Live TV Streams');
+          await cache.saveLiveCategories(cats);
+          await cache.saveLiveStreams(ch);
+          _items[0].subtitle = '${ch.length} channels';
+          hasLive = ch.isNotEmpty;
+        });
+      } else {
+        _markDone(0);
+        hasLive = cache.loadLiveStreams(ignoreExpiry: true)?.isNotEmpty ?? true;
+      }
+
+      // Movies
+      if (widget.isManualRefresh || cache.isVodStale()) {
+        await _step(1, 'Fetching Movies library...', () async {
+          final cats    = await _withRetry(
+                  () => service.getVodCategories(), operationName: 'Movies Categories');
+          final streams = await _withRetry(
+                  () => service.getVodStreams(),    operationName: 'Movies Library');
+          await cache.saveVodCategories(cats);
+          await cache.saveVodStreams(streams);
+          _items[1].subtitle = '${streams.length} movies';
+          hasVod = streams.isNotEmpty;
+        });
+      } else {
+        _markDone(1);
+        hasVod = cache.loadVodStreams(ignoreExpiry: true)?.isNotEmpty ?? true;
+      }
+
+      // Series
+      if (widget.isManualRefresh || cache.isSeriesStale()) {
+        await _step(2, 'Fetching Series library...', () async {
+          final cats   = await _withRetry(
+                  () => service.getSeriesCategories(), operationName: 'Series Categories');
+          final series = await _withRetry(
+                  () => service.getSeries(),           operationName: 'Series Library');
+          await cache.saveSeriesCategories(cats);
+          await cache.saveSeriesList(series);
+          _items[2].subtitle = '${series.length} series';
+          hasSeries = series.isNotEmpty;
+        });
+      } else {
+        _markDone(2);
+        hasSeries = cache.loadSeriesList(ignoreExpiry: true)?.isNotEmpty ?? true;
+      }
+
+      await cache.saveContentFlags(
+          hasLive: hasLive, hasVod: hasVod, hasSeries: hasSeries);
+
+      ref.invalidate(liveCategoriesProvider);
+      ref.invalidate(liveStreamsProvider);
+      ref.invalidate(vodCategoriesProvider);
+      ref.invalidate(vodStreamsProvider);
+      ref.invalidate(seriesCategoriesProvider);
+      ref.invalidate(seriesListProvider);
     }
 
-    // ── Movies ────────────────────────────────────────────────────────
-    if (widget.isManualRefresh || cache.isVodStale()) {
-      await _step(1, 'Fetching Movies library...', () async {
-        final cats = await _withRetry(
-          () => service.getVodCategories(),
-          operationName: 'Movies Categories',
-        );
-        final streams = await _withRetry(
-          () => service.getVodStreams(),
-          operationName: 'Movies Library',
-        );
-        await cache.saveVodCategories(cats);
-        await cache.saveVodStreams(streams);
-        _items[1].subtitle = '${streams.length} movies';
-      });
-    } else {
-      _markDone(1);
-    }
-
-    // ── Series ────────────────────────────────────────────────────────
-    if (widget.isManualRefresh || cache.isSeriesStale()) {
-      await _step(2, 'Fetching Series library...', () async {
-        final cats = await _withRetry(
-          () => service.getSeriesCategories(),
-          operationName: 'Series Categories',
-        );
-        final series = await _withRetry(
-          () => service.getSeries(),
-          operationName: 'Series Library',
-        );
-        await cache.saveSeriesCategories(cats);
-        await cache.saveSeriesList(series);
-        _items[2].subtitle = '${series.length} series';
-      });
-    } else {
-      _markDone(2);
-    }
-
-    // ── Invalidate providers ──────────────────────────────────────────
-    ref.invalidate(liveCategoriesProvider);
-    ref.invalidate(liveStreamsProvider);
-    ref.invalidate(vodCategoriesProvider);
-    ref.invalidate(vodStreamsProvider);
-    ref.invalidate(seriesCategoriesProvider);
-    ref.invalidate(seriesListProvider);
-
-    // ── Signal home screen to rebuild with fresh cache timestamps ─────
     ref.read(cacheLastSyncProvider.notifier).state = DateTime.now();
 
     final msg = _hasAnyFailure
         ? 'Sync completed with some issues'
         : 'All done! Launching Lunar IPTV Player...';
-
     if (mounted) setState(() => _statusMsg = msg);
 
-    // Faster navigation if everything was already fresh
-    final allWereFresh =
-        !widget.isManualRefresh &&
-        !cache.isLiveStale() &&
-        !cache.isVodStale() &&
-        !cache.isSeriesStale();
-    await Future.delayed(Duration(milliseconds: allWereFresh ? 400 : 1200));
+    await Future.delayed(const Duration(milliseconds: 900));
     if (mounted) context.go('/home');
   }
 

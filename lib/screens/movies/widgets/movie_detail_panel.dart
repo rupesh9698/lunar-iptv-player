@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../../../core/theme/app_theme.dart';
 import '../../../core/utils/launcher_utils.dart';
@@ -27,14 +29,9 @@ class MovieDetailPanel extends ConsumerWidget {
           Row(
             children: [
               const Spacer(),
-              IconButton(
-                onPressed: () =>
+              _FocusableCloseButton(
+                onTap: () =>
                     ref.read(selectedVodStreamProvider.notifier).state = null,
-                icon: const Icon(
-                  Icons.close,
-                  color: AppTheme.textMuted,
-                  size: 18,
-                ),
               ),
             ],
           ),
@@ -434,6 +431,28 @@ class MovieDetailPanel extends ConsumerWidget {
           ],
         ),
         const SizedBox(height: 8),
+        // Download button
+        if (service != null)
+          SizedBox(
+            width: double.infinity,
+            child: OutlinedButton.icon(
+              onPressed: () {
+                final url = service.getVodUrl(movie.streamId, ext);
+                launchUrl(Uri.parse(url),
+                    mode: LaunchMode.externalApplication);
+              },
+              icon: const Icon(Icons.download_outlined, size: 18),
+              label: const Text('Download'),
+              style: OutlinedButton.styleFrom(
+                foregroundColor: AppTheme.success,
+                side: const BorderSide(color: AppTheme.success),
+                padding: const EdgeInsets.symmetric(vertical: 11),
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12)),
+              ),
+            ),
+          ),
+        const SizedBox(height: 8),
         if (vodInfo?.info?.youtubeTrailer != null &&
             vodInfo!.info!.youtubeTrailer!.isNotEmpty)
           OutlinedButton.icon(
@@ -622,6 +641,67 @@ class _ExpandableTextState extends State<_ExpandableText> {
             ? CrossFadeState.showSecond
             : CrossFadeState.showFirst,
         duration: const Duration(milliseconds: 250),
+      ),
+    );
+  }
+}
+
+class _FocusableCloseButton extends StatefulWidget {
+  final VoidCallback onTap;
+  const _FocusableCloseButton({required this.onTap});
+
+  @override
+  State<_FocusableCloseButton> createState() => _FocusableCloseButtonState();
+}
+
+class _FocusableCloseButtonState extends State<_FocusableCloseButton> {
+  bool _focused = false;
+
+  @override
+  Widget build(BuildContext context) {
+    return Focus(
+      onFocusChange: (f) => setState(() => _focused = f),
+      onKeyEvent: (_, event) {
+        if (event is KeyDownEvent &&
+            (event.logicalKey == LogicalKeyboardKey.select ||
+                event.logicalKey == LogicalKeyboardKey.enter ||
+                event.logicalKey == LogicalKeyboardKey.space)) {
+          widget.onTap();
+          return KeyEventResult.handled;
+        }
+        if (event is KeyDownEvent &&
+            event.logicalKey == LogicalKeyboardKey.arrowLeft) {
+          FocusScope.of(context).focusInDirection(TraversalDirection.left);
+          return KeyEventResult.handled;
+        }
+        return KeyEventResult.ignored;
+      },
+      child: MouseRegion(
+        cursor: SystemMouseCursors.click,
+        child: GestureDetector(
+          onTap: widget.onTap,
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 150),
+            padding: const EdgeInsets.all(6),
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: _focused
+                  ? AppTheme.primary.withValues(alpha: 0.15)
+                  : Colors.transparent,
+              border: _focused
+                  ? Border.all(
+                      color: AppTheme.primary.withValues(alpha: 0.6),
+                      width: 2,
+                    )
+                  : null,
+            ),
+            child: Icon(
+              Icons.close,
+              color: _focused ? AppTheme.primary : AppTheme.textMuted,
+              size: 18,
+            ),
+          ),
+        ),
       ),
     );
   }

@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'package:http/http.dart' as http;
+import 'package:lunar_iptv_player/services/stream_proxy_service.dart';
 import '../models/xtream_models.dart';
 import '../core/constants/app_constants.dart';
 
@@ -18,10 +19,13 @@ class XtreamService {
       if (action.isNotEmpty) 'action': action,
       ...?extra,
     };
-    final base = playlist.serverUrl.endsWith('/')
-        ? playlist.serverUrl
-        : '${playlist.serverUrl}/';
-    return Uri.parse('${base}player_api.php').replace(queryParameters: params);
+    final base = playlist.baseUrl;
+    final rawUrl = Uri.parse(
+      '${base}player_api.php',
+    ).replace(queryParameters: params).toString();
+    // On web, route API calls through HTTPS proxy to avoid Mixed Content
+    final resolvedUrl = StreamProxyService.resolveApi(rawUrl);
+    return Uri.parse(resolvedUrl);
   }
 
   Future<T> _get<T>(Uri uri, T Function(dynamic) parser) async {
@@ -32,23 +36,27 @@ class XtreamService {
     if (response.statusCode != 200) {
       throw Exception('HTTP ${response.statusCode}: ${response.reasonPhrase}');
     }
-
-    final decoded = json.decode(response.body);
-    return parser(decoded);
+    return parser(json.decode(response.body));
   }
 
   // ── Authentication & Account Info ────────────────────────────
   Future<AccountInfo> getAccountInfo() async {
     final uri = _buildUri('');
-    return _get(uri, (data) => AccountInfo.fromJson(data as Map<String, dynamic>));
+    return _get(
+      uri,
+      (data) => AccountInfo.fromJson(data as Map<String, dynamic>),
+    );
   }
 
   // ── Live TV ──────────────────────────────────────────────────
   Future<List<XtreamCategory>> getLiveCategories() async {
     final uri = _buildUri(AppConstants.actionGetLiveCategories);
-    return _get(uri, (data) => (data as List)
-        .map((e) => XtreamCategory.fromJson(e as Map<String, dynamic>))
-        .toList());
+    return _get(
+      uri,
+      (data) => (data as List)
+          .map((e) => XtreamCategory.fromJson(e as Map<String, dynamic>))
+          .toList(),
+    );
   }
 
   Future<List<LiveStream>> getLiveStreams({String? categoryId}) async {
@@ -56,17 +64,23 @@ class XtreamService {
       AppConstants.actionGetLiveStreams,
       categoryId != null ? {'category_id': categoryId} : null,
     );
-    return _get(uri, (data) => (data as List)
-        .map((e) => LiveStream.fromJson(e as Map<String, dynamic>))
-        .toList());
+    return _get(
+      uri,
+      (data) => (data as List)
+          .map((e) => LiveStream.fromJson(e as Map<String, dynamic>))
+          .toList(),
+    );
   }
 
   // ── Movies (VOD) ─────────────────────────────────────────────
   Future<List<XtreamCategory>> getVodCategories() async {
     final uri = _buildUri(AppConstants.actionGetVodCategories);
-    return _get(uri, (data) => (data as List)
-        .map((e) => XtreamCategory.fromJson(e as Map<String, dynamic>))
-        .toList());
+    return _get(
+      uri,
+      (data) => (data as List)
+          .map((e) => XtreamCategory.fromJson(e as Map<String, dynamic>))
+          .toList(),
+    );
   }
 
   Future<List<VodStream>> getVodStreams({String? categoryId}) async {
@@ -74,9 +88,12 @@ class XtreamService {
       AppConstants.actionGetVodStreams,
       categoryId != null ? {'category_id': categoryId} : null,
     );
-    return _get(uri, (data) => (data as List)
-        .map((e) => VodStream.fromJson(e as Map<String, dynamic>))
-        .toList());
+    return _get(
+      uri,
+      (data) => (data as List)
+          .map((e) => VodStream.fromJson(e as Map<String, dynamic>))
+          .toList(),
+    );
   }
 
   Future<VodInfo> getVodInfo(String vodId) async {
@@ -87,9 +104,12 @@ class XtreamService {
   // ── Series ───────────────────────────────────────────────────
   Future<List<XtreamCategory>> getSeriesCategories() async {
     final uri = _buildUri(AppConstants.actionGetSeriesCategories);
-    return _get(uri, (data) => (data as List)
-        .map((e) => XtreamCategory.fromJson(e as Map<String, dynamic>))
-        .toList());
+    return _get(
+      uri,
+      (data) => (data as List)
+          .map((e) => XtreamCategory.fromJson(e as Map<String, dynamic>))
+          .toList(),
+    );
   }
 
   Future<List<Series>> getSeries({String? categoryId}) async {
@@ -97,21 +117,26 @@ class XtreamService {
       AppConstants.actionGetSeries,
       categoryId != null ? {'category_id': categoryId} : null,
     );
-    return _get(uri, (data) => (data as List)
-        .map((e) => Series.fromJson(e as Map<String, dynamic>))
-        .toList());
+    return _get(
+      uri,
+      (data) => (data as List)
+          .map((e) => Series.fromJson(e as Map<String, dynamic>))
+          .toList(),
+    );
   }
 
   Future<SeriesInfo> getSeriesInfo(String seriesId) async {
-    final uri = _buildUri(
-        AppConstants.actionGetSeriesInfo, {'series_id': seriesId});
+    final uri = _buildUri(AppConstants.actionGetSeriesInfo, {
+      'series_id': seriesId,
+    });
     return _get(
-        uri, (data) => SeriesInfo.fromJson(data as Map<String, dynamic>));
+      uri,
+      (data) => SeriesInfo.fromJson(data as Map<String, dynamic>),
+    );
   }
 
   // ── EPG ──────────────────────────────────────────────────────
-  Future<List<EpgListing>> getShortEpg(String streamId,
-      {int limit = 4}) async {
+  Future<List<EpgListing>> getShortEpg(String streamId, {int limit = 4}) async {
     final uri = _buildUri(AppConstants.actionGetShortEpg, {
       'stream_id': streamId,
       'limit': limit.toString(),

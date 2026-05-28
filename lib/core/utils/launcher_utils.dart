@@ -53,3 +53,29 @@ Future<void> launchYouTubeTrailer(BuildContext context, String videoId) async {
     );
   }
 }
+
+/// Opens the Lunar IPTV website.
+/// Web: new tab. All other platforms: default browser.
+Future<void> launchLunarWebsite(BuildContext context) async {
+  const url = 'https://lunar-iptv.web.app'; // ← replace with your domain
+  final uri = Uri.parse(url);
+  try {
+    await launchUrl(
+      uri,
+      mode: kIsWeb
+          ? LaunchMode
+                .platformDefault // new tab on web
+          : LaunchMode.externalApplication, // browser on desktop/mobile
+    );
+  } catch (_) {
+    if (context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Could not open website'),
+          backgroundColor: AppTheme.error,
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    }
+  }
+}

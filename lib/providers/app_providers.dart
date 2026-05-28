@@ -23,12 +23,12 @@ class PlaylistNotifier extends StateNotifier<List<Playlist>> {
 
   Future<void> addPlaylist(Playlist playlist) async {
     await _storage.savePlaylist(playlist);
+    // Re-read from storage to ensure all fields are preserved
     state = _storage.getPlaylists();
   }
 
   Future<void> removePlaylist(String id) async {
     await _storage.deletePlaylist(id);
-    // If removed playlist was active, clear active
     if (_storage.getActivePlaylistId() == id) {
       await _storage.setActivePlaylistId(null);
     }
@@ -37,20 +37,9 @@ class PlaylistNotifier extends StateNotifier<List<Playlist>> {
 
   Future<void> setActive(String id) async {
     await _storage.setActivePlaylistId(id);
-    state = state
-        .map(
-          (p) => Playlist(
-            id: p.id,
-            name: p.name,
-            serverUrl: p.serverUrl,
-            username: p.username,
-            password: p.password,
-            addedAt: p.addedAt,
-            lastUpdated: p.lastUpdated,
-            isActive: p.id == id,
-          ),
-        )
-        .toList();
+    // Re-read from storage — preserves ALL fields (type, m3uUrl, serverUrl, etc.)
+    // Previous bug: was creating new Playlist objects without type/m3uUrl
+    state = _storage.getPlaylists();
   }
 }
 
@@ -70,29 +59,31 @@ final activePlaylistProvider = Provider<Playlist?>((ref) {
 // ── Xtream Service ───────────────────────────────────────────────────────────
 final xtreamServiceProvider = Provider<XtreamService?>((ref) {
   final playlist = ref.watch(activePlaylistProvider);
-  if (playlist == null) return null;
+  // M3U playlists don't use Xtream API — return null
+  if (playlist == null || playlist.isM3u) return null;
   return XtreamService(playlist: playlist);
 });
 
 // ── Account Info ─────────────────────────────────────────────────────────────
 final accountInfoProvider = FutureProvider<AccountInfo?>((ref) async {
+  final playlist = ref.watch(activePlaylistProvider);
+  // M3U playlists have no Xtream account info
+  if (playlist == null || playlist.isM3u) return null;
   final service = ref.watch(xtreamServiceProvider);
   if (service == null) return null;
   return service.getAccountInfo();
 });
 
 // ── Live TV ──────────────────────────────────────────────────────────────────
-final liveCategoriesProvider = FutureProvider<List<XtreamCategory>>((
-  ref,
-) async {
-  final service = ref.watch(xtreamServiceProvider);
-  if (service == null) return [];
-
-  // 1. Try cache (even if stale — we refresh in background)
+final liveCategoriesProvider = FutureProvider<List<XtreamCategory>>((ref) async {
+  // Always try cache first — populated for both M3U and Xtream during sync
   final cached = CacheService.instance.loadLiveCategories(ignoreExpiry: true);
   if (cached != null) return cached;
 
-  // 2. No cache → fetch and save
+  // No cache → fetch via Xtream API
+  final service = ref.watch(xtreamServiceProvider);
+  if (service == null) return []; // M3U without cache → needs sync
+
   final cats = await service.getLiveCategories();
   await CacheService.instance.saveLiveCategories(cats);
   return cats;
@@ -103,22 +94,20 @@ final selectedLiveCategoryProvider = StateProvider<XtreamCategory?>(
 );
 
 final liveStreamsProvider = FutureProvider<List<LiveStream>>((ref) async {
-  final service = ref.watch(xtreamServiceProvider);
   final category = ref.watch(selectedLiveCategoryProvider);
-  if (service == null) return [];
 
-  // Try cache (all channels stored together)
   final allCached = CacheService.instance.loadLiveStreams(ignoreExpiry: true);
   if (allCached != null) {
     if (category == null) return allCached;
-    return allCached.where((s) => s.categoryId == category.categoryId).toList();
+    return allCached
+        .where((s) => s.categoryId == category.categoryId)
+        .toList();
   }
 
-  // No cache → fetch (with category filter)
-  final streams = await service.getLiveStreams(
-    categoryId: category?.categoryId,
-  );
-  return streams;
+  final service = ref.watch(xtreamServiceProvider);
+  if (service == null) return []; // M3U without cache → needs sync
+
+  return service.getLiveStreams(categoryId: category?.categoryId);
 });
 
 // ── Movies (VOD) ─────────────────────────────────────────────────────────────
@@ -253,16 +242,18 @@ class SettingsNotifier extends StateNotifier<Map<String, dynamic>> {
 // ── Background refresh provider ────────────────────────────────────────────
 // Triggered when cache is stale; runs silently in background
 final backgroundRefreshProvider = FutureProvider<void>((ref) async {
-  final service = ref.read(xtreamServiceProvider);
-  if (service == null) return;
+  final playlist = ref.read(activePlaylistProvider);
+  final service  = ref.read(xtreamServiceProvider);
+
+  // M3U playlists: skip background refresh (no daily stale for M3U)
+  if (playlist?.isM3u == true || service == null) return;
 
   final cache = CacheService.instance;
 
-  // Refresh live TV if stale
   if (cache.isLiveStale()) {
     try {
       final cats = await service.getLiveCategories();
-      final ch = await service.getLiveStreams();
+      final ch   = await service.getLiveStreams();
       await cache.saveLiveCategories(cats);
       await cache.saveLiveStreams(ch);
       ref.invalidate(liveCategoriesProvider);
@@ -270,10 +261,9 @@ final backgroundRefreshProvider = FutureProvider<void>((ref) async {
     } catch (_) {}
   }
 
-  // Refresh VOD if stale
   if (cache.isVodStale()) {
     try {
-      final cats = await service.getVodCategories();
+      final cats    = await service.getVodCategories();
       final streams = await service.getVodStreams();
       await cache.saveVodCategories(cats);
       await cache.saveVodStreams(streams);
@@ -282,10 +272,9 @@ final backgroundRefreshProvider = FutureProvider<void>((ref) async {
     } catch (_) {}
   }
 
-  // Refresh series if stale
   if (cache.isSeriesStale()) {
     try {
-      final cats = await service.getSeriesCategories();
+      final cats   = await service.getSeriesCategories();
       final series = await service.getSeries();
       await cache.saveSeriesCategories(cats);
       await cache.saveSeriesList(series);
@@ -297,3 +286,11 @@ final backgroundRefreshProvider = FutureProvider<void>((ref) async {
 
 // ── Cache Sync Timestamp — incremented after every sync to force home rebuild ─
 final cacheLastSyncProvider = StateProvider<DateTime?>((ref) => null);
+
+// ── Content flags per active playlist ─────────────────────────────────────
+final contentFlagsProvider =
+Provider<({bool hasLive, bool hasVod, bool hasSeries})>((ref) {
+  ref.watch(cacheLastSyncProvider);   // Re-evaluate after every sync
+  ref.watch(activePlaylistProvider);  // Re-evaluate on playlist switch
+  return CacheService.instance.getContentFlags();
+});
