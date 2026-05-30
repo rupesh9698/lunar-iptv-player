@@ -1278,50 +1278,84 @@ class _ErrorView extends StatelessWidget {
     // Web HTTP stream special case
     if (errorMsg == WebProxyClient.webHttpStreamError) {
       return SafeArea(
-        child: Column(children: [
-          Row(children: [
-            IconButton(
-              onPressed: () { _exitCtx(context); Navigator.of(context).pop(); },
-              icon: const Icon(Icons.arrow_back_ios_new, color: Colors.white, size: 20),
+        child: Column(
+          children: [
+            Row(
+              children: [
+                IconButton(
+                  onPressed: () {
+                    _exitCtx(context);
+                    Navigator.of(context).pop();
+                  },
+                  icon: const Icon(
+                    Icons.arrow_back_ios_new,
+                    color: Colors.white,
+                    size: 20,
+                  ),
+                ),
+                Expanded(
+                  child: Text(
+                    title,
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 15,
+                      fontWeight: FontWeight.w600,
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+              ],
             ),
-            Expanded(
-              child: Text(title,
-                  style: const TextStyle(color: Colors.white, fontSize: 15,
-                      fontWeight: FontWeight.w600),
-                  maxLines: 1, overflow: TextOverflow.ellipsis),
+            const Spacer(),
+            const Icon(
+              Icons.no_encryption_outlined,
+              color: AppTheme.warning,
+              size: 48,
             ),
-          ]),
-          const Spacer(),
-          const Icon(Icons.no_encryption_outlined, color: AppTheme.warning, size: 48),
-          const SizedBox(height: 16),
-          const Text('HTTP Stream — Not Supported in Browser',
-              style: TextStyle(color: Colors.white, fontSize: 18,
-                  fontWeight: FontWeight.w700), textAlign: TextAlign.center),
-          const SizedBox(height: 10),
-          const Padding(
-            padding: EdgeInsets.symmetric(horizontal: 32),
-            child: Text(
-              'Chrome blocks HTTP streams on HTTPS pages.\n'
-                  'Use the Android or Windows app for full streaming,\n'
-                  'or open the link below to watch/download directly.',
-              style: TextStyle(color: Colors.white54, fontSize: 13),
+            const SizedBox(height: 16),
+            const Text(
+              'HTTP Stream — Not Supported in Browser',
+              style: TextStyle(
+                color: Colors.white,
+                fontSize: 18,
+                fontWeight: FontWeight.w700,
+              ),
               textAlign: TextAlign.center,
             ),
-          ),
-          const SizedBox(height: 24),
-          ElevatedButton.icon(
-            onPressed: () => launchUrl(Uri.parse(url),
-                mode: LaunchMode.externalApplication),
-            icon: const Icon(Icons.open_in_new),
-            label: const Text('Open / Download in Browser'),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: AppTheme.primary,
-              padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 13),
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(30)),
+            const SizedBox(height: 10),
+            const Padding(
+              padding: EdgeInsets.symmetric(horizontal: 32),
+              child: Text(
+                'Chrome blocks HTTP streams on HTTPS pages.\n'
+                'Use the Android or Windows app for full streaming,\n'
+                'or open the link below to watch/download directly.',
+                style: TextStyle(color: Colors.white54, fontSize: 13),
+                textAlign: TextAlign.center,
+              ),
             ),
-          ),
-          const Spacer(),
-        ]),
+            const SizedBox(height: 24),
+            ElevatedButton.icon(
+              onPressed: () => launchUrl(
+                Uri.parse(url),
+                mode: LaunchMode.externalApplication,
+              ),
+              icon: const Icon(Icons.open_in_new),
+              label: const Text('Open / Download in Browser'),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppTheme.primary,
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 28,
+                  vertical: 13,
+                ),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(30),
+                ),
+              ),
+            ),
+            const Spacer(),
+          ],
+        ),
       );
     }
     return SafeArea(

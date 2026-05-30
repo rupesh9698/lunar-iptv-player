@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:lunar_iptv_player/providers/behavior_providers.dart';
+import 'package:lunar_iptv_player/services/behavior_service.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 
 import '../../core/constants/app_constants.dart';
@@ -469,18 +471,22 @@ class _PlaylistsSection extends ConsumerWidget {
                 decoration: BoxDecoration(
                   color: AppTheme.primary.withValues(alpha: 0.08),
                   borderRadius: BorderRadius.circular(10),
-                  border: Border.all(color: AppTheme.primary.withValues(alpha: 0.2)),
-                ),
-                child: const Row(children: [
-                  Icon(Icons.info_outline, color: AppTheme.primary, size: 16),
-                  SizedBox(width: 8),
-                  Expanded(
-                    child: Text(
-                      'Switch or delete playlists from the Home Screen.',
-                      style: TextStyle(color: AppTheme.primary, fontSize: 12),
-                    ),
+                  border: Border.all(
+                    color: AppTheme.primary.withValues(alpha: 0.2),
                   ),
-                ]),
+                ),
+                child: const Row(
+                  children: [
+                    Icon(Icons.info_outline, color: AppTheme.primary, size: 16),
+                    SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        'Switch or delete playlists from the Home Screen.',
+                        style: TextStyle(color: AppTheme.primary, fontSize: 12),
+                      ),
+                    ),
+                  ],
+                ),
               ),
             ),
 
@@ -630,7 +636,6 @@ class _PlaylistTile extends StatelessWidget {
 class _AccountSection extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-
     // Add after the widget's build(BuildContext context) {
     final playlist = ref.watch(activePlaylistProvider);
     if (playlist?.isM3u == true) {
@@ -641,23 +646,35 @@ class _AccountSection extends ConsumerWidget {
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
               Container(
-                width: 64, height: 64,
+                width: 64,
+                height: 64,
                 decoration: BoxDecoration(
                   color: AppTheme.primary.withValues(alpha: 0.12),
                   shape: BoxShape.circle,
                 ),
-                child: const Icon(Icons.subscriptions_outlined,
-                    color: AppTheme.primary, size: 28),
+                child: const Icon(
+                  Icons.subscriptions_outlined,
+                  color: AppTheme.primary,
+                  size: 28,
+                ),
               ),
               const SizedBox(height: 16),
-              const Text('M3U Playlist',
-                  style: TextStyle(color: AppTheme.textPrimary, fontSize: 18,
-                      fontWeight: FontWeight.w700)),
+              const Text(
+                'M3U Playlist',
+                style: TextStyle(
+                  color: AppTheme.textPrimary,
+                  fontSize: 18,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
               const SizedBox(height: 8),
-              Text(playlist?.m3uUrl ?? '',
-                  style: const TextStyle(color: AppTheme.textMuted, fontSize: 11),
-                  textAlign: TextAlign.center, maxLines: 3,
-                  overflow: TextOverflow.ellipsis),
+              Text(
+                playlist?.m3uUrl ?? '',
+                style: const TextStyle(color: AppTheme.textMuted, fontSize: 11),
+                textAlign: TextAlign.center,
+                maxLines: 3,
+                overflow: TextOverflow.ellipsis,
+              ),
               const SizedBox(height: 16),
               const Text(
                 'Account information is not available\nfor M3U playlists.',
@@ -1521,6 +1538,12 @@ class _CacheSection extends ConsumerWidget {
                     size: 20,
                   ),
                   onTap: () async {
+                    await BehaviorService.instance.clearAll();
+                    ref.read(continueWatchingProvider.notifier).clearAll();
+                    ref
+                        .read(behaviorRefreshProvider.notifier)
+                        .update((s) => s + 1);
+
                     await StorageService.instance.clearHistory();
                     ref.read(recentlyViewedVodProvider.notifier).clear();
                     ref.read(recentlyViewedSeriesProvider.notifier).clear();

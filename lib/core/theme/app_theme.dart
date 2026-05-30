@@ -5,34 +5,50 @@ class AppTheme {
   AppTheme._();
 
   // ── Colors ────────────────────────────────────────────────────────
-  static const Color background     = Color(0xFF0A0C14);
-  static const Color surface        = Color(0xFF141824);
+  static const Color background = Color(0xFF0A0C14);
+  static const Color surface = Color(0xFF141824);
   static const Color surfaceVariant = Color(0xFF1C2130);
-  static const Color card           = Color(0xFF1A1F2E);
-  static const Color cardHover      = Color(0xFF222840);
+  static const Color card = Color(0xFF1A1F2E);
+  static const Color cardHover = Color(0xFF222840);
 
-  static const Color primary        = Color(0xFF4F8EF7);
-  static const Color primaryDark    = Color(0xFF2C6CE4);
-  static const Color accent         = Color(0xFF7B61FF);
+  static const Color primary = Color(0xFF4F8EF7);
+  static const Color primaryDark = Color(0xFF2C6CE4);
+  static const Color accent = Color(0xFF7B61FF);
 
-  static const Color success        = Color(0xFF22C55E);
-  static const Color warning        = Color(0xFFF59E0B);
-  static const Color error          = Color(0xFFEF4444);
+  static const Color success = Color(0xFF22C55E);
+  static const Color warning = Color(0xFFF59E0B);
+  static const Color error = Color(0xFFEF4444);
 
-  static const Color textPrimary    = Color(0xFFE8EAF2);
-  static const Color textSecondary  = Color(0xFF8B90A7);
-  static const Color textMuted      = Color(0xFF4A5068);
-  static const Color divider        = Color(0xFF1E2338);
+  static const Color textPrimary = Color(0xFFE8EAF2);
+  static const Color textSecondary = Color(0xFF8B90A7);
+  static const Color textMuted = Color(0xFF4A5068);
+  static const Color divider = Color(0xFF1E2338);
 
-  static const Color sidebarBg     = Color(0xFF0E1120);
-  static const Color selectedItem  = Color(0xFF1E2D54);
+  static const Color sidebarBg = Color(0xFF0E1120);
+  static const Color selectedItem = Color(0xFF1E2D54);
 
   // ── EPG Colors ────────────────────────────────────────────────────
-  static const Color epgPast     = Color(0xFF111420);
-  static const Color epgCurrent  = Color(0xFF1A2340);
-  static const Color epgFuture   = Color(0xFF161B2C);
-  static const Color epgBorder   = Color(0xFF232840);
+  static const Color epgPast = Color(0xFF111420);
+  static const Color epgCurrent = Color(0xFF1A2340);
+  static const Color epgFuture = Color(0xFF161B2C);
+  static const Color epgBorder = Color(0xFF232840);
   static const Color timelineLine = Color(0xFF4F8EF7);
+
+  // ── TV Focus Ring ─────────────────────────────────────────────────────────────
+  static const focusRingColor = Colors.white;
+  static const focusRingWidth = 2.5;
+  static const focusRingRadius = 12.0;
+
+  static BoxDecoration focusRing({
+    Color color = Colors.white,
+    double width = 2.5,
+    double radius = 12.0,
+    Color? background,
+  }) => BoxDecoration(
+    borderRadius: BorderRadius.circular(radius),
+    border: Border.all(color: color.withValues(alpha: 0.75), width: width),
+    color: background ?? Colors.transparent,
+  );
 
   // ── Gradients ─────────────────────────────────────────────────────
   static const LinearGradient primaryGradient = LinearGradient(
@@ -137,8 +153,10 @@ class AppTheme {
         ),
         hintStyle: const TextStyle(color: textMuted, fontSize: 14),
         labelStyle: const TextStyle(color: primary, fontSize: 14),
-        contentPadding:
-        const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+        contentPadding: const EdgeInsets.symmetric(
+          horizontal: 16,
+          vertical: 14,
+        ),
         isDense: true,
       ),
 
@@ -147,12 +165,14 @@ class AppTheme {
           backgroundColor: primary,
           foregroundColor: Colors.white,
           elevation: 0,
-          padding:
-          const EdgeInsets.symmetric(vertical: 14, horizontal: 24),
+          padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 24),
           shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(12)),
-          textStyle:
-          GoogleFonts.inter(fontSize: 15, fontWeight: FontWeight.w600),
+            borderRadius: BorderRadius.circular(12),
+          ),
+          textStyle: GoogleFonts.inter(
+            fontSize: 15,
+            fontWeight: FontWeight.w600,
+          ),
         ),
       ),
 
@@ -160,12 +180,14 @@ class AppTheme {
         style: OutlinedButton.styleFrom(
           foregroundColor: primary,
           side: const BorderSide(color: primary),
-          padding:
-          const EdgeInsets.symmetric(vertical: 14, horizontal: 24),
+          padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 24),
           shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(12)),
-          textStyle:
-          GoogleFonts.inter(fontSize: 15, fontWeight: FontWeight.w600),
+            borderRadius: BorderRadius.circular(12),
+          ),
+          textStyle: GoogleFonts.inter(
+            fontSize: 15,
+            fontWeight: FontWeight.w600,
+          ),
         ),
       ),
 
@@ -173,8 +195,7 @@ class AppTheme {
       cardTheme: CardThemeData(
         color: card,
         elevation: 0,
-        shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(16)),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
         clipBehavior: Clip.antiAlias,
         margin: const EdgeInsets.all(4),
       ),
@@ -183,17 +204,13 @@ class AppTheme {
       dialogTheme: DialogThemeData(
         backgroundColor: surface,
         elevation: 24,
-        shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(20)),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
         titleTextStyle: GoogleFonts.inter(
           fontSize: 20,
           fontWeight: FontWeight.w700,
           color: textPrimary,
         ),
-        contentTextStyle: GoogleFonts.inter(
-          fontSize: 14,
-          color: textSecondary,
-        ),
+        contentTextStyle: GoogleFonts.inter(fontSize: 14, color: textSecondary),
       ),
 
       dividerTheme: const DividerThemeData(
@@ -206,10 +223,8 @@ class AppTheme {
 
       snackBarTheme: SnackBarThemeData(
         backgroundColor: surfaceVariant,
-        contentTextStyle:
-        GoogleFonts.inter(color: textPrimary, fontSize: 14),
-        shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(12)),
+        contentTextStyle: GoogleFonts.inter(color: textPrimary, fontSize: 14),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
         behavior: SnackBarBehavior.floating,
         elevation: 8,
       ),
@@ -217,8 +232,7 @@ class AppTheme {
       bottomSheetTheme: const BottomSheetThemeData(
         backgroundColor: surface,
         shape: RoundedRectangleBorder(
-          borderRadius:
-          BorderRadius.vertical(top: Radius.circular(24)),
+          borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
         ),
         clipBehavior: Clip.antiAlias,
       ),
@@ -231,12 +245,12 @@ class AppTheme {
           fontWeight: FontWeight.w500,
           color: textPrimary,
         ),
-        subtitleTextStyle:
-        GoogleFonts.inter(fontSize: 12, color: textSecondary),
-        shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(10)),
-        contentPadding:
-        const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+        subtitleTextStyle: GoogleFonts.inter(
+          fontSize: 12,
+          color: textSecondary,
+        ),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+        contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
       ),
 
       checkboxTheme: CheckboxThemeData(
@@ -246,19 +260,18 @@ class AppTheme {
         }),
         checkColor: WidgetStateProperty.all(Colors.white),
         side: const BorderSide(color: textMuted, width: 1.5),
-        shape:
-        RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
       ),
 
       switchTheme: SwitchThemeData(
-        thumbColor: WidgetStateProperty.resolveWith((states) =>
-        states.contains(WidgetState.selected)
-            ? Colors.white
-            : textMuted),
-        trackColor: WidgetStateProperty.resolveWith((states) =>
-        states.contains(WidgetState.selected)
-            ? primary
-            : surfaceVariant),
+        thumbColor: WidgetStateProperty.resolveWith(
+          (states) =>
+              states.contains(WidgetState.selected) ? Colors.white : textMuted,
+        ),
+        trackColor: WidgetStateProperty.resolveWith(
+          (states) =>
+              states.contains(WidgetState.selected) ? primary : surfaceVariant,
+        ),
       ),
 
       sliderTheme: const SliderThemeData(
@@ -284,8 +297,7 @@ class AppTheme {
       ),
 
       scrollbarTheme: ScrollbarThemeData(
-        thumbColor: WidgetStateProperty.all(
-            textMuted.withValues(alpha: 0.5)),
+        thumbColor: WidgetStateProperty.all(textMuted.withValues(alpha: 0.5)),
         radius: const Radius.circular(4),
         thickness: WidgetStateProperty.all(4),
       ),
@@ -305,33 +317,32 @@ class AppTheme {
   // ── Text Theme Builder ────────────────────────────────────────────
   static TextTheme _buildTextTheme(TextTheme base) {
     return GoogleFonts.interTextTheme(base).copyWith(
-      displayLarge:  _ts(57, FontWeight.w700, letterSpacing: -1),
+      displayLarge: _ts(57, FontWeight.w700, letterSpacing: -1),
       displayMedium: _ts(45, FontWeight.w700, letterSpacing: -0.5),
       headlineLarge: _ts(32, FontWeight.w700, letterSpacing: -0.5),
-      headlineMedium:_ts(24, FontWeight.w600),
+      headlineMedium: _ts(24, FontWeight.w600),
       headlineSmall: _ts(20, FontWeight.w600),
-      titleLarge:    _ts(18, FontWeight.w600),
-      titleMedium:   _ts(16, FontWeight.w500),
-      titleSmall:    _ts(14, FontWeight.w500, color: textSecondary),
-      bodyLarge:     _ts(16, FontWeight.w400),
-      bodyMedium:    _ts(14, FontWeight.w400, color: textSecondary),
-      bodySmall:     _ts(12, FontWeight.w400, color: textMuted),
-      labelLarge:    _ts(14, FontWeight.w600, letterSpacing: 0.5),
-      labelMedium:   _ts(12, FontWeight.w500),
-      labelSmall:    _ts(11, FontWeight.w500, color: textMuted),
+      titleLarge: _ts(18, FontWeight.w600),
+      titleMedium: _ts(16, FontWeight.w500),
+      titleSmall: _ts(14, FontWeight.w500, color: textSecondary),
+      bodyLarge: _ts(16, FontWeight.w400),
+      bodyMedium: _ts(14, FontWeight.w400, color: textSecondary),
+      bodySmall: _ts(12, FontWeight.w400, color: textMuted),
+      labelLarge: _ts(14, FontWeight.w600, letterSpacing: 0.5),
+      labelMedium: _ts(12, FontWeight.w500),
+      labelSmall: _ts(11, FontWeight.w500, color: textMuted),
     );
   }
 
   static TextStyle _ts(
-      double size,
-      FontWeight weight, {
-        Color color = textPrimary,
-        double letterSpacing = 0,
-      }) =>
-      GoogleFonts.inter(
-        fontSize: size,
-        fontWeight: weight,
-        color: color,
-        letterSpacing: letterSpacing,
-      );
+    double size,
+    FontWeight weight, {
+    Color color = textPrimary,
+    double letterSpacing = 0,
+  }) => GoogleFonts.inter(
+    fontSize: size,
+    fontWeight: weight,
+    color: color,
+    letterSpacing: letterSpacing,
+  );
 }

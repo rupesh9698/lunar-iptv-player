@@ -37,6 +37,12 @@ class _LiveTVScreenState extends ConsumerState<LiveTVScreen> {
 
   String _channelInputStr = '';
   bool _hasRestored = false;
+
+  // ── Panel focus nodes ──────────────────────────────────────────────────────
+  final _categoryPanelFocus = FocusScopeNode(debugLabel: 'CategoryPanel');
+  final _channelPanelFocus = FocusScopeNode(debugLabel: 'ChannelPanel');
+  final _previewPanelFocus = FocusScopeNode(debugLabel: 'PreviewPanel');
+
   Timer? _channelInputTimer;
   final FocusNode _keyboardFocus = FocusNode();
 
@@ -330,6 +336,11 @@ class _LiveTVScreenState extends ConsumerState<LiveTVScreen> {
   void dispose() {
     _channelInputTimer?.cancel();
     _keyboardFocus.dispose();
+
+    _categoryPanelFocus.dispose();
+    _channelPanelFocus.dispose();
+    _previewPanelFocus.dispose();
+
     // Stop inline player — prevents audio bleeding to other screens
     try {
       ref.read(livePlayerProvider.notifier).stop();
@@ -344,7 +355,6 @@ class _LiveTVScreenState extends ConsumerState<LiveTVScreen> {
     ref.listen<LiveStream?>(selectedChannelProvider, (prev, next) {
       if (next == null || next.streamId == prev?.streamId) return;
 
-      // Works for both Xtream (constructs URL) and M3U (uses directSource)
       final playlist = ref.read(activePlaylistProvider);
       final url = playlist?.getChannelUrl(next) ?? '';
       if (url.isEmpty) return;
@@ -364,7 +374,36 @@ class _LiveTVScreenState extends ConsumerState<LiveTVScreen> {
 
     return KeyboardListener(
       focusNode: _keyboardFocus,
-      onKeyEvent: _handleKeyEvent,
+      onKeyEvent: (KeyEvent event) {
+        // Fixed: Removed FocusNode parameter
+        // First check for custom digit/escape inputs
+        _handleKeyEvent(event);
+
+        if (event is! KeyDownEvent) {
+          return; // Fixed: void return type, no KeyEventResult
+        }
+
+        // ── TV D-pad Panel Switching Logic ─────────────────────────────────
+        // Left arrow when in channel list or preview area → focus category sidebar
+        if (event.logicalKey == LogicalKeyboardKey.arrowLeft) {
+          if (_channelPanelFocus.hasFocus || _previewPanelFocus.hasFocus) {
+            _categoryPanelFocus.requestFocus();
+            return;
+          }
+        }
+
+        // Right arrow navigation cascades across panels
+        if (event.logicalKey == LogicalKeyboardKey.arrowRight) {
+          if (_categoryPanelFocus.hasFocus) {
+            _channelPanelFocus.requestFocus();
+            return;
+          }
+          if (_channelPanelFocus.hasFocus) {
+            _previewPanelFocus.requestFocus();
+            return;
+          }
+        }
+      },
       child: PopScope(
         canPop: false,
         onPopInvokedWithResult: (didPop, _) {
@@ -455,8 +494,12 @@ class _LiveTVScreenState extends ConsumerState<LiveTVScreen> {
         Expanded(
           child: Row(
             children: [
-              LiveCategorySidebar(
-                width: ref.watch(categorySidebarWidthProvider),
+              // ── WRAPPED HERE: Category Sidebar ─────────────────────
+              FocusScope(
+                node: _categoryPanelFocus,
+                child: LiveCategorySidebar(
+                  width: ref.watch(categorySidebarWidthProvider),
+                ),
               ),
               _ResizeDivider(
                 axis: Axis.vertical,

@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
+import 'package:lunar_iptv_player/services/behavior_service.dart';
 import 'package:lunar_iptv_player/services/storage_service.dart';
 
 import '../../core/theme/app_theme.dart';
@@ -734,8 +735,18 @@ class _MoviePosterCardState extends ConsumerState<_MoviePosterCard> {
             _pressed = false;
           }),
           child: GestureDetector(
-            onTap: () => ref.read(selectedVodStreamProvider.notifier).state =
-                widget.movie,
+            onTap: () {
+              // Record as search click if user is currently searching
+              final query = ref.read(vodSearchQueryProvider);
+              if (query.isNotEmpty) {
+                BehaviorService.instance.recordSearchClick(
+                  widget.movie.streamId,
+                );
+              }
+              // Also record general open count
+              BehaviorService.instance.recordOpen(widget.movie.streamId);
+              ref.read(selectedVodStreamProvider.notifier).state = widget.movie;
+            },
             onTapDown: (_) => setState(() => _pressed = true),
             onTapUp: (_) => setState(() => _pressed = false),
             onTapCancel: () => setState(() => _pressed = false),

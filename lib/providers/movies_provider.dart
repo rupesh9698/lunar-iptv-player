@@ -1,4 +1,5 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:lunar_iptv_player/services/behavior_service.dart';
 import 'package:lunar_iptv_player/services/cache_service.dart';
 
 import '../core/constants/app_constants.dart';
@@ -65,11 +66,24 @@ final sortedVodStreamsProvider = Provider<AsyncValue<List<VodStream>>>((ref) {
           });
         if (filtered.length > 100) filtered = filtered.sublist(0, 100);
       case VodFilter.all:
-        filtered = query.isEmpty
-            ? List.from(streams)
-            : streams
-                  .where((s) => s.name.toLowerCase().contains(query))
-                  .toList();
+        if (query.isEmpty) {
+          filtered = List.from(streams);
+        } else {
+          // Smart search ranking: text match score + behavior boost
+          final scored =
+              streams.where((s) => s.name.toLowerCase().contains(query)).map((
+                s,
+              ) {
+                final name = s.name.toLowerCase();
+                final textScore = name.startsWith(query) ? 1.0 : 0.5;
+                final finalScore = BehaviorService.instance.getSearchScore(
+                  s.streamId,
+                  textScore,
+                );
+                return (stream: s, score: finalScore);
+              }).toList()..sort((a, b) => b.score.compareTo(a.score));
+          filtered = scored.map((e) => e.stream).toList();
+        }
     }
 
     // Apply search to non-all filters

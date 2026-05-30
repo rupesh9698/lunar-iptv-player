@@ -1,8 +1,10 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_native_splash/flutter_native_splash.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/date_symbol_data_local.dart';
+import 'package:lunar_iptv_player/services/behavior_service.dart';
 import 'package:media_kit/media_kit.dart';
 
 import 'core/router/app_router.dart';
@@ -12,7 +14,11 @@ import 'services/cache_service.dart';
 import 'services/storage_service.dart';
 
 void main() async {
-  WidgetsFlutterBinding.ensureInitialized();
+  // 1. Capture the instance into a variable ONCE
+  final widgetsBinding = WidgetsFlutterBinding.ensureInitialized();
+
+  // 2. Pass that captured variable directly here
+  FlutterNativeSplash.preserve(widgetsBinding: widgetsBinding);
 
   // ── Status bar / navigation bar ────────────────────────────────────
   // Hide system UI for immersive fullscreen experience on Android/iOS
@@ -42,6 +48,7 @@ void main() async {
   // ── Services ────────────────────────────────────────────────────────
   await StorageService.instance.init();
   await CacheService.instance.init();
+  await BehaviorService.instance.init();
   await initializeDateFormatting();
   await PlatformUtils.initWakelock();
 
@@ -50,6 +57,9 @@ void main() async {
   if (activeId != null) {
     CacheService.instance.setActivePlaylist(activeId);
   }
+
+  // NOTE: FlutterNativeSplash.remove() is intentionally missing here!
+  // The initialization route engine inside app_router.dart drops it now.
 
   runApp(const ProviderScope(child: LunarIPTVPlayerApp()));
 }

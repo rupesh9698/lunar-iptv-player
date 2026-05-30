@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
+import 'package:lunar_iptv_player/services/behavior_service.dart';
 import 'package:lunar_iptv_player/services/storage_service.dart';
 
 import '../../core/theme/app_theme.dart';
@@ -291,13 +292,15 @@ class _SeriesSortDropdown extends ConsumerWidget {
       style: const TextStyle(color: AppTheme.textSecondary, fontSize: 13),
       items: const [
         DropdownMenuItem(
-            value: SeriesSortBy.defaultOrder, child: Text('Default')),
+          value: SeriesSortBy.defaultOrder,
+          child: Text('Default'),
+        ),
+        DropdownMenuItem(value: SeriesSortBy.nameAZ, child: Text('A–Z')),
+        DropdownMenuItem(value: SeriesSortBy.nameZA, child: Text('Z–A')),
         DropdownMenuItem(
-            value: SeriesSortBy.nameAZ, child: Text('A–Z')),
-        DropdownMenuItem(
-            value: SeriesSortBy.nameZA, child: Text('Z–A')),
-        DropdownMenuItem(
-            value: SeriesSortBy.ratingHighLow, child: Text('Top Rated')),
+          value: SeriesSortBy.ratingHighLow,
+          child: Text('Top Rated'),
+        ),
       ],
       onChanged: (v) {
         if (v != null) ref.read(seriesSortProvider.notifier).state = v;
@@ -951,8 +954,17 @@ class _SeriesPosterCardState extends ConsumerState<_SeriesPosterCard> {
             _pressed = false;
           }),
           child: GestureDetector(
-            onTap: () => ref.read(selectedSeriesStreamProvider.notifier).state =
-                widget.series,
+            onTap: () {
+              final query = ref.read(seriesSearchQueryProvider);
+              if (query.isNotEmpty) {
+                BehaviorService.instance.recordSearchClick(
+                  widget.series.seriesId,
+                );
+              }
+              BehaviorService.instance.recordOpen(widget.series.seriesId);
+              ref.read(selectedSeriesStreamProvider.notifier).state =
+                  widget.series;
+            },
             onTapDown: (_) => setState(() => _pressed = true),
             onTapUp: (_) => setState(() => _pressed = false),
             onTapCancel: () => setState(() => _pressed = false),

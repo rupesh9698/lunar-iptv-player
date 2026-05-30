@@ -6,6 +6,8 @@ import 'package:flutter_animate/flutter_animate.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
+import 'package:lunar_iptv_player/core/utils/focus_utils.dart';
+import 'package:lunar_iptv_player/widgets/continue_watching_row.dart';
 import 'package:upgrader/upgrader.dart';
 
 import '../../core/theme/app_theme.dart';
@@ -60,12 +62,18 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
         child: Scaffold(
           backgroundColor: AppTheme.background,
           body: SafeArea(
-            child: Row(
-              children: [
-                const SizedBox(width: 280, child: _LeftPanel()),
-                const VerticalDivider(color: AppTheme.divider, width: 1),
-                Expanded(child: _RightPanel(cache: CacheService.instance)),
-              ],
+            child: ScreenFocusScope(
+              debugLabel: 'HomeScreen',
+              child: Container(
+                color: AppTheme.background,
+                child: Row(
+                  children: [
+                    SizedBox(width: 280, child: const _LeftPanel()),
+                    const VerticalDivider(color: AppTheme.divider, width: 1),
+                    Expanded(child: _RightPanel(cache: CacheService.instance)),
+                  ],
+                ),
+              ),
             ),
           ),
         ),
@@ -591,7 +599,7 @@ class _LiveClockState extends State<_LiveClock> {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// RIGHT PANEL — SCROLLABLE nav cards (ConsumerWidget to access ref)
+// RIGHT PANEL
 // ─────────────────────────────────────────────────────────────────────────────
 class _RightPanel extends ConsumerWidget {
   final CacheService cache;
@@ -599,13 +607,20 @@ class _RightPanel extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final flags = ref.watch(contentFlagsProvider);
+    // Defensive contentFlags — if provider throws, show all cards
+    ({bool hasLive, bool hasVod, bool hasSeries}) flags;
+    try {
+      flags = ref.watch(contentFlagsProvider);
+    } catch (_) {
+      flags = (hasLive: true, hasVod: true, hasSeries: true);
+    }
 
     return SingleChildScrollView(
       padding: const EdgeInsets.all(24),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          // ── Header ────────────────────────────────────────────────────────
           const Text(
             'Browse',
             style: TextStyle(
@@ -614,8 +629,15 @@ class _RightPanel extends ConsumerWidget {
               fontWeight: FontWeight.w700,
             ),
           ).animate().fadeIn(duration: 400.ms).slideX(begin: -0.1),
-          const SizedBox(height: 20),
 
+          const SizedBox(height: 16),
+
+          // ── Continue Watching ──────────────────────────────────────────────
+          const ContinueWatchingRow(),
+
+          const SizedBox(height: 16),
+
+          // ── Nav Cards Grid ─────────────────────────────────────────────────
           GridView.count(
             crossAxisCount: 2,
             crossAxisSpacing: 20,
@@ -643,7 +665,7 @@ class _RightPanel extends ConsumerWidget {
                   .fadeIn(delay: 0.ms, duration: 450.ms)
                   .slideY(begin: 0.18, curve: Curves.easeOutCubic),
 
-              // Movies — hide for M3U or Xtream without VOD data
+              // Movies
               if (flags.hasVod)
                 _NavCard(
                       label: 'Movies',
@@ -663,7 +685,7 @@ class _RightPanel extends ConsumerWidget {
                     .fadeIn(delay: 100.ms, duration: 450.ms)
                     .slideY(begin: 0.18, curve: Curves.easeOutCubic),
 
-              // Series — hide for M3U or Xtream without series data
+              // Series
               if (flags.hasSeries)
                 _NavCard(
                       label: 'Series',
@@ -739,110 +761,72 @@ class _NavCard extends StatefulWidget {
 }
 
 class _NavCardState extends State<_NavCard> {
-  bool _hover = false;
-  bool _focused = false;
-  bool _pressed = false;
-
-  double get _shadowAlpha => _hover || _focused ? 0.55 : 0.35;
-  double get _shadowBlur => _hover || _focused ? 32 : 22;
-
   @override
   Widget build(BuildContext context) {
-    return Focus(
-      onFocusChange: (f) => setState(() => _focused = f),
-      onKeyEvent: (_, event) {
-        // Handles: TV remote Select/Enter, keyboard Enter/Space, gamepad A
-        if (event is KeyDownEvent &&
-            (event.logicalKey == LogicalKeyboardKey.select ||
-                event.logicalKey == LogicalKeyboardKey.enter ||
-                event.logicalKey == LogicalKeyboardKey.space ||
-                event.logicalKey == LogicalKeyboardKey.gameButtonA)) {
-          setState(() => _pressed = true);
-          widget.onTap();
-          return KeyEventResult.handled;
-        }
-        if (event is KeyUpEvent) {
-          setState(() => _pressed = false);
-          return KeyEventResult.ignored;
-        }
-        return KeyEventResult.ignored;
-      },
-      child: MouseRegion(
-        cursor: SystemMouseCursors.click,
-        onEnter: (_) => setState(() => _hover = true),
-        onExit: (_) => setState(() {
-          _hover = false;
-          _pressed = false;
-        }),
-        child: GestureDetector(
-          onTap: widget.onTap,
-          onTapDown: (_) => setState(() => _pressed = true),
-          onTapUp: (_) => setState(() => _pressed = false),
-          onTapCancel: () => setState(() => _pressed = false),
-          child: AnimatedScale(
-            scale: _pressed
-                ? 0.96
-                : (_hover || _focused)
-                ? 1.04
-                : 1.0,
+    return TvFocusable(
+      onActivate: widget.onTap,
+      builder: (focused, pressed) {
+        return AnimatedScale(
+          scale: pressed
+              ? 0.95
+              : focused
+              ? 1.04
+              : 1.0,
+          duration: const Duration(milliseconds: 150),
+          child: AnimatedContainer(
             duration: const Duration(milliseconds: 150),
-            child: AnimatedContainer(
-              duration: const Duration(milliseconds: 150),
-              curve: Curves.easeOutCubic,
-              decoration: BoxDecoration(
-                gradient: widget.gradient,
-                borderRadius: BorderRadius.circular(20),
-                // White border appears on TV-remote/keyboard focus
-                border: _focused
-                    ? Border.all(
-                        color: Colors.white.withValues(alpha: 0.75),
-                        width: 2.5,
-                      )
-                    : null,
-                boxShadow: [
-                  BoxShadow(
-                    color: widget.gradient.colors.first.withValues(
-                      alpha: _shadowAlpha,
-                    ),
-                    blurRadius: _shadowBlur,
-                    offset: const Offset(0, 10),
+            decoration: BoxDecoration(
+              gradient: widget.gradient,
+              borderRadius: BorderRadius.circular(20),
+              border: focused
+                  ? Border.all(
+                      color: Colors.white.withValues(alpha: 0.80),
+                      width: 3.0,
+                    )
+                  : null,
+              boxShadow: [
+                BoxShadow(
+                  color: widget.gradient.colors.first.withValues(
+                    alpha: focused ? 0.60 : 0.35,
                   ),
-                ],
-              ),
-              padding: const EdgeInsets.all(24),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Icon(widget.icon, color: Colors.white, size: 32)
-                      .animate(target: _hover || _focused ? 1 : 0)
-                      .scaleXY(
-                        end: 1.15,
-                        duration: 200.ms,
-                        curve: Curves.easeOut,
-                      ),
-                  const Spacer(),
-                  Text(
-                    widget.label,
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontSize: 18,
-                      fontWeight: FontWeight.w700,
+                  blurRadius: focused ? 36 : 22,
+                  offset: const Offset(0, 10),
+                ),
+              ],
+            ),
+            padding: const EdgeInsets.all(24),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Icon(widget.icon, color: Colors.white, size: 32)
+                    .animate(target: focused ? 1 : 0)
+                    .scaleXY(
+                      end: 1.15,
+                      duration: 200.ms,
+                      curve: Curves.easeOut,
                     ),
+                const Spacer(),
+                Text(
+                  widget.label,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 18,
+                    fontWeight: FontWeight.w700,
                   ),
-                  const SizedBox(height: 4),
-                  Text(
-                    widget.sublabel,
-                    style: TextStyle(
-                      color: Colors.white.withValues(alpha: 0.85),
-                      fontSize: 12.5,
-                    ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  widget.sublabel,
+                  style: TextStyle(
+                    color: Colors.white.withValues(alpha: 0.85),
+                    fontSize: 12.5,
                   ),
-                ],
-              ),
+                ),
+              ],
             ),
           ),
-        ),
-      ),
+        );
+      },
     );
   }
 }

@@ -1,4 +1,5 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:lunar_iptv_player/services/behavior_service.dart';
 import 'package:lunar_iptv_player/services/cache_service.dart';
 
 import '../core/constants/app_constants.dart';
@@ -59,9 +60,21 @@ final sortedSeriesListProvider = Provider<AsyncValue<List<Series>>>((ref) {
           });
         if (filtered.length > 100) filtered = filtered.sublist(0, 100);
       case SeriesFilter.all:
-        filtered = query.isEmpty
-            ? List.from(list)
-            : list.where((s) => s.name.toLowerCase().contains(query)).toList();
+        if (query.isEmpty) {
+          filtered = List.from(list);
+        } else {
+          final scored =
+              list.where((s) => s.name.toLowerCase().contains(query)).map((s) {
+                final name = s.name.toLowerCase();
+                final textScore = name.startsWith(query) ? 1.0 : 0.5;
+                final finalScore = BehaviorService.instance.getSearchScore(
+                  s.seriesId,
+                  textScore,
+                );
+                return (series: s, score: finalScore);
+              }).toList()..sort((a, b) => b.score.compareTo(a.score));
+          filtered = scored.map((e) => e.series).toList();
+        }
     }
 
     if (filter != SeriesFilter.all && query.isNotEmpty) {

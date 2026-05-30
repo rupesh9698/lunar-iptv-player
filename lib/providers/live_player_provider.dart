@@ -5,8 +5,6 @@ import 'package:lunar_iptv_player/services/stream_proxy_service.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
 
-import '../services/web_proxy_client.dart';
-
 // ── Player State ──────────────────────────────────────────────────────────────
 class LivePlayerState {
   final bool isInitialized;
@@ -204,7 +202,9 @@ class LivePlayerNotifier extends StateNotifier<LivePlayerState> {
   }
 
   void clearError() {
-    if (mounted) state = state.copyWith(error: '', isReconnecting: false);
+    if (mounted) {
+      state = state.copyWith(error: '', isReconnecting: false);
+    }
   }
 
   @override

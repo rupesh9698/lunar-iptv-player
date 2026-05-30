@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:lunar_iptv_player/services/behavior_service.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../../../core/theme/app_theme.dart';
@@ -370,6 +371,22 @@ class MovieDetailPanel extends ConsumerWidget {
                 onPressed: service == null
                     ? null
                     : () {
+                        // Record genre frequency for "For You" feature (Step 3)
+                        if (vodInfo?.info?.genre != null) {
+                          for (final g in vodInfo!.info!.genre!.split(',')) {
+                            final trimmed = g.trim();
+                            if (trimmed.isNotEmpty) {
+                              BehaviorService.instance.recordGenreAccess(
+                                trimmed,
+                              );
+                            }
+                          }
+                        }
+                        // Start watch timer (Continue Watching)
+                        BehaviorService.instance.startWatchTimer(
+                          movie.streamId,
+                        );
+
                         ref
                             .read(recentlyViewedVodProvider.notifier)
                             .add(movie.streamId);
@@ -438,8 +455,7 @@ class MovieDetailPanel extends ConsumerWidget {
             child: OutlinedButton.icon(
               onPressed: () {
                 final url = service.getVodUrl(movie.streamId, ext);
-                launchUrl(Uri.parse(url),
-                    mode: LaunchMode.externalApplication);
+                launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
               },
               icon: const Icon(Icons.download_outlined, size: 18),
               label: const Text('Download'),
@@ -448,7 +464,8 @@ class MovieDetailPanel extends ConsumerWidget {
                 side: const BorderSide(color: AppTheme.success),
                 padding: const EdgeInsets.symmetric(vertical: 11),
                 shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12)),
+                  borderRadius: BorderRadius.circular(12),
+                ),
               ),
             ),
           ),

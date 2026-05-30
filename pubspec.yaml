@@ -16,7 +16,7 @@ publish_to: "none" # Remove this line if you wish to publish to pub.dev
 # https://developer.apple.com/library/archive/documentation/General/Reference/InfoPlistKeyReference/Articles/CoreFoundationKeys.html
 # In Windows, build-name is used as the major, minor, and patch parts
 # of the product and file versions while build-number is used as the build suffix.
-version: 1.0.1+2
+version: 1.0.2+3
 
 environment:
   sdk: ^3.11.5
@@ -85,6 +85,8 @@ dependencies:
   upgrader: ^13.3.0
   window_manager: ^0.3.9
   flutter_cache_manager: ^3.4.1
+  flutter_native_splash: ^2.4.1
+  fl_chart: ^0.69.0
 
   # The following adds the Cupertino Icons font to your application.
   # Use with the CupertinoIcons class for iOS style icons.
@@ -142,12 +144,30 @@ flutter:
   # For details regarding fonts from package dependencies,
   # see https://flutter.dev/to/font-from-package
 
+# flutter build windows --release
+# dart run msix:create
 msix_config:
   display_name: Lunar IPTV Player
   publisher_display_name: Solvix Studio
   identity_name: SolvixStudio.LunarIPTVPlayer
   publisher: "CN=40CD255E-554A-46EA-95B2-750577ACCF64"
-  msix_version: 1.0.1.0
+  msix_version: 1.0.2.0
   logo_path: windows/runner/resources/app_icon.ico
   store: true
   capabilities: internetClient
+
+# ── Native Splash Screen Setup ──────────────────────────────────────────────
+# dart run flutter_native_splash:create
+flutter_native_splash:
+  color: "#0A0C14"
+  image: assets/images/logo.png
+  image_dark: assets/images/logo.png
+  color_dark: "#0A0C14"
+  android_12:
+    color: "#0A0C14"
+    image: assets/images/logo.png
+    color_dark: "#0A0C14"
+    image_dark: assets/images/logo.png
+  fullscreen: true
+  android_gravity: center
+  ios_content_mode: center

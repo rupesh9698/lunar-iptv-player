@@ -292,14 +292,17 @@ class _AddPlaylistScreenState extends ConsumerState<AddPlaylistScreen> {
 
       // Universal name uniqueness across ALL playlists (any type)
       final isDupName = existing.any(
-              (p) => p.name.toLowerCase() == name.toLowerCase());
+        (p) => p.name.toLowerCase() == name.toLowerCase(),
+      );
       if (isDupName) {
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-            content: Text('A playlist with this name already exists'),
-            backgroundColor: AppTheme.error,
-            behavior: SnackBarBehavior.floating,
-          ));
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('A playlist with this name already exists'),
+              backgroundColor: AppTheme.error,
+              behavior: SnackBarBehavior.floating,
+            ),
+          );
         }
         setState(() => _isAdding = false);
         return;
@@ -311,41 +314,54 @@ class _AddPlaylistScreenState extends ConsumerState<AddPlaylistScreen> {
         final isDupUrl = existing.any((p) => p.isM3u && p.m3uUrl == m3uUrl);
         if (isDupUrl) {
           if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-              content: Text('A playlist with this URL already exists'),
-              backgroundColor: AppTheme.error,
-              behavior: SnackBarBehavior.floating,
-            ));
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('A playlist with this URL already exists'),
+                backgroundColor: AppTheme.error,
+                behavior: SnackBarBehavior.floating,
+              ),
+            );
           }
           setState(() => _isAdding = false);
           return;
         }
         playlist = Playlist(
-          id: const Uuid().v4(), name: name,
+          id: const Uuid().v4(),
+          name: name,
           addedAt: DateTime.now(),
-          type: PlaylistType.m3u, m3uUrl: m3uUrl,
+          type: PlaylistType.m3u,
+          m3uUrl: m3uUrl,
         );
       } else {
         // Xtream: check credential uniqueness only
         final server = _serverCtrl.text.trim();
-        final user   = _usernameCtrl.text.trim();
-        final isDupCreds = existing.any((p) =>
-        p.serverUrl == server && p.username == user &&
-            p.password == _passwordCtrl.text.trim());
+        final user = _usernameCtrl.text.trim();
+        final isDupCreds = existing.any(
+          (p) =>
+              p.serverUrl == server &&
+              p.username == user &&
+              p.password == _passwordCtrl.text.trim(),
+        );
         if (isDupCreds) {
           if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-              content: Text('A playlist with these credentials already exists'),
-              backgroundColor: AppTheme.error,
-              behavior: SnackBarBehavior.floating,
-            ));
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text(
+                  'A playlist with these credentials already exists',
+                ),
+                backgroundColor: AppTheme.error,
+                behavior: SnackBarBehavior.floating,
+              ),
+            );
           }
           setState(() => _isAdding = false);
           return;
         }
         playlist = Playlist(
-          id: const Uuid().v4(), name: name,
-          serverUrl: server, username: user,
+          id: const Uuid().v4(),
+          name: name,
+          serverUrl: server,
+          username: user,
           password: _passwordCtrl.text.trim(),
           addedAt: DateTime.now(),
         );
@@ -356,8 +372,9 @@ class _AddPlaylistScreenState extends ConsumerState<AddPlaylistScreen> {
       if (mounted) context.go('/sync');
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error: $e')));
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Error: $e')));
       }
     } finally {
       if (mounted) setState(() => _isAdding = false);
@@ -371,7 +388,8 @@ class _AddPlaylistScreenState extends ConsumerState<AddPlaylistScreen> {
         decoration: const BoxDecoration(
           gradient: LinearGradient(
             colors: [Color(0xFF0A0C14), Color(0xFF0E1220)],
-            begin: Alignment.topLeft, end: Alignment.bottomRight,
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
           ),
         ),
         child: SafeArea(
@@ -474,80 +492,101 @@ class _AddPlaylistScreenState extends ConsumerState<AddPlaylistScreen> {
         border: Border.all(color: AppTheme.divider),
       ),
       padding: const EdgeInsets.all(4),
-      child: Row(children: [
-        Expanded(child: _ModeBtn(
-          label: 'Xtream Codes',
-          icon: Icons.api_outlined,
-          active: _mode == PlaylistType.xtream,
-          onTap: () {
-            setState(() {
-              _mode = PlaylistType.xtream;
-              _isTestSuccessful = false;
-              _testResult = null;
-              _testError  = null;
-            });
-          },
-        )),
-        Expanded(child: _ModeBtn(
-          label: 'M3U URL',
-          icon: Icons.subscriptions_outlined,
-          active: _mode == PlaylistType.m3u,
-          onTap: () {
-            setState(() {
-              _mode = PlaylistType.m3u;
-              _isTestSuccessful = false;
-              _testResult = null;
-              _testError  = null;
-            });
-          },
-        )),
-      ]),
+      child: Row(
+        children: [
+          Expanded(
+            child: _ModeBtn(
+              label: 'Xtream Codes',
+              icon: Icons.api_outlined,
+              active: _mode == PlaylistType.xtream,
+              onTap: () {
+                setState(() {
+                  _mode = PlaylistType.xtream;
+                  _isTestSuccessful = false;
+                  _testResult = null;
+                  _testError = null;
+                });
+              },
+            ),
+          ),
+          Expanded(
+            child: _ModeBtn(
+              label: 'M3U URL',
+              icon: Icons.subscriptions_outlined,
+              active: _mode == PlaylistType.m3u,
+              onTap: () {
+                setState(() {
+                  _mode = PlaylistType.m3u;
+                  _isTestSuccessful = false;
+                  _testResult = null;
+                  _testError = null;
+                });
+              },
+            ),
+          ),
+        ],
+      ),
     ).animate().fadeIn(delay: 150.ms);
   }
 
   Widget _buildM3uFields() {
-    return Column(children: [
-      _buildTextField(
-        controller: _nameCtrl,
-        focusNode: _nameFocus,
-        nextFocus: _m3uUrlFocus,
-        label: 'Playlist name',
-        hint: 'My IPTV',
-        icon: Icons.playlist_play,
-        validator: (v) =>
-        (v == null || v.trim().isEmpty) ? 'Enter a playlist name' : null,
-      ).animate().slideX(begin: -0.2, delay: 300.ms),
+    return Column(
+      children: [
+        _buildTextField(
+          controller: _nameCtrl,
+          focusNode: _nameFocus,
+          nextFocus: _m3uUrlFocus,
+          label: 'Playlist name',
+          hint: 'My IPTV',
+          icon: Icons.playlist_play,
+          validator: (v) =>
+              (v == null || v.trim().isEmpty) ? 'Enter a playlist name' : null,
+        ).animate().slideX(begin: -0.2, delay: 300.ms),
 
-      const SizedBox(height: 18),
+        const SizedBox(height: 18),
 
-      TextFormField(
-        controller: _m3uUrlCtrl,
-        focusNode: _m3uUrlFocus,
-        keyboardType: TextInputType.url,
-        textInputAction: TextInputAction.done,
-        onFieldSubmitted: (_) => _testBtnFocus.requestFocus(),
-        style: const TextStyle(color: AppTheme.textPrimary, fontSize: 16),
-        validator: (v) {
-          if (v == null || v.trim().isEmpty) return 'M3U URL is required';
-          final uri = Uri.tryParse(v.trim());
-          if (uri == null || !uri.hasAuthority) return 'Enter a valid URL';
-          return null;
-        },
-        decoration: InputDecoration(
-          labelText: 'M3U Playlist URL',
-          hintText: 'http://server.com/playlist.m3u',
-          prefixIcon: const Icon(Icons.link, color: AppTheme.textMuted, size: 22),
-          labelStyle: const TextStyle(color: AppTheme.primary, fontSize: 14),
-          contentPadding: const EdgeInsets.symmetric(vertical: 18, horizontal: 16),
-          border: OutlineInputBorder(borderRadius: BorderRadius.circular(14),
-              borderSide: const BorderSide(color: AppTheme.divider)),
-          enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(14),
-              borderSide: const BorderSide(color: AppTheme.divider)),
-          focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(14),
-              borderSide: const BorderSide(color: AppTheme.primary, width: 2)),
-        ),
-      ).animate().slideX(begin: -0.2, delay: 350.ms),
-    ]);
+        TextFormField(
+          controller: _m3uUrlCtrl,
+          focusNode: _m3uUrlFocus,
+          keyboardType: TextInputType.url,
+          textInputAction: TextInputAction.done,
+          onFieldSubmitted: (_) => _testBtnFocus.requestFocus(),
+          style: const TextStyle(color: AppTheme.textPrimary, fontSize: 16),
+          validator: (v) {
+            if (v == null || v.trim().isEmpty) return 'M3U URL is required';
+            final uri = Uri.tryParse(v.trim());
+            if (uri == null || !uri.hasAuthority) return 'Enter a valid URL';
+            return null;
+          },
+          decoration: InputDecoration(
+            labelText: 'M3U Playlist URL',
+            hintText: 'http://server.com/playlist.m3u',
+            prefixIcon: const Icon(
+              Icons.link,
+              color: AppTheme.textMuted,
+              size: 22,
+            ),
+            labelStyle: const TextStyle(color: AppTheme.primary, fontSize: 14),
+            contentPadding: const EdgeInsets.symmetric(
+              vertical: 18,
+              horizontal: 16,
+            ),
+            border: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(14),
+              borderSide: const BorderSide(color: AppTheme.divider),
+            ),
+            enabledBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(14),
+              borderSide: const BorderSide(color: AppTheme.divider),
+            ),
+            focusedBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(14),
+              borderSide: const BorderSide(color: AppTheme.primary, width: 2),
+            ),
+          ),
+        ).animate().slideX(begin: -0.2, delay: 350.ms),
+      ],
+    );
   }
 
   Widget _buildFormFields() {
@@ -707,17 +746,27 @@ class _AddPlaylistScreenState extends ConsumerState<AddPlaylistScreen> {
           borderRadius: BorderRadius.circular(14),
           border: Border.all(color: AppTheme.success.withValues(alpha: 0.3)),
         ),
-        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          const Row(children: [
-            Icon(Icons.check_circle, color: AppTheme.success, size: 20),
-            SizedBox(width: 8),
-            Text('Valid M3U Playlist',
-                style: TextStyle(color: AppTheme.success, fontWeight: FontWeight.w600)),
-          ]),
-          const SizedBox(height: 12),
-          _InfoRow('Channels',   '$_m3uChannelCount'),
-          _InfoRow('Categories', '$_m3uCategoryCount'),
-        ]),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Row(
+              children: [
+                Icon(Icons.check_circle, color: AppTheme.success, size: 20),
+                SizedBox(width: 8),
+                Text(
+                  'Valid M3U Playlist',
+                  style: TextStyle(
+                    color: AppTheme.success,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            _InfoRow('Channels', '$_m3uChannelCount'),
+            _InfoRow('Categories', '$_m3uCategoryCount'),
+          ],
+        ),
       ).animate().fadeIn();
     }
     if (_testResult != null) {
@@ -933,8 +982,12 @@ class _ModeBtn extends StatefulWidget {
   final IconData icon;
   final bool active;
   final VoidCallback onTap;
-  const _ModeBtn({required this.label, required this.icon,
-    required this.active, required this.onTap});
+  const _ModeBtn({
+    required this.label,
+    required this.icon,
+    required this.active,
+    required this.onTap,
+  });
 
   @override
   State<_ModeBtn> createState() => _ModeBtnState();
@@ -950,9 +1003,10 @@ class _ModeBtnState extends State<_ModeBtn> {
       onKeyEvent: (_, e) {
         if (e is KeyDownEvent &&
             (e.logicalKey == LogicalKeyboardKey.select ||
-                e.logicalKey == LogicalKeyboardKey.enter  ||
+                e.logicalKey == LogicalKeyboardKey.enter ||
                 e.logicalKey == LogicalKeyboardKey.space)) {
-          widget.onTap(); return KeyEventResult.handled;
+          widget.onTap();
+          return KeyEventResult.handled;
         }
         return KeyEventResult.ignored;
       },
@@ -970,17 +1024,27 @@ class _ModeBtnState extends State<_ModeBtn> {
                   ? Border.all(color: Colors.white.withValues(alpha: 0.4))
                   : null,
             ),
-            child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
-              Icon(widget.icon,
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(
+                  widget.icon,
                   size: 15,
-                  color: widget.active ? Colors.white : AppTheme.textSecondary),
-              const SizedBox(width: 6),
-              Text(widget.label,
+                  color: widget.active ? Colors.white : AppTheme.textSecondary,
+                ),
+                const SizedBox(width: 6),
+                Text(
+                  widget.label,
                   style: TextStyle(
-                    fontSize: 13, fontWeight: FontWeight.w600,
-                    color: widget.active ? Colors.white : AppTheme.textSecondary,
-                  )),
-            ]),
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                    color: widget.active
+                        ? Colors.white
+                        : AppTheme.textSecondary,
+                  ),
+                ),
+              ],
+            ),
           ),
         ),
       ),

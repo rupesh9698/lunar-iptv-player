@@ -49,7 +49,9 @@ class _SyncScreenState extends ConsumerState<SyncScreen> {
   void initState() {
     super.initState();
     _clockTimer = Timer.periodic(
-        const Duration(seconds: 1), (_) => setState(() => _now = DateTime.now()));
+      const Duration(seconds: 1),
+      (_) => setState(() => _now = DateTime.now()),
+    );
     WidgetsBinding.instance.addPostFrameCallback((_) => _runSync());
   }
 
@@ -99,11 +101,26 @@ class _SyncScreenState extends ConsumerState<SyncScreen> {
       return;
     }
 
-    // Set cache context for this playlist
-    CacheService.instance.setActivePlaylist(playlist.id);
+    final cache = CacheService.instance;
+    cache.setActivePlaylist(playlist.id);
 
     setState(() => _hasAnyFailure = false);
-    final cache = CacheService.instance;
+
+    // ── Guard: skip sync if data exists AND is fresh AND not manual ──────────
+    // This prevents the double-sync-on-restart bug.
+    if (!widget.isManualRefresh) {
+      final hasData =
+          cache.loadLiveStreams(ignoreExpiry: true)?.isNotEmpty ?? false;
+      final isFresh = playlist.isM3u
+          ? hasData // M3U: any cached data = fresh (no daily expiry)
+          : hasData && !cache.isLiveStale(); // Xtream: check 24h expiry
+
+      if (isFresh) {
+        // Data is ready — go straight to home without showing sync screen
+        if (mounted) context.go('/home');
+        return;
+      }
+    }
 
     if (playlist.isM3u) {
       // ── M3U sync ────────────────────────────────────────────────────────
@@ -118,8 +135,12 @@ class _SyncScreenState extends ConsumerState<SyncScreen> {
           await cache.saveLiveCategories(cats);
           await cache.saveLiveStreams(streams);
           await cache.saveContentFlags(
-              hasLive: streams.isNotEmpty, hasVod: false, hasSeries: false);
-          _items[0].subtitle = '${streams.length} channels · ${cats.length} categories';
+            hasLive: streams.isNotEmpty,
+            hasVod: false,
+            hasSeries: false,
+          );
+          _items[0].subtitle =
+              '${streams.length} channels · ${cats.length} categories';
         });
       } else {
         _markDone(0);
@@ -132,8 +153,8 @@ class _SyncScreenState extends ConsumerState<SyncScreen> {
       setState(() {
         _items = [
           _SyncItem('Live TV', Icons.tv_outlined),
-          _SyncItem('Movies',  Icons.video_library_outlined),
-          _SyncItem('Series',  Icons.theaters_outlined),
+          _SyncItem('Movies', Icons.video_library_outlined),
+          _SyncItem('Series', Icons.theaters_outlined),
         ];
       });
 
@@ -149,9 +170,13 @@ class _SyncScreenState extends ConsumerState<SyncScreen> {
       if (widget.isManualRefresh || cache.isLiveStale()) {
         await _step(0, 'Fetching Live TV channels...', () async {
           final cats = await _withRetry(
-                  () => service.getLiveCategories(), operationName: 'Live TV Categories');
+            () => service.getLiveCategories(),
+            operationName: 'Live TV Categories',
+          );
           final ch = await _withRetry(
-                  () => service.getLiveStreams(),    operationName: 'Live TV Streams');
+            () => service.getLiveStreams(),
+            operationName: 'Live TV Streams',
+          );
           await cache.saveLiveCategories(cats);
           await cache.saveLiveStreams(ch);
           _items[0].subtitle = '${ch.length} channels';
@@ -165,10 +190,14 @@ class _SyncScreenState extends ConsumerState<SyncScreen> {
       // Movies
       if (widget.isManualRefresh || cache.isVodStale()) {
         await _step(1, 'Fetching Movies library...', () async {
-          final cats    = await _withRetry(
-                  () => service.getVodCategories(), operationName: 'Movies Categories');
+          final cats = await _withRetry(
+            () => service.getVodCategories(),
+            operationName: 'Movies Categories',
+          );
           final streams = await _withRetry(
-                  () => service.getVodStreams(),    operationName: 'Movies Library');
+            () => service.getVodStreams(),
+            operationName: 'Movies Library',
+          );
           await cache.saveVodCategories(cats);
           await cache.saveVodStreams(streams);
           _items[1].subtitle = '${streams.length} movies';
@@ -182,10 +211,14 @@ class _SyncScreenState extends ConsumerState<SyncScreen> {
       // Series
       if (widget.isManualRefresh || cache.isSeriesStale()) {
         await _step(2, 'Fetching Series library...', () async {
-          final cats   = await _withRetry(
-                  () => service.getSeriesCategories(), operationName: 'Series Categories');
+          final cats = await _withRetry(
+            () => service.getSeriesCategories(),
+            operationName: 'Series Categories',
+          );
           final series = await _withRetry(
-                  () => service.getSeries(),           operationName: 'Series Library');
+            () => service.getSeries(),
+            operationName: 'Series Library',
+          );
           await cache.saveSeriesCategories(cats);
           await cache.saveSeriesList(series);
           _items[2].subtitle = '${series.length} series';
@@ -193,11 +226,15 @@ class _SyncScreenState extends ConsumerState<SyncScreen> {
         });
       } else {
         _markDone(2);
-        hasSeries = cache.loadSeriesList(ignoreExpiry: true)?.isNotEmpty ?? true;
+        hasSeries =
+            cache.loadSeriesList(ignoreExpiry: true)?.isNotEmpty ?? true;
       }
 
       await cache.saveContentFlags(
-          hasLive: hasLive, hasVod: hasVod, hasSeries: hasSeries);
+        hasLive: hasLive,
+        hasVod: hasVod,
+        hasSeries: hasSeries,
+      );
 
       ref.invalidate(liveCategoriesProvider);
       ref.invalidate(liveStreamsProvider);
@@ -455,7 +492,8 @@ class _SyncCard extends StatelessWidget {
               alignment: Alignment.center,
               children: [
                 Container(
-                  width: 90, height: 90,
+                  width: 90,
+                  height: 90,
                   decoration: BoxDecoration(
                     shape: BoxShape.circle,
                     color: AppTheme.surfaceVariant,
@@ -476,7 +514,8 @@ class _SyncCard extends StatelessWidget {
                 ),
                 if (isLoading)
                   SizedBox(
-                    width: 108, height: 108,
+                    width: 108,
+                    height: 108,
                     child: CircularProgressIndicator(
                       strokeWidth: 4,
                       strokeCap: StrokeCap.round,

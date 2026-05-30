@@ -30,10 +30,6 @@ class ShowChannelNumberNotifier extends StateNotifier<bool> {
   }
 }
 
-// ── Last Watched Live (for Remember Watch Position) ───────────────────────────
-const _kLastLiveCategoryKey = 'last_live_category_id';
-const _kLastLiveChannelKey = 'last_live_channel_id';
-
 // ── Last Watched Live — per playlist ─────────────────────────────────────────
 typedef _LastWatched = ({String? categoryId, String? channelId});
 
