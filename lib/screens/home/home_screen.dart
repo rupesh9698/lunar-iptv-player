@@ -7,6 +7,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 import 'package:lunar_iptv_player/core/utils/focus_utils.dart';
+import 'package:lunar_iptv_player/providers/behavior_providers.dart';
+import 'package:lunar_iptv_player/services/behavior_service.dart';
 import 'package:lunar_iptv_player/widgets/continue_watching_row.dart';
 import 'package:upgrader/upgrader.dart';
 
@@ -300,7 +302,8 @@ class _LeftPanel extends ConsumerWidget {
     CacheService.instance.setActivePlaylist(playlist.id);
     await ref.read(playlistsProvider.notifier).setActive(playlist.id);
 
-    // Invalidate all content so they reload from new playlist's cache
+    BehaviorService.instance.setPlaylist(playlist.id);
+    ref.read(continueWatchingProvider.notifier).refresh();
     ref.invalidate(accountInfoProvider);
     ref.invalidate(liveCategoriesProvider);
     ref.invalidate(liveStreamsProvider);
@@ -719,6 +722,22 @@ class _RightPanel extends ConsumerWidget {
                   )
                   .animate()
                   .fadeIn(delay: 300.ms, duration: 450.ms)
+                  .slideY(begin: 0.18, curve: Curves.easeOutCubic),
+
+              // Stats / Dashboard
+              _NavCard(
+                    label: 'My Stats',
+                    sublabel: 'Watch history & insights',
+                    icon: Icons.bar_chart_rounded,
+                    gradient: const LinearGradient(
+                      colors: [Color(0xFF7B61FF), Color(0xFF4F8EF7)],
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
+                    ),
+                    onTap: () => context.push('/stats'),
+                  )
+                  .animate()
+                  .fadeIn(delay: 350.ms, duration: 450.ms)
                   .slideY(begin: 0.18, curve: Curves.easeOutCubic),
             ],
           ),

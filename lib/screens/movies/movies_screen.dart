@@ -5,8 +5,10 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
+import 'package:lunar_iptv_player/providers/behavior_providers.dart';
 import 'package:lunar_iptv_player/services/behavior_service.dart';
 import 'package:lunar_iptv_player/services/storage_service.dart';
+import 'package:lunar_iptv_player/widgets/for_you_section.dart';
 
 import '../../core/theme/app_theme.dart';
 import '../../models/xtream_models.dart';
@@ -637,10 +639,45 @@ class _MoviesContentState extends ConsumerState<_MoviesContent> {
   }
 }
 
-class _MoviesGrid extends ConsumerWidget {
+class _MoviesGrid extends ConsumerStatefulWidget {
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<_MoviesGrid> createState() => _MoviesGridState();
+}
+
+class _MoviesGridState extends ConsumerState<_MoviesGrid> {
+  int _displayLimit = 30;
+  final ScrollController _scrollCtrl = ScrollController();
+
+  @override
+  void initState() {
+    super.initState();
+
+    @override
+    void initState() {
+      super.initState();
+      _scrollCtrl.addListener(_onScroll);
+    }
+  }
+
+  void _onScroll() {
+    if (!mounted) return;
+    final pos = _scrollCtrl.position;
+    if (pos.pixels > pos.maxScrollExtent - 600) {
+      setState(() => _displayLimit = (_displayLimit + 30).clamp(0, 5000));
+    }
+  }
+
+  @override
+  void dispose() {
+    _scrollCtrl.removeListener(_onScroll);
+    _scrollCtrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final streamsAsync = ref.watch(sortedVodStreamsProvider);
+    final forYouAsync = ref.watch(forYouVodProvider);
 
     return streamsAsync.when(
       loading: () => const Center(
@@ -674,16 +711,65 @@ class _MoviesGrid extends ConsumerWidget {
             ),
           );
         }
-        return GridView.builder(
-          padding: const EdgeInsets.all(12),
-          gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
-            maxCrossAxisExtent: 160,
-            childAspectRatio: 0.67,
-            crossAxisSpacing: 10,
-            mainAxisSpacing: 10,
-          ),
-          itemCount: streams.length,
-          itemBuilder: (ctx, i) => _MoviePosterCard(movie: streams[i]),
+
+        // Get For You movies — safely falls back to empty list
+        final forYouMovies = forYouAsync.valueOrNull ?? [];
+
+        return CustomScrollView(
+          controller: _scrollCtrl,
+          slivers: [
+            // ── For You Section ─────────────────────────────────────────────
+            if (forYouMovies.isNotEmpty)
+              SliverToBoxAdapter(
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(12, 12, 12, 4),
+                  child: ForYouSection(
+                    label: 'Recommended for You',
+                    items: forYouMovies
+                        .map(
+                          (m) => (
+                            id: m.streamId,
+                            name: m.name,
+                            imageUrl: m.streamIcon,
+                            rating: m.ratingValue,
+                          ),
+                        )
+                        .toList(),
+                    onTap: (id) {
+                      final movie = forYouMovies.firstWhere(
+                        (m) => m.streamId == id,
+                        orElse: () => forYouMovies.first,
+                      );
+                      ref.read(selectedVodStreamProvider.notifier).state =
+                          movie;
+                      BehaviorService.instance.recordOpen(id);
+                    },
+                  ),
+                ),
+              ),
+
+            // ── Movies Grid ─────────────────────────────────────────────────
+            SliverPadding(
+              padding: const EdgeInsets.all(12),
+              sliver: SliverGrid(
+                gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
+                  maxCrossAxisExtent: 160,
+                  childAspectRatio: 0.67,
+                  crossAxisSpacing: 10,
+                  mainAxisSpacing: 10,
+                ),
+                delegate: SliverChildBuilderDelegate(
+                  (ctx, i) => RepaintBoundary(
+                    child: _MoviePosterCard(movie: streams[i]),
+                  ),
+                  childCount: streams.length.clamp(0, _displayLimit),
+                  // Reuse widgets when scrolling for memory efficiency
+                  addRepaintBoundaries: false,
+                  addAutomaticKeepAlives: false,
+                ),
+              ),
+            ),
+          ],
         );
       },
     );

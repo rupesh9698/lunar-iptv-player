@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_native_splash/flutter_native_splash.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:lunar_iptv_player/screens/stats/stats_screen.dart';
 
 import '../../providers/app_providers.dart';
 import '../../screens/add_playlist/add_playlist_screen.dart';
@@ -38,6 +39,7 @@ final routerProvider = Provider<GoRouter>((ref) {
       GoRoute(path: '/movies', builder: (_, _) => const MoviesScreen()),
       GoRoute(path: '/series', builder: (_, _) => const SeriesScreen()),
       GoRoute(path: '/settings', builder: (_, _) => const SettingsScreen()),
+      GoRoute(path: '/stats', builder: (_, __) => const StatsScreen()),
       GoRoute(
         path: '/player',
         builder: (_, state) {
@@ -48,6 +50,7 @@ final routerProvider = Provider<GoRouter>((ref) {
             imageUrl: extra['imageUrl'] as String?,
             type: extra['type'] as String? ?? 'live',
             id: extra['id'] as String? ?? '',
+            startPosition: (extra['startPosition'] as num?)?.toDouble() ?? 0.0,
           );
         },
       ),

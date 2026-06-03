@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:lunar_iptv_player/screens/live_tv/widgets/time_of_day_strip.dart';
 
 import '../../../core/theme/app_theme.dart';
 import '../../../models/xtream_models.dart';
@@ -76,6 +77,7 @@ class _LiveCategorySidebarState extends ConsumerState<LiveCategorySidebar> {
                     controller: _scrollCtrl,
                     padding: EdgeInsets.zero,
                     children: [
+                      const TimeOfDayStrip(),
                       // ── All Channels ──────────────────────────────────
                       _SidebarTile(
                         icon: Icons.all_inclusive,
@@ -468,6 +470,24 @@ class _SidebarTileState extends State<_SidebarTile> {
   bool _focused = false;
   bool _pressed = false;
 
+  bool get _showFocusRing =>
+      _focused &&
+      FocusManager.instance.highlightMode == FocusHighlightMode.traditional;
+
+  @override
+  void initState() {
+    super.initState();
+    FocusManager.instance.addHighlightModeListener(_onHighlight);
+  }
+
+  void _onHighlight(FocusHighlightMode _) => setState(() {});
+
+  @override
+  void dispose() {
+    FocusManager.instance.removeHighlightModeListener(_onHighlight);
+    super.dispose();
+  }
+
   @override
   Widget build(BuildContext context) {
     return Focus(
@@ -482,10 +502,7 @@ class _SidebarTileState extends State<_SidebarTile> {
             widget.onTap();
             return KeyEventResult.handled;
           }
-          if (event.logicalKey == LogicalKeyboardKey.arrowRight) {
-            FocusScope.of(context).focusInDirection(TraversalDirection.right);
-            return KeyEventResult.handled;
-          }
+          // Right arrow — let scope node handle cross-panel navigation
         }
         if (event is KeyUpEvent) {
           setState(() => _pressed = false);
@@ -514,13 +531,13 @@ class _SidebarTileState extends State<_SidebarTile> {
                   ? AppTheme.selectedItem
                   : _pressed
                   ? AppTheme.surface.withValues(alpha: 0.8)
-                  : (_hover || _focused)
+                  : (_hover || _showFocusRing) // ← was: _focused
                   ? AppTheme.surface
                   : Colors.transparent,
               borderRadius: BorderRadius.circular(8),
               border: widget.isSelected
                   ? Border.all(color: AppTheme.primary.withValues(alpha: 0.25))
-                  : (_focused && !widget.isSelected)
+                  : _showFocusRing // ← was: _focused
                   ? Border.all(
                       color: Colors.white.withValues(alpha: 0.35),
                       width: 1.5,
@@ -593,6 +610,24 @@ class _CategoryTileState extends State<_CategoryTile> {
   bool _focused = false;
   bool _pressed = false;
 
+  bool get _showFocusRing =>
+      _focused &&
+      FocusManager.instance.highlightMode == FocusHighlightMode.traditional;
+
+  @override
+  void initState() {
+    super.initState();
+    FocusManager.instance.addHighlightModeListener(_onHighlight);
+  }
+
+  void _onHighlight(FocusHighlightMode _) => setState(() {});
+
+  @override
+  void dispose() {
+    FocusManager.instance.removeHighlightModeListener(_onHighlight);
+    super.dispose();
+  }
+
   @override
   Widget build(BuildContext context) {
     return Focus(
@@ -607,10 +642,7 @@ class _CategoryTileState extends State<_CategoryTile> {
             widget.onTap();
             return KeyEventResult.handled;
           }
-          if (event.logicalKey == LogicalKeyboardKey.arrowRight) {
-            FocusScope.of(context).focusInDirection(TraversalDirection.right);
-            return KeyEventResult.handled;
-          }
+          // Right arrow: cross-panel navigation handled by _categoryPanelFocus.onKeyEvent
         }
         if (event is KeyUpEvent) {
           setState(() => _pressed = false);
@@ -640,7 +672,7 @@ class _CategoryTileState extends State<_CategoryTile> {
                   ? AppTheme.selectedItem
                   : _pressed
                   ? AppTheme.surface.withValues(alpha: 0.8)
-                  : (_hover || _focused)
+                  : (_hover || _showFocusRing) // ← was: _focused
                   ? AppTheme.surface
                   : Colors.transparent,
               borderRadius: BorderRadius.circular(8),
@@ -648,7 +680,7 @@ class _CategoryTileState extends State<_CategoryTile> {
                   ? const Border(
                       left: BorderSide(color: AppTheme.primary, width: 2),
                     )
-                  : (_focused && !widget.isSelected)
+                  : _showFocusRing // ← was: _focused
                   ? Border.all(
                       color: Colors.white.withValues(alpha: 0.3),
                       width: 1.5,
@@ -681,7 +713,6 @@ class _CategoryTileState extends State<_CategoryTile> {
                     overflow: TextOverflow.ellipsis,
                   ),
                 ),
-                // Parental lock icon
                 if (widget.isLocked)
                   const Padding(
                     padding: EdgeInsets.only(left: 4),
@@ -702,9 +733,10 @@ class _CategoryTileState extends State<_CategoryTile> {
                       ),
                     ),
                   ),
-                // Long-press hint on hover/focus
                 AnimatedOpacity(
-                  opacity: (_hover || _focused) ? 1.0 : 0.0,
+                  opacity: (_hover || _showFocusRing)
+                      ? 1.0
+                      : 0.0, // ← was _focused
                   duration: const Duration(milliseconds: 150),
                   child: const Padding(
                     padding: EdgeInsets.only(left: 4),

@@ -223,38 +223,50 @@ class _LiveInlinePlayerState extends ConsumerState<LiveInlinePlayer> {
       );
     }
 
-    return Container(
-      color: AppTheme.surface,
-      child: Row(
-        children: [
-          // Video (16:9)
-          AspectRatio(
-            aspectRatio: 16 / 9,
-            child: _VideoArea(
-              ctrl: ctrl,
-              ps: ps,
-              videoFill: _videoFill,
-              ctrlVisible: _ctrlVisible,
-              onTap: _toggleControls,
-              onDoubleTap: widget.onMaximize,
-              overlay: _compactOverlay(ps),
+    return Focus(
+      // Intercept Select/OK in compact mode → maximize player
+      onKeyEvent: (_, event) {
+        if (event is KeyDownEvent &&
+            (event.logicalKey == LogicalKeyboardKey.select ||
+                event.logicalKey == LogicalKeyboardKey.enter)) {
+          widget.onMaximize();
+          return KeyEventResult.handled;
+        }
+        return KeyEventResult.ignored;
+      },
+      child: Container(
+        color: AppTheme.surface,
+        child: Row(
+          children: [
+            // Video (16:9)
+            AspectRatio(
+              aspectRatio: 16 / 9,
+              child: _VideoArea(
+                ctrl: ctrl,
+                ps: ps,
+                videoFill: _videoFill,
+                ctrlVisible: _ctrlVisible,
+                onTap: _toggleControls,
+                onDoubleTap: widget.onMaximize,
+                overlay: _compactOverlay(ps),
+              ),
             ),
-          ),
-          // Info pane
-          Expanded(
-            child: _InfoPane(
-              channel: channel,
-              current: current,
-              next: next,
-              ps: ps,
-              onWatchNow: widget.onMaximize,
-              onTogglePlay: () =>
-                  ref.read(livePlayerProvider.notifier).togglePlayPause(),
-              onVolumeChange: (v) =>
-                  ref.read(livePlayerProvider.notifier).setVolume(v),
+            // Info pane
+            Expanded(
+              child: _InfoPane(
+                channel: channel,
+                current: current,
+                next: next,
+                ps: ps,
+                onWatchNow: widget.onMaximize,
+                onTogglePlay: () =>
+                    ref.read(livePlayerProvider.notifier).togglePlayPause(),
+                onVolumeChange: (v) =>
+                    ref.read(livePlayerProvider.notifier).setVolume(v),
+              ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }

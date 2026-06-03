@@ -2,6 +2,7 @@ import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:lunar_iptv_player/core/utils/focus_utils.dart';
+import 'package:lunar_iptv_player/services/behavior_service.dart';
 
 import '../../../core/constants/app_constants.dart';
 import '../../../core/theme/app_theme.dart';
@@ -181,6 +182,11 @@ class _ChannelListPanelState extends ConsumerState<ChannelListPanel> {
       onActivate: () {
         ref.read(selectedChannelProvider.notifier).state = stream;
         ref.read(epgCacheProvider.notifier).loadEpg(stream.streamId);
+        // Record hourly view with channel name for stats
+        BehaviorService.instance.recordHourlyChannelView(
+          stream.streamId,
+          name: stream.name,
+        );
         ref.read(recentlyViewedLiveProvider.notifier).add(stream.streamId);
 
         final rememberPos =

@@ -1523,9 +1523,21 @@ class _CacheSection extends ConsumerWidget {
                     color: AppTheme.textMuted,
                     size: 20,
                   ),
-                  onTap: () {
+                  onTap: () async {
                     ref.read(recentlyViewedLiveProvider.notifier).clear();
-                    _snack(context, 'Recently viewed cleared');
+                    // Clear hourly channel prefs and live watch-time stats
+                    await BehaviorService.instance.clearLiveStats();
+                    ref
+                        .read(behaviorRefreshProvider.notifier)
+                        .update((s) => s + 1);
+                    if (context.mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                          content: Text('Live TV history cleared'),
+                          behavior: SnackBarBehavior.floating,
+                        ),
+                      );
+                    }
                   },
                 ),
                 _SettTile(
@@ -1538,17 +1550,21 @@ class _CacheSection extends ConsumerWidget {
                     size: 20,
                   ),
                   onTap: () async {
-                    await BehaviorService.instance.clearAll();
+                    ref.read(recentlyViewedVodProvider.notifier).clear();
+                    ref.read(recentlyViewedSeriesProvider.notifier).clear();
                     ref.read(continueWatchingProvider.notifier).clearAll();
+                    await BehaviorService.instance.clearVodSeriesStats();
                     ref
                         .read(behaviorRefreshProvider.notifier)
                         .update((s) => s + 1);
-
-                    await StorageService.instance.clearHistory();
-                    ref.read(recentlyViewedVodProvider.notifier).clear();
-                    ref.read(recentlyViewedSeriesProvider.notifier).clear();
-                    if (!context.mounted) return;
-                    _snack(context, 'Watch history cleared');
+                    if (context.mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                          content: Text('Watch history cleared'),
+                          behavior: SnackBarBehavior.floating,
+                        ),
+                      );
+                    }
                   },
                 ),
               ],

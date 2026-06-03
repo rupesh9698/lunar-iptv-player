@@ -1,3 +1,6 @@
+import 'dart:isolate';
+
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:lunar_iptv_player/services/behavior_service.dart';
 import 'package:lunar_iptv_player/services/cache_service.dart';
@@ -6,6 +9,95 @@ import '../core/constants/app_constants.dart';
 import '../models/xtream_models.dart';
 import '../providers/app_providers.dart';
 import '../services/storage_service.dart';
+
+// Top-level — required by compute()
+class _VodSortMsg {
+  final List<VodStream> streams;
+  final int filterIndex;
+  final int sortIndex;
+  final String query;
+  final List<String> favIds;
+  final List<String> recentIds;
+  final Map<String, double> scores; // pre-computed search scores
+
+  const _VodSortMsg({
+    required this.streams,
+    required this.filterIndex,
+    required this.sortIndex,
+    required this.query,
+    required this.favIds,
+    required this.recentIds,
+    required this.scores,
+  });
+}
+
+List<VodStream> _vodSortIsolate(_VodSortMsg msg) {
+  final filter = VodFilter.values[msg.filterIndex];
+  final sort = VodSortBy.values[msg.sortIndex];
+
+  List<VodStream> filtered;
+
+  switch (filter) {
+    case VodFilter.favorites:
+      filtered = msg.streams
+          .where((s) => msg.favIds.contains(s.streamId))
+          .toList();
+    case VodFilter.recent:
+      final map = {for (final s in msg.streams) s.streamId: s};
+      filtered = msg.recentIds
+          .map((id) => map[id])
+          .whereType<VodStream>()
+          .toList();
+    case VodFilter.recentlyAdded:
+      filtered = List.from(msg.streams)
+        ..sort((a, b) {
+          final at = int.tryParse(a.added ?? '0') ?? 0;
+          final bt = int.tryParse(b.added ?? '0') ?? 0;
+          return bt.compareTo(at);
+        });
+      if (filtered.length > 100) filtered = filtered.sublist(0, 100);
+      return filtered;
+    case VodFilter.all:
+      if (msg.query.isEmpty) {
+        filtered = List.from(msg.streams);
+      } else {
+        final scored =
+            msg.streams
+                .where((s) => s.name.toLowerCase().contains(msg.query))
+                .map((s) => (stream: s, score: msg.scores[s.streamId] ?? 0.5))
+                .toList()
+              ..sort((a, b) => b.score.compareTo(a.score));
+        return scored.map((e) => e.stream).toList();
+      }
+  }
+
+  if (filter != VodFilter.all && msg.query.isNotEmpty) {
+    filtered = filtered
+        .where((s) => s.name.toLowerCase().contains(msg.query))
+        .toList();
+  }
+
+  if (filter == VodFilter.all || filter == VodFilter.favorites) {
+    switch (sort) {
+      case VodSortBy.nameAZ:
+        filtered.sort((a, b) => a.name.compareTo(b.name));
+      case VodSortBy.nameZA:
+        filtered.sort((a, b) => b.name.compareTo(a.name));
+      case VodSortBy.ratingHighLow:
+        filtered.sort((a, b) => b.ratingValue.compareTo(a.ratingValue));
+      case VodSortBy.recentlyAdded:
+        filtered.sort((a, b) {
+          final at = int.tryParse(a.added ?? '0') ?? 0;
+          final bt = int.tryParse(b.added ?? '0') ?? 0;
+          return bt.compareTo(at);
+        });
+      case VodSortBy.defaultOrder:
+        break;
+    }
+  }
+
+  return filtered;
+}
 
 // ── Sort options ──────────────────────────────────────────────────────────────
 enum VodSortBy { defaultOrder, nameAZ, nameZA, ratingHighLow, recentlyAdded }
@@ -31,90 +123,51 @@ final vodInfoProvider = FutureProvider.autoDispose.family<VodInfo, String>((
 });
 
 // ── Sorted + filtered streams ─────────────────────────────────────────────────
-final sortedVodStreamsProvider = Provider<AsyncValue<List<VodStream>>>((ref) {
+final sortedVodStreamsProvider = FutureProvider<List<VodStream>>((ref) async {
   final sort = ref.watch(vodSortProvider);
   final query = ref.watch(vodSearchQueryProvider).toLowerCase().trim();
   final filter = ref.watch(vodFilterProvider);
-  final favs = ref.watch(vodFavoritesProvider);
+  final favIds = ref.watch(vodFavoritesProvider).toList();
   final recentIds = ref.watch(recentlyViewedVodProvider);
 
-  final allAsync = ref.watch(vodAllStreamsProvider);
-  final catAsync = ref.watch(vodStreamsProvider);
+  // Await the correct base list
+  final List<VodStream> allStreams;
+  try {
+    allStreams = filter == VodFilter.all
+        ? await ref.watch(vodStreamsProvider.future)
+        : await ref.watch(vodAllStreamsProvider.future);
+  } catch (_) {
+    return [];
+  }
 
-  // recentlyAdded/favorites/recent need all streams; category filter uses catAsync
-  final baseAsync = (filter == VodFilter.all) ? catAsync : allAsync;
-
-  return baseAsync.whenData((streams) {
-    List<VodStream> filtered;
-
-    switch (filter) {
-      case VodFilter.favorites:
-        filtered = streams.where((s) => favs.contains(s.streamId)).toList();
-      case VodFilter.recent:
-        final map = {for (final s in streams) s.streamId: s};
-        filtered = recentIds
-            .map((id) => map[id])
-            .whereType<VodStream>()
-            .toList();
-      case VodFilter.recentlyAdded:
-        // Sort all by added timestamp, take top 100 — ignores category filter
-        filtered = List.from(streams)
-          ..sort((a, b) {
-            final at = int.tryParse(a.added ?? '0') ?? 0;
-            final bt = int.tryParse(b.added ?? '0') ?? 0;
-            return bt.compareTo(at);
-          });
-        if (filtered.length > 100) filtered = filtered.sublist(0, 100);
-      case VodFilter.all:
-        if (query.isEmpty) {
-          filtered = List.from(streams);
-        } else {
-          // Smart search ranking: text match score + behavior boost
-          final scored =
-              streams.where((s) => s.name.toLowerCase().contains(query)).map((
-                s,
-              ) {
-                final name = s.name.toLowerCase();
-                final textScore = name.startsWith(query) ? 1.0 : 0.5;
-                final finalScore = BehaviorService.instance.getSearchScore(
-                  s.streamId,
-                  textScore,
-                );
-                return (stream: s, score: finalScore);
-              }).toList()..sort((a, b) => b.score.compareTo(a.score));
-          filtered = scored.map((e) => e.stream).toList();
-        }
-    }
-
-    // Apply search to non-all filters
-    if (filter != VodFilter.all && query.isNotEmpty) {
-      filtered = filtered
-          .where((s) => s.name.toLowerCase().contains(query))
-          .toList();
-    }
-
-    // Apply sort only for all/favorites (recent/recentlyAdded have their own order)
-    if (filter == VodFilter.all || filter == VodFilter.favorites) {
-      switch (sort) {
-        case VodSortBy.nameAZ:
-          filtered.sort((a, b) => a.name.compareTo(b.name));
-        case VodSortBy.nameZA:
-          filtered.sort((a, b) => b.name.compareTo(a.name));
-        case VodSortBy.ratingHighLow:
-          filtered.sort((a, b) => b.ratingValue.compareTo(a.ratingValue));
-        case VodSortBy.recentlyAdded:
-          filtered.sort((a, b) {
-            final at = int.tryParse(a.added ?? '0') ?? 0;
-            final bt = int.tryParse(b.added ?? '0') ?? 0;
-            return bt.compareTo(at);
-          });
-        case VodSortBy.defaultOrder:
-          break;
+  // Pre-compute search scores (fast — only on matched items)
+  final scores = <String, double>{};
+  if (query.isNotEmpty) {
+    for (final s in allStreams) {
+      if (s.name.toLowerCase().contains(query)) {
+        final t = s.name.toLowerCase().startsWith(query) ? 1.0 : 0.5;
+        scores[s.streamId] = BehaviorService.instance.getSearchScore(
+          s.streamId,
+          t,
+        );
       }
     }
+  }
 
-    return filtered;
-  });
+  // Run heavy sort in background isolate to prevent ANR
+  return Isolate.run(
+    () => _vodSortIsolate(
+      _VodSortMsg(
+        streams: allStreams,
+        filterIndex: filter.index,
+        sortIndex: sort.index,
+        query: query,
+        favIds: favIds,
+        recentIds: recentIds,
+        scores: scores,
+      ),
+    ),
+  );
 });
 
 // ── Favorites ─────────────────────────────────────────────────────────────────

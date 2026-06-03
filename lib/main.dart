@@ -49,11 +49,15 @@ void main() async {
   await StorageService.instance.init();
   await CacheService.instance.init();
   await BehaviorService.instance.init();
+  // Point BehaviorService at the active playlist from first boot
+  final activeId = StorageService.instance.getActivePlaylistId();
+  if (activeId != null) {
+    BehaviorService.instance.setPlaylist(activeId);
+  }
   await initializeDateFormatting();
   await PlatformUtils.initWakelock();
 
   // Set active playlist context in cache service
-  final activeId = StorageService.instance.getActivePlaylistId();
   if (activeId != null) {
     CacheService.instance.setActivePlaylist(activeId);
   }

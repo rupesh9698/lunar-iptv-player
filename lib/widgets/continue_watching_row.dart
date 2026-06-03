@@ -466,8 +466,37 @@ class _ContinueCardState extends State<_ContinueCard> {
   }
 
   void _navigate(BuildContext context) {
+    final id = widget.item['id'] as String? ?? '';
+    final url = widget.item['url'] as String? ?? '';
+    final title = widget.item['title'] as String? ?? '';
+    final imageUrl = widget.item['imageUrl'] as String?;
+    final type = widget.item['type'] as String? ?? 'movie';
     final position = (widget.item['position'] as num?)?.toDouble() ?? 0.0;
-    context.push('/player', extra: {...widget.item, 'startPosition': position});
+
+    // Guard: URL must be present — if missing, cannot resume
+    if (url.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Cannot resume — no URL stored. Open from Movies/Series instead.',
+          ),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+      return;
+    }
+
+    context.push(
+      '/player',
+      extra: {
+        'title': title,
+        'url': url,
+        'imageUrl': imageUrl,
+        'type': type,
+        'id': id,
+        'startPosition': position,
+      },
+    );
   }
 
   static String _fmt(Duration d) {

@@ -38,10 +38,17 @@ class _LiveTVScreenState extends ConsumerState<LiveTVScreen> {
   String _channelInputStr = '';
   bool _hasRestored = false;
 
+  // ── TV remote long-press detection (repeat-count based) ────────────────────
+  int _categoryOkRepeatCount = 0;
+  static const int _kLongPressRepeatThreshold = 5;
+
   // ── Panel focus nodes ──────────────────────────────────────────────────────
   final _categoryPanelFocus = FocusScopeNode(debugLabel: 'CategoryPanel');
   final _channelPanelFocus = FocusScopeNode(debugLabel: 'ChannelPanel');
   final _previewPanelFocus = FocusScopeNode(debugLabel: 'PreviewPanel');
+  // ── Category long-press detection (Bug 1 fix) ──────────────────────────────
+  Timer? _categoryLongPressTimer;
+  bool _categoryLongPressFired = false;
 
   Timer? _channelInputTimer;
   final FocusNode _keyboardFocus = FocusNode();
@@ -67,6 +74,9 @@ class _LiveTVScreenState extends ConsumerState<LiveTVScreen> {
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _keyboardFocus.requestFocus();
+      _categoryPanelFocus.onKeyEvent = _handleCategoryPanelKey;
+      _previewPanelFocus.onKeyEvent = _handlePreviewPanelKey;
+      _channelPanelFocus.onKeyEvent = _handleChannelPanelKey;
       if (_isRefreshing) {
         _doRefresh();
       } else {
@@ -171,6 +181,164 @@ class _LiveTVScreenState extends ConsumerState<LiveTVScreen> {
       setState(() => _isRefreshing = false);
       if (!_hasRestored) _restoreFromLastWatched();
     }
+  }
+
+  // ── Category panel key handler ────────────────────────────────────────────
+  KeyEventResult _handleCategoryPanelKey(FocusNode node, KeyEvent event) {
+    if (event is KeyDownEvent) {
+      // ── Right → go to preview area ─────────────────────────────
+      if (event.logicalKey == LogicalKeyboardKey.arrowRight) {
+        _previewPanelFocus.requestFocus();
+        return KeyEventResult.handled;
+      }
+
+      // ── OK long-press detection (TV remote hide-category) ───────
+      final isOk =
+          event.logicalKey == LogicalKeyboardKey.select ||
+          event.logicalKey == LogicalKeyboardKey.enter;
+      if (isOk) {
+        _categoryOkRepeatCount = 0;
+        return KeyEventResult.ignored;
+      }
+    }
+
+    if (event is KeyRepeatEvent) {
+      final isOk =
+          event.logicalKey == LogicalKeyboardKey.select ||
+          event.logicalKey == LogicalKeyboardKey.enter;
+      if (isOk) {
+        _categoryOkRepeatCount++;
+        if (_categoryOkRepeatCount == _kLongPressRepeatThreshold) {
+          _showCategoryOptionsMenu();
+        }
+        return KeyEventResult.handled;
+      }
+    }
+
+    if (event is KeyUpEvent) {
+      final isOk =
+          event.logicalKey == LogicalKeyboardKey.select ||
+          event.logicalKey == LogicalKeyboardKey.enter;
+      if (isOk) {
+        _categoryOkRepeatCount = 0;
+      }
+    }
+
+    return KeyEventResult.ignored;
+  }
+
+  // ── Preview panel key handler ─────────────────────────────────────────────
+  // Fires when LiveInlinePlayer (compact) has focus.
+  KeyEventResult _handlePreviewPanelKey(FocusNode node, KeyEvent event) {
+    if (event is! KeyDownEvent) return KeyEventResult.ignored;
+
+    // Left → back to categories
+    if (event.logicalKey == LogicalKeyboardKey.arrowLeft) {
+      _categoryPanelFocus.requestFocus();
+      return KeyEventResult.handled;
+    }
+
+    final epgVis = ref.read(epgPanelVisibleProvider);
+
+    // Down or Right → EPG channel list (when EPG is visible)
+    if ((event.logicalKey == LogicalKeyboardKey.arrowDown ||
+            event.logicalKey == LogicalKeyboardKey.arrowRight) &&
+        epgVis &&
+        !_epgFullscreen) {
+      _channelPanelFocus.requestFocus();
+      return KeyEventResult.handled;
+    }
+
+    // Back / Escape → home (when not maximized)
+    if (event.logicalKey == LogicalKeyboardKey.escape ||
+        event.logicalKey == LogicalKeyboardKey.goBack) {
+      final isMax = ref.read(livePlayerMaximizedProvider);
+      if (isMax) {
+        ref.read(livePlayerMaximizedProvider.notifier).state = false;
+      } else {
+        try {
+          ref.read(livePlayerProvider.notifier).stop();
+        } catch (_) {}
+        context.go('/home');
+      }
+      return KeyEventResult.handled;
+    }
+
+    return KeyEventResult.ignored;
+  }
+
+  // ── Channel/EPG panel key handler ─────────────────────────────────────────
+  // Fires when EPG timeline has focus.
+  KeyEventResult _handleChannelPanelKey(FocusNode node, KeyEvent event) {
+    if (event is! KeyDownEvent) return KeyEventResult.ignored;
+
+    // Left is handled by individual _ChannelCell (focusInDirection left)
+    // Up from top → preview area
+    if (event.logicalKey == LogicalKeyboardKey.arrowUp) {
+      final epgVis = ref.read(epgPanelVisibleProvider);
+      if (epgVis && !_epgFullscreen) {
+        _previewPanelFocus.requestFocus();
+        return KeyEventResult.handled;
+      }
+    }
+
+    return KeyEventResult.ignored;
+  }
+
+  void _showCategoryOptionsMenu() {
+    final cat = ref.read(selectedLiveCategoryProvider);
+    if (cat == null || !mounted) return;
+
+    showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: AppTheme.surface,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: Row(
+          children: [
+            const Icon(
+              Icons.folder_outlined,
+              color: AppTheme.primary,
+              size: 20,
+            ),
+            const SizedBox(width: 8),
+            Flexible(
+              child: Text(
+                cat.categoryName,
+                style: const TextStyle(
+                  color: AppTheme.textPrimary,
+                  fontSize: 15,
+                  fontWeight: FontWeight.w700,
+                ),
+                maxLines: 2,
+              ),
+            ),
+          ],
+        ),
+        content: const Text(
+          'What would you like to do with this category?',
+          style: TextStyle(color: AppTheme.textSecondary, fontSize: 13),
+        ),
+        actions: [
+          TextButton.icon(
+            autofocus: true,
+            icon: const Icon(Icons.visibility_off_outlined, size: 16),
+            label: const Text('Hide Category'),
+            style: TextButton.styleFrom(foregroundColor: AppTheme.error),
+            onPressed: () {
+              Navigator.pop(ctx);
+              ref
+                  .read(hiddenLiveCategoriesProvider.notifier)
+                  .toggle(cat.categoryId);
+            },
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Cancel'),
+          ),
+        ],
+      ),
+    );
   }
 
   // ── Channel number input ──────────────────────────────────────────────
@@ -339,6 +507,7 @@ class _LiveTVScreenState extends ConsumerState<LiveTVScreen> {
 
     _categoryPanelFocus.dispose();
     _channelPanelFocus.dispose();
+    _categoryLongPressTimer?.cancel();
     _previewPanelFocus.dispose();
 
     // Stop inline player — prevents audio bleeding to other screens
@@ -375,34 +544,8 @@ class _LiveTVScreenState extends ConsumerState<LiveTVScreen> {
     return KeyboardListener(
       focusNode: _keyboardFocus,
       onKeyEvent: (KeyEvent event) {
-        // Fixed: Removed FocusNode parameter
-        // First check for custom digit/escape inputs
+        // Handles digit input (CH number overlay) and Escape (minimize player)
         _handleKeyEvent(event);
-
-        if (event is! KeyDownEvent) {
-          return; // Fixed: void return type, no KeyEventResult
-        }
-
-        // ── TV D-pad Panel Switching Logic ─────────────────────────────────
-        // Left arrow when in channel list or preview area → focus category sidebar
-        if (event.logicalKey == LogicalKeyboardKey.arrowLeft) {
-          if (_channelPanelFocus.hasFocus || _previewPanelFocus.hasFocus) {
-            _categoryPanelFocus.requestFocus();
-            return;
-          }
-        }
-
-        // Right arrow navigation cascades across panels
-        if (event.logicalKey == LogicalKeyboardKey.arrowRight) {
-          if (_categoryPanelFocus.hasFocus) {
-            _channelPanelFocus.requestFocus();
-            return;
-          }
-          if (_channelPanelFocus.hasFocus) {
-            _previewPanelFocus.requestFocus();
-            return;
-          }
-        }
       },
       child: PopScope(
         canPop: false,
@@ -451,21 +594,28 @@ class _LiveTVScreenState extends ConsumerState<LiveTVScreen> {
                       top: playerTop,
                       width: playerW,
                       height: playerH,
-                      child: LiveInlinePlayer(
-                        isMaximized: isMaximized,
-                        onMaximize: () =>
-                            ref
-                                    .read(livePlayerMaximizedProvider.notifier)
-                                    .state =
-                                true,
-                        onMinimize: () =>
-                            ref
-                                    .read(livePlayerMaximizedProvider.notifier)
-                                    .state =
-                                false,
+                      // ── WRAPPED: gives preview area its own focus scope ──────────
+                      child: FocusScope(
+                        node: _previewPanelFocus,
+                        child: LiveInlinePlayer(
+                          isMaximized: isMaximized,
+                          onMaximize: () =>
+                              ref
+                                      .read(
+                                        livePlayerMaximizedProvider.notifier,
+                                      )
+                                      .state =
+                                  true,
+                          onMinimize: () =>
+                              ref
+                                      .read(
+                                        livePlayerMaximizedProvider.notifier,
+                                      )
+                                      .state =
+                                  false,
+                        ),
                       ),
                     ),
-
                   // ── Layer 3: Channel number overlay ───────────────────
                   if (_channelInputStr.isNotEmpty)
                     _ChannelInputOverlay(number: _channelInputStr),
@@ -514,7 +664,12 @@ class _LiveTVScreenState extends ConsumerState<LiveTVScreen> {
                   ref.read(categorySidebarWidthProvider.notifier).state = v;
                 },
               ),
-              Expanded(child: _buildMainContent(epgVisible)),
+              Expanded(
+                child: FocusScope(
+                  node: _channelPanelFocus,
+                  child: _buildMainContent(epgVisible),
+                ),
+              ),
             ],
           ),
         ),
@@ -921,15 +1076,6 @@ class _DesktopTopBar extends ConsumerWidget {
           ],
           const Spacer(),
           _TopBtn(
-            icon: epgVisible
-                ? Icons.view_timeline_outlined
-                : Icons.view_timeline,
-            tooltip: epgVisible ? 'Hide EPG' : 'Show EPG',
-            isActive: epgVisible,
-            onTap: onToggleEpg,
-          ),
-          const SizedBox(width: 4),
-          _TopBtn(
             icon: epgFullscreen
                 ? Icons.fullscreen_exit
                 : Icons.fit_screen_outlined,
@@ -978,6 +1124,24 @@ class _FocusableIconButton extends StatefulWidget {
 class _FocusableIconButtonState extends State<_FocusableIconButton> {
   bool _focused = false;
 
+  bool get _showFocusRing =>
+      _focused &&
+      FocusManager.instance.highlightMode == FocusHighlightMode.traditional;
+
+  @override
+  void initState() {
+    super.initState();
+    FocusManager.instance.addHighlightModeListener(_onHighlight);
+  }
+
+  void _onHighlight(FocusHighlightMode _) => setState(() {});
+
+  @override
+  void dispose() {
+    FocusManager.instance.removeHighlightModeListener(_onHighlight);
+    super.dispose();
+  }
+
   @override
   Widget build(BuildContext context) {
     return Focus(
@@ -1004,20 +1168,25 @@ class _FocusableIconButtonState extends State<_FocusableIconButton> {
               height: 36,
               decoration: BoxDecoration(
                 borderRadius: BorderRadius.circular(8),
-                border: _focused
+                border:
+                    _showFocusRing // ← was: _focused
                     ? Border.all(
                         color: AppTheme.primary.withValues(alpha: 0.7),
                         width: 2,
                       )
                     : null,
-                color: _focused
+                color:
+                    _showFocusRing // ← was: _focused
                     ? AppTheme.primary.withValues(alpha: 0.12)
                     : Colors.transparent,
               ),
               child: Icon(
                 widget.icon,
                 size: 16,
-                color: _focused ? AppTheme.primary : widget.iconColor,
+                color:
+                    _showFocusRing // ← was: _focused
+                    ? AppTheme.primary
+                    : widget.iconColor,
               ),
             ),
           ),
@@ -1047,6 +1216,24 @@ class _TopBtn extends StatefulWidget {
 class _TopBtnState extends State<_TopBtn> {
   bool _focused = false;
   bool _pressed = false;
+
+  bool get _showFocusRing =>
+      _focused &&
+      FocusManager.instance.highlightMode == FocusHighlightMode.traditional;
+
+  @override
+  void initState() {
+    super.initState();
+    FocusManager.instance.addHighlightModeListener(_onHighlight);
+  }
+
+  void _onHighlight(FocusHighlightMode _) => setState(() {});
+
+  @override
+  void dispose() {
+    FocusManager.instance.removeHighlightModeListener(_onHighlight);
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -1081,13 +1268,16 @@ class _TopBtnState extends State<_TopBtn> {
               width: 32,
               height: 32,
               decoration: BoxDecoration(
-                color: widget.isActive || _focused
+                color:
+                    widget.isActive ||
+                        _showFocusRing // ← was: _focused
                     ? AppTheme.primary.withValues(alpha: 0.20)
                     : _pressed
                     ? AppTheme.primary.withValues(alpha: 0.12)
                     : Colors.transparent,
                 borderRadius: BorderRadius.circular(8),
-                border: _focused
+                border:
+                    _showFocusRing // ← was: _focused
                     ? Border.all(
                         color: AppTheme.primary.withValues(alpha: 0.8),
                         width: 2,
@@ -1099,7 +1289,8 @@ class _TopBtnState extends State<_TopBtn> {
               child: Icon(
                 widget.icon,
                 size: 18,
-                color: (widget.isActive || _focused)
+                color:
+                    (widget.isActive || _showFocusRing) // ← was: _focused
                     ? AppTheme.primary
                     : AppTheme.textSecondary,
               ),

@@ -5,8 +5,10 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
+import 'package:lunar_iptv_player/providers/behavior_providers.dart';
 import 'package:lunar_iptv_player/services/behavior_service.dart';
 import 'package:lunar_iptv_player/services/storage_service.dart';
+import 'package:lunar_iptv_player/widgets/for_you_section.dart';
 
 import '../../core/theme/app_theme.dart';
 import '../../models/xtream_models.dart';
@@ -858,10 +860,40 @@ class _SeriesContentState extends ConsumerState<_SeriesContent> {
   }
 }
 
-class _SeriesGrid extends ConsumerWidget {
+class _SeriesGrid extends ConsumerStatefulWidget {
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<_SeriesGrid> createState() => _SeriesGridState();
+}
+
+class _SeriesGridState extends ConsumerState<_SeriesGrid> {
+  int _displayLimit = 30;
+  final ScrollController _scrollCtrl = ScrollController();
+
+  @override
+  void initState() {
+    super.initState();
+    _scrollCtrl.addListener(_onScroll);
+  }
+
+  void _onScroll() {
+    if (!mounted) return;
+    final pos = _scrollCtrl.position;
+    if (pos.pixels > pos.maxScrollExtent - 600) {
+      setState(() => _displayLimit = (_displayLimit + 30).clamp(0, 5000));
+    }
+  }
+
+  @override
+  void dispose() {
+    _scrollCtrl.removeListener(_onScroll);
+    _scrollCtrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final seriesAsync = ref.watch(sortedSeriesListProvider);
+    final forYouAsync = ref.watch(forYouSeriesProvider);
 
     return seriesAsync.when(
       loading: () => const Center(
@@ -893,16 +925,65 @@ class _SeriesGrid extends ConsumerWidget {
             ),
           );
         }
-        return GridView.builder(
-          padding: const EdgeInsets.all(12),
-          gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
-            maxCrossAxisExtent: 160,
-            childAspectRatio: 0.67,
-            crossAxisSpacing: 10,
-            mainAxisSpacing: 10,
-          ),
-          itemCount: seriesList.length,
-          itemBuilder: (ctx, i) => _SeriesPosterCard(series: seriesList[i]),
+
+        // Get For You series — safely falls back to empty list
+        final forYouSeries = forYouAsync.valueOrNull ?? [];
+
+        return CustomScrollView(
+          controller: _scrollCtrl,
+          slivers: [
+            // ── For You Section ─────────────────────────────────────────────
+            if (forYouSeries.isNotEmpty)
+              SliverToBoxAdapter(
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(12, 12, 12, 4),
+                  child: ForYouSection(
+                    label: 'Recommended for You',
+                    items: forYouSeries
+                        .map(
+                          (s) => (
+                            id: s.seriesId,
+                            name: s.name,
+                            imageUrl: s.cover,
+                            rating: s.ratingValue,
+                          ),
+                        )
+                        .toList(),
+                    onTap: (id) {
+                      final series = forYouSeries.firstWhere(
+                        (s) => s.seriesId == id,
+                        orElse: () => forYouSeries.first,
+                      );
+                      ref.read(selectedSeriesStreamProvider.notifier).state =
+                          series;
+                      BehaviorService.instance.recordOpen(id);
+                    },
+                  ),
+                ),
+              ),
+
+            // ── Series Grid ─────────────────────────────────────────────────
+            SliverPadding(
+              padding: const EdgeInsets.all(12),
+              sliver: SliverGrid(
+                gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
+                  maxCrossAxisExtent: 160,
+                  childAspectRatio: 0.67,
+                  crossAxisSpacing: 10,
+                  mainAxisSpacing: 10,
+                ),
+                delegate: SliverChildBuilderDelegate(
+                  (ctx, i) => RepaintBoundary(
+                    child: _SeriesPosterCard(series: seriesList[i]),
+                  ),
+                  childCount: seriesList.length.clamp(0, _displayLimit),
+                  // Reuse widgets when scrolling for memory efficiency
+                  addRepaintBoundaries: false,
+                  addAutomaticKeepAlives: false,
+                ),
+              ),
+            ),
+          ],
         );
       },
     );

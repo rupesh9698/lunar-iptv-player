@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:lunar_iptv_player/services/behavior_service.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
 import 'package:media_kit_video/media_kit_video_controls/src/controls/extensions/duration.dart';
@@ -21,6 +22,7 @@ class PlayerScreen extends ConsumerStatefulWidget {
   final String? imageUrl;
   final String type; // 'live' | 'movie' | 'series'
   final String id;
+  final double startPosition;
 
   const PlayerScreen({
     super.key,
@@ -29,6 +31,7 @@ class PlayerScreen extends ConsumerStatefulWidget {
     this.imageUrl,
     required this.type,
     required this.id,
+    this.startPosition = 0.0,
   });
 
   @override
@@ -79,6 +82,8 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
   bool _showBright = false;
   bool _dragIsLeft = false;
   bool _playerDisposed = false;
+  Timer? _positionTimer;
+  static const int _kPosSaveInterval = 10;
 
   bool get _isLive => widget.type == 'live';
 
@@ -97,6 +102,12 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
     _playerDisposed = true;
     _hideTimer?.cancel();
     _reconnectTimer?.cancel();
+    // ── Save final position + stop behavior timer ─────────────────────────────
+    _positionTimer?.cancel();
+    if (!_isLive && !_playerDisposed) _saveCurrentPosition();
+    try {
+      BehaviorService.instance.stopWatchTimer(widget.id);
+    } catch (_) {}
     for (final s in _subs) {
       s.cancel();
     }
@@ -114,7 +125,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
 
   // ── Player init with IPTV optimizations ──────────────────────────────
   Future<void> _initPlayer() async {
-    // On web, HTTP media streams are blocked by Chrome (Mixed Content)
+    // Web: HTTP stream blocked by browser Mixed Content policy
     if (WebProxyClient.isWebHttpStream(widget.url)) {
       if (mounted) {
         setState(() {
@@ -125,39 +136,63 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
       return;
     }
 
-    _player = Player();
-    _ctrl = VideoController(_player);
+    _player = Player(
+      configuration: const PlayerConfiguration(
+        // Disable libass on low-spec devices — saves ~15MB RAM
+        libass: false,
+      ),
+    );
+    _ctrl = VideoController(
+      _player,
+      configuration: VideoControllerConfiguration(
+        // Use low-res surface on Android to reduce GPU pressure
+        enableHardwareAcceleration: true,
+        // Limit surface size — huge benefit on 720p TV displays
+        width: 1280,
+        height: 720,
+      ),
+    );
 
-    // Configure MPV properties safely
-    await _setMpvProp('network-timeout', '20');
+    // ── MPV properties ────────────────────────────────────────────────────────
+    await _setMpvProp('network-timeout', '15');
+
     if (_isLive) {
-      // Low-spec friendly live settings
       await _setMpvProp('cache', 'yes');
-      await _setMpvProp('cache-secs', '8');
+      await _setMpvProp('cache-secs', '5');
       await _setMpvProp('cache-initial', '0');
       await _setMpvProp('cache-pause', 'no');
       await _setMpvProp('cache-pause-initial', 'no');
-      await _setMpvProp('demuxer-max-bytes', '20MiB'); // ← reduced for low RAM
+      await _setMpvProp('demuxer-max-bytes', '6MiB');
+      await _setMpvProp('demuxer-max-back-bytes', '2MiB');
       await _setMpvProp(
         'stream-lavf-o',
         'reconnect=1,reconnect_at_eof=1,reconnect_streamed=1,'
-            'reconnect_delay_max=5,timeout=20000000',
+            'reconnect_delay_max=5,timeout=15000000',
       );
     } else {
       await _setMpvProp('cache', 'yes');
-      await _setMpvProp('cache-secs', '60');
-      await _setMpvProp('cache-initial', '1000000');
-      await _setMpvProp('demuxer-max-bytes', '40MiB'); // ← reduced
-      await _setMpvProp('demuxer-readahead-secs', '20');
-      await _setMpvProp('prefetch-playlist', 'yes');
+      await _setMpvProp('cache-secs', '30');
+      await _setMpvProp('cache-initial', '500000');
+      await _setMpvProp('demuxer-max-bytes', '16MiB');
+      await _setMpvProp('demuxer-max-back-bytes', '8MiB');
+      await _setMpvProp('demuxer-readahead-secs', '10');
     }
-    // Universal low-spec optimizations
+
+    // ── Universal low-spec optimisations ─────────────────────────────────────
     await _setMpvProp('hwdec', 'auto-safe');
     await _setMpvProp('video-sync', 'audio');
-    await _setMpvProp('framedrop', 'vo'); // ← drop frames under load
-    await _setMpvProp('vd-lavc-threads', '2'); // ← limit decode threads
-    await _setMpvProp('audio-buffer', '0.2'); // ← smaller audio buffer
+    await _setMpvProp('framedrop', 'decoder+vo');
+    await _setMpvProp('vd-lavc-threads', '1');
+    await _setMpvProp('vd-lavc-fast', 'yes');
+    await _setMpvProp('vd-lavc-skiploopfilter', 'nonkey');
+    await _setMpvProp('vd-lavc-skipframe', 'nonref');
+    await _setMpvProp('audio-buffer', '0.1');
+    await _setMpvProp('scale', 'bilinear');
+    await _setMpvProp('dscale', 'bilinear');
+    await _setMpvProp('correct-downscaling', 'no');
+    await _setMpvProp('sigmoid-upscaling', 'no');
 
+    // ── Subscriptions ─────────────────────────────────────────────────────────
     _subs.addAll([
       _player.stream.playing.listen((v) {
         if (!mounted) return;
@@ -200,8 +235,37 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
     ]);
 
     await _player.setVolume(100);
+
+    // Open media — VOD: seek to saved position after open completes
+    if (!_isLive && widget.startPosition > 3.0) {
+      // Listen for first duration event which confirms media is loaded
+      late StreamSubscription<Duration> _durSub;
+      _durSub = _player.stream.duration.listen((dur) async {
+        if (dur.inSeconds > 0) {
+          _durSub.cancel();
+          await Future.delayed(const Duration(milliseconds: 300));
+          if (mounted && !_playerDisposed) {
+            final seekTo = Duration(seconds: widget.startPosition.round());
+            await _player.seek(seekTo.clamp(Duration.zero, dur));
+          }
+        }
+      });
+      _subs.add(_durSub);
+    }
+
     await _player.open(Media(widget.url));
     await PlatformUtils.enableWakelock();
+
+    // ── Behavior tracking ─────────────────────────────────────────────────────
+    BehaviorService.instance.startWatchTimer(widget.id, name: widget.title);
+
+    // ── Periodic position save (VOD only, every 10s) ─────────────────────────
+    if (!_isLive) {
+      _positionTimer = Timer.periodic(const Duration(seconds: 10), (_) {
+        if (!_playerDisposed && mounted) _saveCurrentPosition();
+      });
+    }
+
     _resetHideTimer();
   }
 
@@ -399,6 +463,23 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
       // ignore: avoid_dynamic_calls
       await (_player as dynamic).setProperty(key, value);
     } catch (_) {}
+  }
+
+  /// Saves position for Continue Watching. Skips very short content
+  /// and near-complete content (handled by BehaviorService internally).
+  void _saveCurrentPosition() {
+    if (_dur.inSeconds < 30 || _playerDisposed || _pos == Duration.zero) return;
+    BehaviorService.instance
+        .savePosition(
+          id: widget.id,
+          url: widget.url,
+          positionSeconds: _pos.inSeconds.toDouble(),
+          durationSeconds: _dur.inSeconds.toDouble(),
+          type: widget.type,
+          title: widget.title,
+          imageUrl: widget.imageUrl,
+        )
+        .ignore();
   }
 
   // ── Buffer percentage (VOD only) ──────────────────────────────────────

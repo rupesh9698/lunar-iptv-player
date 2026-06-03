@@ -1,4 +1,5 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:lunar_iptv_player/services/behavior_service.dart';
 import '../core/constants/app_constants.dart';
 import '../models/xtream_models.dart';
 import '../providers/app_providers.dart';
@@ -252,6 +253,65 @@ final filteredLiveStreamsProvider = Provider<AsyncValue<List<LiveStream>>>((
           .watch(liveStreamsProvider)
           .whenData((streams) => search(streams));
   }
+});
+
+// ── Smart Category Ordering ───────────────────────────────────────────────────
+// Most-tapped categories move to the top automatically.
+// Falls back to original order for untapped categories.
+final smartLiveCategoriesProvider = FutureProvider<List<XtreamCategory>>((
+  ref,
+) async {
+  final cats = await ref.watch(liveCategoriesProvider.future);
+  if (cats.isEmpty) return cats;
+
+  // Sort by tap count descending; untapped categories keep their original order
+  final withTaps =
+      cats
+          .asMap()
+          .entries
+          .map(
+            (e) => (
+              category: e.value,
+              taps: BehaviorService.instance.getCategoryTaps(
+                e.value.categoryId,
+              ),
+              original: e.key, // preserve original order for ties
+            ),
+          )
+          .toList()
+        ..sort((a, b) {
+          final diff = b.taps.compareTo(a.taps);
+          return diff != 0 ? diff : a.original.compareTo(b.original);
+        });
+
+  return withTaps.map((e) => e.category).toList();
+});
+
+// ── Time-of-Day Channel Suggestions ──────────────────────────────────────────
+// Surfaces channels the user typically watches at the current hour.
+// Refreshes every time filteredLiveStreamsProvider changes (category switch, etc.)
+final timeOfDayChannelsProvider = Provider<List<LiveStream>>((ref) {
+  final allAsync = ref.watch(liveAllStreamsProvider);
+
+  return allAsync.whenOrNull(
+        data: (all) {
+          if (all.isEmpty) return null;
+
+          final topIds = BehaviorService.instance.getHourlyTopChannels(
+            topN: 10,
+          );
+          if (topIds.isEmpty) return null;
+
+          final map = {for (final s in all) s.streamId: s};
+          final result = topIds
+              .map((id) => map[id])
+              .whereType<LiveStream>()
+              .toList();
+
+          return result.isEmpty ? null : result;
+        },
+      ) ??
+      [];
 });
 
 // ── Favorites Management ─────────────────────────────────────────────────────

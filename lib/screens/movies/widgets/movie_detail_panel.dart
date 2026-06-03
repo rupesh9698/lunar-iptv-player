@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_animate/flutter_animate.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:lunar_iptv_player/services/behavior_service.dart';
@@ -243,6 +244,75 @@ class MovieDetailPanel extends ConsumerWidget {
         // Genre chips
         if (info?.genre != null) ...[
           const SizedBox(height: 8),
+          // ── Auto Favourite Suggestion ─────────────────────────────────────────────
+          Builder(
+            builder: (ctx) {
+              final watchCount = BehaviorService.instance.getWatchCount(
+                movie.streamId,
+              );
+              final alreadyFav = ref
+                  .watch(vodFavoritesProvider)
+                  .contains(movie.streamId);
+              if (watchCount < 5 || alreadyFav) return const SizedBox.shrink();
+
+              return Container(
+                margin: const EdgeInsets.only(bottom: 12),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 8,
+                ),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF7B61FF).withValues(alpha: 0.10),
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(
+                    color: const Color(0xFF7B61FF).withValues(alpha: 0.30),
+                  ),
+                ),
+                child: Row(
+                  children: [
+                    const Icon(
+                      Icons.auto_awesome,
+                      color: Color(0xFF7B61FF),
+                      size: 14,
+                    ),
+                    const SizedBox(width: 6),
+                    Expanded(
+                      child: Text(
+                        'You\'ve watched this $watchCount times — add to Favourites?',
+                        style: TextStyle(
+                          color: Color(0xFF7B61FF),
+                          fontSize: 11,
+                        ),
+                      ),
+                    ),
+                    GestureDetector(
+                      onTap: () => ref
+                          .read(vodFavoritesProvider.notifier)
+                          .toggle(movie.streamId),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 8,
+                          vertical: 4,
+                        ),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFF7B61FF),
+                          borderRadius: BorderRadius.circular(6),
+                        ),
+                        child: const Text(
+                          'Add',
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 10,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ).animate().fadeIn(duration: 300.ms);
+            },
+          ),
           _buildGenreChips(info!.genre!),
         ],
 

@@ -422,19 +422,90 @@ class _EpgControlBarState extends ConsumerState<_EpgControlBar> {
     required String tooltip,
     required VoidCallback onTap,
   }) {
-    return Tooltip(
-      message: tooltip,
-      child: GestureDetector(
-        onTap: onTap,
-        child: Container(
-          width: 28,
-          height: 28,
-          decoration: BoxDecoration(
-            color: AppTheme.surfaceVariant,
-            borderRadius: BorderRadius.circular(6),
-            border: Border.all(color: AppTheme.divider),
+    return _EpgBarBtn(icon: icon, tooltip: tooltip, onTap: onTap);
+  }
+}
+
+// Focusable EPG bar button — TV remote + mouse + touch
+class _EpgBarBtn extends StatefulWidget {
+  final IconData icon;
+  final String tooltip;
+  final VoidCallback onTap;
+  const _EpgBarBtn({
+    required this.icon,
+    required this.tooltip,
+    required this.onTap,
+  });
+  @override
+  State<_EpgBarBtn> createState() => _EpgBarBtnState();
+}
+
+class _EpgBarBtnState extends State<_EpgBarBtn> {
+  bool _focused = false;
+
+  bool get _showFocusRing =>
+      _focused &&
+      FocusManager.instance.highlightMode == FocusHighlightMode.traditional;
+
+  @override
+  void initState() {
+    super.initState();
+    FocusManager.instance.addHighlightModeListener(_onHighlight);
+  }
+
+  void _onHighlight(FocusHighlightMode _) => setState(() {});
+
+  @override
+  void dispose() {
+    FocusManager.instance.removeHighlightModeListener(_onHighlight);
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Focus(
+      onFocusChange: (f) => setState(() => _focused = f),
+      onKeyEvent: (_, e) {
+        if (e is KeyDownEvent &&
+            (e.logicalKey == LogicalKeyboardKey.select ||
+                e.logicalKey == LogicalKeyboardKey.enter ||
+                e.logicalKey == LogicalKeyboardKey.space)) {
+          widget.onTap();
+          return KeyEventResult.handled;
+        }
+        return KeyEventResult.ignored;
+      },
+      child: Tooltip(
+        message: widget.tooltip,
+        child: MouseRegion(
+          cursor: SystemMouseCursors.click,
+          child: GestureDetector(
+            onTap: widget.onTap,
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 150),
+              width: 28,
+              height: 28,
+              decoration: BoxDecoration(
+                color: _showFocusRing
+                    ? AppTheme.primary.withValues(alpha: 0.15)
+                    : AppTheme.surfaceVariant,
+                borderRadius: BorderRadius.circular(6),
+                border: _showFocusRing
+                    ? Border.all(
+                        color: AppTheme.primary.withValues(alpha: 0.7),
+                        width: 1.5,
+                      )
+                    : Border.all(color: AppTheme.divider),
+              ),
+              child: Icon(
+                widget.icon,
+                size: 15,
+                color: _showFocusRing
+                    ? AppTheme.primary
+                    : AppTheme.textSecondary,
+              ),
+            ),
           ),
-          child: Icon(icon, size: 15, color: AppTheme.textSecondary),
         ),
       ),
     );
@@ -470,6 +541,24 @@ class _ChannelCellState extends State<_ChannelCell> {
   bool _hovering = false;
   bool _focused = false;
 
+  bool get _showFocusRing =>
+      _focused &&
+      FocusManager.instance.highlightMode == FocusHighlightMode.traditional;
+
+  @override
+  void initState() {
+    super.initState();
+    FocusManager.instance.addHighlightModeListener(_onHighlight);
+  }
+
+  void _onHighlight(FocusHighlightMode _) => setState(() {});
+
+  @override
+  void dispose() {
+    FocusManager.instance.removeHighlightModeListener(_onHighlight);
+    super.dispose();
+  }
+
   @override
   Widget build(BuildContext context) {
     final hasNum =
@@ -478,21 +567,37 @@ class _ChannelCellState extends State<_ChannelCell> {
         widget.channel.num != '0';
 
     return Focus(
-      onFocusChange: (f) => setState(() => _focused = f),
-      onKeyEvent: (_, event) {
-        if (event is KeyDownEvent &&
-            (event.logicalKey == LogicalKeyboardKey.select ||
-                event.logicalKey == LogicalKeyboardKey.enter ||
-                event.logicalKey == LogicalKeyboardKey.space ||
-                event.logicalKey == LogicalKeyboardKey.gameButtonA)) {
-          widget.onTap();
-          return KeyEventResult.handled;
+      onFocusChange: (f) {
+        setState(() => _focused = f);
+        // Auto-scroll this row into view when focused via remote
+        if (f) {
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (!mounted) return;
+            final ctx = context;
+            Scrollable.ensureVisible(
+              ctx,
+              alignment: 0.3,
+              duration: const Duration(milliseconds: 200),
+              curve: Curves.easeOut,
+            );
+          });
         }
-        // LEFT → back to category sidebar
-        if (event is KeyDownEvent &&
-            event.logicalKey == LogicalKeyboardKey.arrowLeft) {
-          FocusScope.of(context).focusInDirection(TraversalDirection.left);
-          return KeyEventResult.handled;
+      },
+      onKeyEvent: (_, event) {
+        if (event is KeyDownEvent) {
+          // Select/OK → select channel; if already selected → maximize
+          if (event.logicalKey == LogicalKeyboardKey.select ||
+              event.logicalKey == LogicalKeyboardKey.enter ||
+              event.logicalKey == LogicalKeyboardKey.space ||
+              event.logicalKey == LogicalKeyboardKey.gameButtonA) {
+            widget.onTap(); // first tap selects; caller decides if maximize
+            return KeyEventResult.handled;
+          }
+          // LEFT → back to categories (via focusInDirection)
+          if (event.logicalKey == LogicalKeyboardKey.arrowLeft) {
+            FocusScope.of(context).focusInDirection(TraversalDirection.left);
+            return KeyEventResult.handled;
+          }
         }
         return KeyEventResult.ignored;
       },
@@ -508,13 +613,15 @@ class _ChannelCellState extends State<_ChannelCell> {
             decoration: BoxDecoration(
               color: widget.isSelected
                   ? AppTheme.selectedItem
-                  : (_hovering || _focused) // ← ADD _focused
+                  : (_hovering || _showFocusRing) // ← was: _focused
                   ? AppTheme.surfaceVariant
                   : AppTheme.epgFuture,
               border: Border(
                 bottom: const BorderSide(color: AppTheme.epgBorder, width: 0.5),
-                // Focus ring on left edge
-                left: _focused && !widget.isSelected
+                left:
+                    _showFocusRing &&
+                        !widget
+                            .isSelected // ← was: _focused
                     ? const BorderSide(color: AppTheme.primary, width: 2.5)
                     : BorderSide.none,
               ),
@@ -570,7 +677,9 @@ class _ChannelCellState extends State<_ChannelCell> {
                     ],
                   ),
                 ),
-                if (_hovering || _focused || widget.isFavorite)
+                if (_hovering ||
+                    _showFocusRing ||
+                    widget.isFavorite) // ← was: _focused
                   GestureDetector(
                     onTap: widget.onFavorite,
                     child: Icon(
@@ -583,7 +692,9 @@ class _ChannelCellState extends State<_ChannelCell> {
                           : AppTheme.textMuted,
                     ),
                   ),
-                if (_hovering || _focused || widget.isSelected)
+                if (_hovering ||
+                    _showFocusRing ||
+                    widget.isSelected) // ← was: _focused
                   Icon(
                     Icons.play_circle_outline,
                     size: 16,
@@ -605,7 +716,7 @@ class _ChannelCellState extends State<_ChannelCell> {
       return Image.network(
         icon,
         fit: BoxFit.contain,
-        errorBuilder: (_, _, _) => _placeholder(),
+        errorBuilder: (_, __, ___) => _placeholder(),
       );
     }
     return _placeholder();

@@ -129,23 +129,44 @@ class LivePlayerNotifier extends StateNotifier<LivePlayerState> {
   Future<void> _configureMpv() async {
     try {
       final p = _player as dynamic;
-      await p.setProperty('network-timeout', '20');
-      await p.setProperty('cache', 'yes');
-      await p.setProperty('cache-secs', '8');
-      await p.setProperty('cache-initial', '0');
-      await p.setProperty('cache-pause', 'no');
-      await p.setProperty('cache-pause-initial', 'no');
-      await p.setProperty('demuxer-max-bytes', '20MiB'); // ← low RAM friendly
+
+      // ── Network ────────────────────────────────────────────────────────────
+      await p.setProperty('network-timeout', '15');
       await p.setProperty(
         'stream-lavf-o',
         'reconnect=1,reconnect_at_eof=1,reconnect_streamed=1,'
-            'reconnect_delay_max=5,timeout=20000000',
+            'reconnect_delay_max=5,timeout=15000000',
       );
+
+      // ── Buffer — extremely tight for low-RAM TV devices ────────────────────
+      await p.setProperty('cache', 'yes');
+      await p.setProperty('cache-secs', '5'); // ← was 8
+      await p.setProperty('cache-initial', '0');
+      await p.setProperty('cache-pause', 'no');
+      await p.setProperty('cache-pause-initial', 'no');
+      await p.setProperty('demuxer-max-bytes', '8MiB'); // ← was 20MiB
+      await p.setProperty('demuxer-max-back-bytes', '4MiB'); // ← new
+
+      // ── Video decode — low-spec aggressive ────────────────────────────────
       await p.setProperty('hwdec', 'auto-safe');
       await p.setProperty('video-sync', 'audio');
-      await p.setProperty('framedrop', 'vo'); // ← drop frames under load
-      await p.setProperty('vd-lavc-threads', '2');
-      await p.setProperty('audio-buffer', '0.2');
+      await p.setProperty('framedrop', 'decoder+vo'); // ← was vo only
+      await p.setProperty('vd-lavc-threads', '1'); // ← was 2
+      await p.setProperty('vd-lavc-fast', 'yes'); // ← new: skip quality
+      await p.setProperty(
+        'vd-lavc-skiploopfilter',
+        'nonkey',
+      ); // ← new: skip deblocking
+      await p.setProperty('vd-lavc-skipframe', 'nonref'); // ← new: skip non-ref
+
+      // ── Audio ──────────────────────────────────────────────────────────────
+      await p.setProperty('audio-buffer', '0.1'); // ← was 0.2
+
+      // ── Output — reduce GPU memory footprint ──────────────────────────────
+      await p.setProperty('scale', 'bilinear'); // ← fast scaler
+      await p.setProperty('dscale', 'bilinear');
+      await p.setProperty('correct-downscaling', 'no');
+      await p.setProperty('sigmoid-upscaling', 'no');
     } catch (_) {}
   }
 
