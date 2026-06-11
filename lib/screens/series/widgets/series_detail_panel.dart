@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:lunar_iptv_player/widgets/auto_fav_banner.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../../../core/theme/app_theme.dart';
@@ -231,6 +232,23 @@ class _SeriesDetailPanelState extends ConsumerState<SeriesDetailPanel> {
       },
       child: CustomScrollView(
         slivers: [
+          // ── Auto Favourite Banner ───────────────────────────────────────────────────
+          if (AutoFavBanner.shouldShow(
+            series.seriesId,
+            ref.watch(seriesFavoritesProvider),
+            minViews: 3,
+          ))
+            SliverToBoxAdapter(
+              child: AutoFavBanner(
+                key: ValueKey('sfav_${series.seriesId}'),
+                contentId: series.seriesId,
+                contentName: series.name,
+                onAddFav: () => ref
+                    .read(seriesFavoritesProvider.notifier)
+                    .toggle(series.seriesId),
+                onDismiss: () {},
+              ),
+            ),
           // ── Backdrop hero ────────────────────────────────────────
           SliverToBoxAdapter(child: _buildHero(series, info, isFav, ref)),
 
@@ -296,9 +314,13 @@ class _SeriesDetailPanelState extends ConsumerState<SeriesDetailPanel> {
                   final service = ref.read(xtreamServiceProvider);
                   if (service == null) return;
                   final url = service.getSeriesUrl(
-                      ep.id, ep.containerExtension ?? 'mkv');
-                  launchUrl(Uri.parse(url),
-                      mode: LaunchMode.externalApplication);
+                    ep.id,
+                    ep.containerExtension ?? 'mkv',
+                  );
+                  launchUrl(
+                    Uri.parse(url),
+                    mode: LaunchMode.externalApplication,
+                  );
                 },
               );
             }, childCount: episodes.length),
@@ -947,27 +969,27 @@ class _EpisodeTileState extends State<_EpisodeTile> {
                   ),
                 ),
                 GestureDetector(
-                    onTap: () {
-                      widget.onDownload?.call();
-                    },
-                    child: AnimatedContainer(
-                      duration: const Duration(milliseconds: 200),
-                      width: 32,
-                      height: 32,
-                      decoration: BoxDecoration(
-                        color: (_hovering || _focused)
-                            ? AppTheme.primary
-                            : Colors.transparent,
-                        shape: BoxShape.circle,
-                      ),
-                      child: Icon(
-                        Icons.download_rounded,
-                        size: 18,
-                        color: (_hovering || _focused)
-                            ? Colors.white
-                            : AppTheme.textMuted,
-                      ),
+                  onTap: () {
+                    widget.onDownload?.call();
+                  },
+                  child: AnimatedContainer(
+                    duration: const Duration(milliseconds: 200),
+                    width: 32,
+                    height: 32,
+                    decoration: BoxDecoration(
+                      color: (_hovering || _focused)
+                          ? AppTheme.primary
+                          : Colors.transparent,
+                      shape: BoxShape.circle,
                     ),
+                    child: Icon(
+                      Icons.download_rounded,
+                      size: 18,
+                      color: (_hovering || _focused)
+                          ? Colors.white
+                          : AppTheme.textMuted,
+                    ),
+                  ),
                 ),
               ],
             ),

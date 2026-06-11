@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:lunar_iptv_player/core/utils/focus_utils.dart';
 import 'package:lunar_iptv_player/services/behavior_service.dart';
+import 'package:lunar_iptv_player/widgets/auto_fav_banner.dart';
 
 import '../../../core/constants/app_constants.dart';
 import '../../../core/theme/app_theme.dart';
@@ -125,13 +126,45 @@ class _ChannelListPanelState extends ConsumerState<ChannelListPanel> {
               ),
             );
           }
-          return ListView.builder(
-            controller: _scrollCtrl,
-            itemCount: streams.length,
-            itemExtent: 68,
-            itemBuilder: (ctx, i) {
-              return _buildItem(i, streams[i], selected, showChannelNumber);
-            },
+
+          final selected = ref.watch(selectedChannelProvider);
+          final favorites = ref.watch(liveFavoritesNotifierProvider);
+
+          // ── Auto-fav banner ────────────────────────────────────────────────
+          final showBanner =
+              selected != null &&
+              AutoFavBanner.shouldShow(selected.streamId, favorites);
+
+          return Column(
+            children: [
+              // Time-of-Day strip is rendered in the sidebar, not here
+
+              // Auto-fav banner — shown above the list when applicable
+              if (showBanner)
+                AutoFavBanner(
+                  key: ValueKey('afb_${selected.streamId}'),
+                  contentId: selected.streamId,
+                  contentName: selected.name,
+                  onAddFav: () => ref
+                      .read(liveFavoritesNotifierProvider.notifier)
+                      .toggle(selected.streamId),
+                  onDismiss: () {
+                    // Record dismissal so banner doesn't reappear this session
+                    // (no persistent storage needed — in-memory only)
+                  },
+                ),
+
+              // Channel list
+              Expanded(
+                child: ListView.builder(
+                  controller: _scrollCtrl,
+                  itemCount: streams.length,
+                  itemExtent: 68,
+                  itemBuilder: (ctx, i) =>
+                      _buildItem(i, streams[i], selected, showChannelNumber),
+                ),
+              ),
+            ],
           );
         },
         loading: () => const Center(

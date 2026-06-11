@@ -9,6 +9,7 @@ import '../../../models/xtream_models.dart';
 import '../../../providers/app_providers.dart';
 import '../../../providers/live_tv_provider.dart';
 import '../../../services/storage_service.dart';
+import '../../../services/behavior_service.dart';
 
 class LiveCategorySidebar extends ConsumerStatefulWidget {
   final double width;
@@ -24,17 +25,23 @@ class _LiveCategorySidebarState extends ConsumerState<LiveCategorySidebar> {
   final _searchCtrl = TextEditingController();
   String _query = '';
   bool _showSearch = false;
+  final Map<String, GlobalKey> _catKeys = {};
+  // Track item index for reliable scroll-to-selected on cold start
+  final Map<String, int> _catIndexMap = {};
+  static const double _kItemHeight = 42.0; // matches tile padding
+  static const double _kHeaderOffset = 160.0; // pinned tiles + divider height
 
   @override
   void dispose() {
     _scrollCtrl.dispose();
     _searchCtrl.dispose();
+    _catKeys.clear();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
-    final categoriesAsync = ref.watch(liveCategoriesProvider);
+    final categoriesAsync = ref.watch(smartLiveCategoriesProvider);
     final selected = ref.watch(selectedLiveCategoryProvider);
     final hiddenCats = ref.watch(hiddenLiveCategoriesProvider);
     final filter = ref.watch(liveFilterProvider);
@@ -50,6 +57,22 @@ class _LiveCategorySidebarState extends ConsumerState<LiveCategorySidebar> {
       final id = s.categoryId ?? '';
       countMap[id] = (countMap[id] ?? 0) + 1;
     }
+
+    // Restore scroll to previously selected category after rebuild/cold start
+    ref.listen<XtreamCategory?>(selectedLiveCategoryProvider, (prev, next) {
+      if (next != null && next.categoryId != prev?.categoryId) {
+        // Small delay to let the list fully layout first
+        Future.delayed(const Duration(milliseconds: 120), () {
+          if (mounted) _scrollToCategory(next.categoryId);
+        });
+      }
+    });
+
+    // On first build, scroll to currently selected category
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final sel = ref.read(selectedLiveCategoryProvider);
+      if (sel != null) _scrollToCategory(sel.categoryId);
+    });
 
     return SizedBox(
       width: widget.width,
@@ -72,6 +95,12 @@ class _LiveCategorySidebarState extends ConsumerState<LiveCategorySidebar> {
                     }
                     return true;
                   }).toList();
+
+                  // Build index map for reliable scroll positioning
+                  _catIndexMap.clear();
+                  for (int i = 0; i < filtered.length; i++) {
+                    _catIndexMap[filtered[i].categoryId] = i;
+                  }
 
                   return ListView(
                     controller: _scrollCtrl,
@@ -175,6 +204,40 @@ class _LiveCategorySidebarState extends ConsumerState<LiveCategorySidebar> {
                                 letterSpacing: 1,
                               ),
                             ),
+                            const SizedBox(width: 6),
+                            // AI sorted badge — visible only when behavior data exists
+                            if (filtered.any(
+                              (c) =>
+                                  BehaviorService.instance.getCategoryTaps(
+                                    c.categoryId,
+                                  ) >
+                                  0,
+                            ))
+                              Container(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 4,
+                                  vertical: 1,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: const Color(
+                                    0xFF7B61FF,
+                                  ).withValues(alpha: 0.15),
+                                  borderRadius: BorderRadius.circular(3),
+                                  border: Border.all(
+                                    color: const Color(
+                                      0xFF7B61FF,
+                                    ).withValues(alpha: 0.3),
+                                  ),
+                                ),
+                                child: const Text(
+                                  'AI',
+                                  style: TextStyle(
+                                    color: Color(0xFF7B61FF),
+                                    fontSize: 7,
+                                    fontWeight: FontWeight.w800,
+                                  ),
+                                ),
+                              ),
                             const Spacer(),
                             Text(
                               '${cats.length}',
@@ -187,25 +250,37 @@ class _LiveCategorySidebarState extends ConsumerState<LiveCategorySidebar> {
                         ),
                       ),
 
+                      // Build index map for reliable scroll positioning
+                      // _catIndexMap.clear();
+                      // for (int i = 0; i < filtered.length; i++) {
+                      //   _catIndexMap[filtered[i].categoryId] = i;
+                      // }
+
                       // ── Category items ────────────────────────────────
                       ...filtered.asMap().entries.map((e) {
                         final i = e.key;
                         final cat = e.value;
-                        return _CategoryTile(
-                          category: cat,
-                          isSelected:
-                              filter == LiveFilter.all &&
-                              selected?.categoryId == cat.categoryId,
-                          count: countMap[cat.categoryId] ?? 0,
-                          isLocked:
-                              parentalEnabled &&
-                              parentalLocked.contains(cat.categoryId),
-                          onTap: () => _onCategoryTap(context, cat, selected),
-                          onLongPress: () =>
-                              _showHideDialog(context, cat, selected),
-                        ).animate().fadeIn(
-                          delay: Duration(milliseconds: i * 18),
-                          duration: 250.ms,
+                        _catKeys.putIfAbsent(cat.categoryId, () => GlobalKey());
+                        return RepaintBoundary(
+                          key: _catKeys[cat.categoryId],
+                          child:
+                              _CategoryTile(
+                                category: cat,
+                                isSelected:
+                                    filter == LiveFilter.all &&
+                                    selected?.categoryId == cat.categoryId,
+                                count: countMap[cat.categoryId] ?? 0,
+                                isLocked:
+                                    parentalEnabled &&
+                                    parentalLocked.contains(cat.categoryId),
+                                onTap: () =>
+                                    _onCategoryTap(context, cat, selected),
+                                onLongPress: () =>
+                                    _showHideDialog(context, cat, selected),
+                              ).animate().fadeIn(
+                                delay: Duration(milliseconds: i * 18),
+                                duration: 250.ms,
+                              ),
                         );
                       }),
 
@@ -298,6 +373,29 @@ class _LiveCategorySidebarState extends ConsumerState<LiveCategorySidebar> {
     );
   }
 
+  void _scrollToCategory(String categoryId) {
+    if (!_scrollCtrl.hasClients) return;
+    final idx = _catIndexMap[categoryId];
+    if (idx == null) return;
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!_scrollCtrl.hasClients) return;
+      final viewportH = _scrollCtrl.position.viewportDimension;
+      final itemOffset = _kHeaderOffset + (idx * _kItemHeight);
+      // Center the item in the viewport
+      final target = (itemOffset - viewportH / 2 + _kItemHeight / 2).clamp(
+        0.0,
+        _scrollCtrl.position.maxScrollExtent,
+      );
+
+      _scrollCtrl.animateTo(
+        target,
+        duration: const Duration(milliseconds: 400),
+        curve: Curves.easeOutCubic,
+      );
+    });
+  }
+
   Future<void> _showHideDialog(
     BuildContext context,
     XtreamCategory cat,
@@ -361,6 +459,25 @@ class _LiveCategorySidebarState extends ConsumerState<LiveCategorySidebar> {
     ref.read(selectedLiveCategoryProvider.notifier).state = isSameAndAll
         ? null
         : cat;
+
+    // Record tap for smart category ordering (AI feature)
+    BehaviorService.instance.recordCategoryTap(cat.categoryId);
+
+    // Scroll selected category to center of sidebar
+    _scrollToCategory(cat.categoryId);
+
+    // Auto-scroll to keep selected category visible
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final key = _catKeys[cat.categoryId];
+      if (key?.currentContext != null && _scrollCtrl.hasClients) {
+        Scrollable.ensureVisible(
+          key!.currentContext!,
+          duration: const Duration(milliseconds: 300),
+          curve: Curves.easeOut,
+          alignment: 0.3, // keep it in upper-third of viewport
+        );
+      }
+    });
   }
 
   Future<bool> _showPinDialog(BuildContext context) async {
@@ -502,7 +619,11 @@ class _SidebarTileState extends State<_SidebarTile> {
             widget.onTap();
             return KeyEventResult.handled;
           }
-          // Right arrow — let scope node handle cross-panel navigation
+          // Right arrow: explicitly navigate to channel list panel
+          if (event.logicalKey == LogicalKeyboardKey.arrowRight) {
+            FocusScope.of(context).focusInDirection(TraversalDirection.right);
+            return KeyEventResult.handled;
+          }
         }
         if (event is KeyUpEvent) {
           setState(() => _pressed = false);
@@ -642,7 +763,11 @@ class _CategoryTileState extends State<_CategoryTile> {
             widget.onTap();
             return KeyEventResult.handled;
           }
-          // Right arrow: cross-panel navigation handled by _categoryPanelFocus.onKeyEvent
+          // Right arrow: explicitly navigate to channel list panel
+          if (event.logicalKey == LogicalKeyboardKey.arrowRight) {
+            FocusScope.of(context).focusInDirection(TraversalDirection.right);
+            return KeyEventResult.handled;
+          }
         }
         if (event is KeyUpEvent) {
           setState(() => _pressed = false);

@@ -61,18 +61,24 @@ class BehaviorService {
     String? episode,
   }) async {
     if (_box == null || durationSeconds <= 0) return;
+    if (url.isEmpty)
+      return; // Never save without a URL — would cause black screen
 
     final progress = positionSeconds / durationSeconds;
-    if (progress > 0.90) {
+
+    // Remove if near end (>92%)
+    if (progress > 0.92) {
       await _box!.delete(_k('watch_pos_$id'));
       await _prunePositions();
       return;
     }
-    if (progress < 0.02) return;
+
+    // Skip if too early (<3%) to avoid accidental saves
+    if (progress < 0.03) return;
 
     final data = {
       'id': id,
-      'url': url, // ← NEW — needed to resume playback
+      'url': url,
       'position': positionSeconds,
       'duration': durationSeconds,
       'progress': progress,
@@ -87,7 +93,6 @@ class BehaviorService {
     };
 
     await _box!.put(_k('watch_pos_$id'), jsonEncode(data));
-    // Also store name for stats
     await _box!.put(_k('content_name_$id'), title);
     await _prunePositions();
   }

@@ -4,6 +4,7 @@ import 'package:flutter_animate/flutter_animate.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:lunar_iptv_player/services/behavior_service.dart';
+import 'package:lunar_iptv_player/widgets/auto_fav_banner.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../../../core/theme/app_theme.dart';
@@ -241,6 +242,20 @@ class MovieDetailPanel extends ConsumerWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
+        // ── Auto Favourite Banner ────────────────────────────────────────────────────
+        if (AutoFavBanner.shouldShow(
+          movie.streamId,
+          ref.watch(vodFavoritesProvider),
+          minViews: 5,
+        ))
+          AutoFavBanner(
+            key: ValueKey('mfav_${movie.streamId}'),
+            contentId: movie.streamId,
+            contentName: movie.name,
+            onAddFav: () =>
+                ref.read(vodFavoritesProvider.notifier).toggle(movie.streamId),
+            onDismiss: () {},
+          ),
         // Genre chips
         if (info?.genre != null) ...[
           const SizedBox(height: 8),
