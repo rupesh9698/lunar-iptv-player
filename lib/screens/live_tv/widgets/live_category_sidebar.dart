@@ -26,10 +26,7 @@ class _LiveCategorySidebarState extends ConsumerState<LiveCategorySidebar> {
   String _query = '';
   bool _showSearch = false;
   final Map<String, GlobalKey> _catKeys = {};
-  // Track item index for reliable scroll-to-selected on cold start
   final Map<String, int> _catIndexMap = {};
-  static const double _kItemHeight = 42.0; // matches tile padding
-  static const double _kHeaderOffset = 160.0; // pinned tiles + divider height
 
   @override
   void dispose() {
@@ -374,22 +371,16 @@ class _LiveCategorySidebarState extends ConsumerState<LiveCategorySidebar> {
   }
 
   void _scrollToCategory(String categoryId) {
-    if (!_scrollCtrl.hasClients) return;
-    final idx = _catIndexMap[categoryId];
-    if (idx == null) return;
+    final key = _catKeys[categoryId];
+    if (key?.currentContext == null) return;
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!_scrollCtrl.hasClients) return;
-      final viewportH = _scrollCtrl.position.viewportDimension;
-      final itemOffset = _kHeaderOffset + (idx * _kItemHeight);
-      // Center the item in the viewport
-      final target = (itemOffset - viewportH / 2 + _kItemHeight / 2).clamp(
-        0.0,
-        _scrollCtrl.position.maxScrollExtent,
-      );
-
-      _scrollCtrl.animateTo(
-        target,
+      if (!mounted) return;
+      final ctx = key?.currentContext;
+      if (ctx == null) return;
+      Scrollable.ensureVisible(
+        ctx,
+        alignment: 0.5, // 0.5 = exact center of viewport
         duration: const Duration(milliseconds: 400),
         curve: Curves.easeOutCubic,
       );
@@ -463,21 +454,8 @@ class _LiveCategorySidebarState extends ConsumerState<LiveCategorySidebar> {
     // Record tap for smart category ordering (AI feature)
     BehaviorService.instance.recordCategoryTap(cat.categoryId);
 
-    // Scroll selected category to center of sidebar
+    // Scroll selected category to center of viewport
     _scrollToCategory(cat.categoryId);
-
-    // Auto-scroll to keep selected category visible
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      final key = _catKeys[cat.categoryId];
-      if (key?.currentContext != null && _scrollCtrl.hasClients) {
-        Scrollable.ensureVisible(
-          key!.currentContext!,
-          duration: const Duration(milliseconds: 300),
-          curve: Curves.easeOut,
-          alignment: 0.3, // keep it in upper-third of viewport
-        );
-      }
-    });
   }
 
   Future<bool> _showPinDialog(BuildContext context) async {
