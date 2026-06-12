@@ -1,5 +1,6 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:lunar_iptv_player/services/behavior_service.dart';
+
 import '../core/constants/app_constants.dart';
 import '../models/xtream_models.dart';
 import '../providers/app_providers.dart';
@@ -45,16 +46,23 @@ class LastWatchedLiveNotifier extends StateNotifier<_LastWatched> {
   final String playlistId;
 
   LastWatchedLiveNotifier({required this.playlistId})
-    : super(_load(playlistId));
+      : super(_load(playlistId));
 
   static _LastWatched _load(String pid) => (
-    categoryId:
-        StorageService.instance.getSetting('last_live_cat_$pid') as String?,
-    channelId:
-        StorageService.instance.getSetting('last_live_ch_$pid') as String?,
+  categoryId:
+  StorageService.instance.getSetting('last_live_cat_$pid') as String?,
+  channelId:
+  StorageService.instance.getSetting('last_live_ch_$pid') as String?,
   );
 
+  /// Saves only when rememberPosition setting is enabled.
   Future<void> save({String? categoryId, String? channelId}) async {
+    final remember = StorageService.instance.getSetting(
+      AppConstants.rememberPositionKey,
+      true,
+    ) as bool;
+    if (!remember) return;
+
     await StorageService.instance.setSetting(
       'last_live_cat_$playlistId',
       categoryId,

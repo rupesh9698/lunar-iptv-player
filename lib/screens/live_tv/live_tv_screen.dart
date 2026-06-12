@@ -427,76 +427,92 @@ class _LiveTVScreenState extends ConsumerState<LiveTVScreen> {
     }
   }
 
-  // ── Cold-start + post-refresh restore ────────────────────────────────────────
+  // ── Cold-start + post-refresh restore ─────────────────────────────────────
+  // Called after cache is ready. Restores last watched category + channel
+  // and starts streaming immediately.
   Future<void> _restoreFromLastWatched() async {
     if (_hasRestored) return;
-    final remember =
-        StorageService.instance.getSetting(
-              AppConstants.rememberPositionKey,
-              true,
-            )
-            as bool;
+
+    final remember = StorageService.instance.getSetting(
+      AppConstants.rememberPositionKey,
+      true,
+    ) as bool;
     if (!remember) return;
 
     final last = ref.read(lastWatchedLiveProvider);
     if (last.categoryId == null && last.channelId == null) return;
 
-    // Await the future — resolves from Hive cache almost instantly on restart
+    // Load categories from cache — near-instant on restart
     List<XtreamCategory> cats;
     try {
       cats = await ref.read(liveCategoriesProvider.future);
     } catch (_) {
       return;
     }
-
     if (!mounted || _hasRestored || cats.isEmpty) return;
     _hasRestored = true;
 
-    // Restore category selection
+    // ── Step 1: Restore category ──────────────────────────────────────────
+    XtreamCategory? restoredCategory;
     if (last.categoryId != null) {
-      final category = cats.cast<XtreamCategory?>().firstWhere(
-        (c) => c?.categoryId == last.categoryId,
+      restoredCategory = cats.cast<XtreamCategory?>().firstWhere(
+            (c) => c?.categoryId == last.categoryId,
         orElse: () => null,
       );
-      if (category != null) {
+      if (restoredCategory != null) {
         ref.read(liveFilterProvider.notifier).state = LiveFilter.all;
-        ref.read(selectedLiveCategoryProvider.notifier).state = category;
+        ref.read(selectedLiveCategoryProvider.notifier).state = restoredCategory;
+        // Wait for category filter + stream provider to propagate
+        await Future.delayed(const Duration(milliseconds: 500));
+        if (!mounted) return;
       }
     }
 
-    // Give category-filter time to propagate before scrolling
-    if (last.channelId != null) {
-      await Future.delayed(const Duration(milliseconds: 700));
-      if (!mounted) return;
+    // ── Step 2: Find the channel ──────────────────────────────────────────
+    if (last.channelId == null) return;
 
-      // Trigger scroll in channel list
-      ref.read(liveScrollToChannelProvider.notifier).state = last.channelId;
+    LiveStream? channel;
 
-      // Auto-load into inline player
-      LiveStream? channel;
-      final filtered = ref.read(filteredLiveStreamsProvider).value;
-      if (filtered != null) {
-        for (final s in filtered) {
-          if (s.streamId == last.channelId) {
-            channel = s;
-            break;
-          }
-        }
+    // First try the filtered list (respects current category)
+    final filtered = ref.read(filteredLiveStreamsProvider).value;
+    channel = filtered?.firstWhereOrNull((s) => s.streamId == last.channelId);
+
+    // Fallback: search all cached streams
+    if (channel == null) {
+      final allCached =
+          CacheService.instance.loadLiveStreams(ignoreExpiry: true) ?? [];
+      channel = allCached.firstWhereOrNull((s) => s.streamId == last.channelId);
+
+      // If found in cache but not in filtered list, category may have been
+      // "All Channels" — reset to null so all channels show
+      if (channel != null && restoredCategory == null) {
+        ref.read(liveFilterProvider.notifier).state = LiveFilter.all;
+        ref.read(selectedLiveCategoryProvider.notifier).state = null;
+        await Future.delayed(const Duration(milliseconds: 200));
+        if (!mounted) return;
       }
-      if (channel == null) {
-        final cached =
-            CacheService.instance.loadLiveStreams(ignoreExpiry: true) ?? [];
-        for (final s in cached) {
-          if (s.streamId == last.channelId) {
-            channel = s;
-            break;
-          }
-        }
-      }
-      if (channel != null && mounted) {
-        ref.read(selectedChannelProvider.notifier).state = channel;
-        ref.read(epgCacheProvider.notifier).loadEpg(channel.streamId);
-      }
+    }
+
+    if (channel == null || !mounted) return;
+
+    // ── Step 3: Select channel + trigger scroll ───────────────────────────
+    // Set scroll target BEFORE setting channel so EPG list scrolls correctly
+    ref.read(liveScrollToChannelProvider.notifier).state = channel.streamId;
+
+    // Setting selectedChannelProvider triggers the ref.listen in build()
+    // which calls openChannel() and saves last watched automatically
+    ref.read(selectedChannelProvider.notifier).state = channel;
+    ref.read(epgCacheProvider.notifier).loadEpg(channel.streamId);
+
+    // ── Step 4: Explicitly start streaming ───────────────────────────────
+    // The ref.listen fires only on CHANGES. Since selectedChannelProvider
+    // was null before this, it will fire. But we also call openChannel
+    // directly here as a safety net in case the listener missed it
+    // (e.g. if this runs before the first build completes).
+    final playlist = ref.read(activePlaylistProvider);
+    final url = playlist?.getChannelUrl(channel) ?? '';
+    if (url.isNotEmpty) {
+      ref.read(livePlayerProvider.notifier).openChannel(url);
     }
   }
 
@@ -521,6 +537,9 @@ class _LiveTVScreenState extends ConsumerState<LiveTVScreen> {
   @override
   Widget build(BuildContext context) {
     // ── Auto-load channel in inline player when selection changes ──────────
+    // This is the SINGLE central point that handles all channel changes:
+    // from channel list, EPG timeline, player switch buttons, time-of-day
+    // strip, channel guide — all trigger this listener.
     ref.listen<LiveStream?>(selectedChannelProvider, (prev, next) {
       if (next == null || next.streamId == prev?.streamId) return;
 
@@ -528,8 +547,16 @@ class _LiveTVScreenState extends ConsumerState<LiveTVScreen> {
       final url = playlist?.getChannelUrl(next) ?? '';
       if (url.isEmpty) return;
 
+      // Start streaming
       ref.read(livePlayerProvider.notifier).openChannel(url);
       ref.read(recentlyViewedLiveProvider.notifier).add(next.streamId);
+
+      // Centrally save last watched (notifier checks rememberPosition internally)
+      final category = ref.read(selectedLiveCategoryProvider);
+      ref.read(lastWatchedLiveProvider.notifier).save(
+        categoryId: category?.categoryId,
+        channelId: next.streamId,
+      );
     });
 
     final isMaximized = ref.watch(livePlayerMaximizedProvider);
@@ -1454,4 +1481,14 @@ void playChannel(BuildContext context, WidgetRef ref, LiveStream channel) {
   ref.read(epgCacheProvider.notifier).loadEpg(channel.streamId);
   // Maximize the inline player
   ref.read(livePlayerMaximizedProvider.notifier).state = true;
+}
+
+// ── Extension ─────────────────────────────────────────────────────────────────
+extension _IterableExt<T> on Iterable<T> {
+  T? firstWhereOrNull(bool Function(T) test) {
+    for (final e in this) {
+      if (test(e)) return e;
+    }
+    return null;
+  }
 }

@@ -5,12 +5,10 @@ import 'package:lunar_iptv_player/core/utils/focus_utils.dart';
 import 'package:lunar_iptv_player/services/behavior_service.dart';
 import 'package:lunar_iptv_player/widgets/auto_fav_banner.dart';
 
-import '../../../core/constants/app_constants.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../models/xtream_models.dart';
 import '../../../providers/app_providers.dart';
 import '../../../providers/live_tv_provider.dart';
-import '../../../services/storage_service.dart';
 import '../live_tv_screen.dart';
 
 class ChannelListPanel extends ConsumerStatefulWidget {
@@ -215,28 +213,11 @@ class _ChannelListPanelState extends ConsumerState<ChannelListPanel> {
       onActivate: () {
         ref.read(selectedChannelProvider.notifier).state = stream;
         ref.read(epgCacheProvider.notifier).loadEpg(stream.streamId);
-        // Record hourly view with channel name for stats
         BehaviorService.instance.recordHourlyChannelView(
           stream.streamId,
           name: stream.name,
         );
         ref.read(recentlyViewedLiveProvider.notifier).add(stream.streamId);
-
-        final rememberPos =
-            StorageService.instance.getSetting(
-                  AppConstants.rememberPositionKey,
-                  true,
-                )
-                as bool;
-        if (rememberPos) {
-          final category = ref.read(selectedLiveCategoryProvider);
-          ref
-              .read(lastWatchedLiveProvider.notifier)
-              .save(
-                categoryId: category?.categoryId,
-                channelId: stream.streamId,
-              );
-        }
       },
       onFocusChange: (focused) {
         if (focused && _scrollCtrl.hasClients) {
