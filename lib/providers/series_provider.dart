@@ -142,10 +142,15 @@ final sortedSeriesListProvider = FutureProvider<List<Series>>((ref) async {
     }
   }
 
+  final sortInput = (filter == SeriesFilter.all && query.isEmpty &&
+      allList.length > 20000)
+      ? allList.sublist(0, 20000)
+      : allList;
+
   return Isolate.run(
-    () => _seriesSortIsolate(
+        () => _seriesSortIsolate(
       _SeriesSortMsg(
-        list: allList,
+        list: sortInput,
         filterIndex: filter.index,
         sortIndex: sort.index,
         query: query,

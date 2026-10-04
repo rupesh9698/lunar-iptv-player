@@ -154,11 +154,18 @@ final sortedVodStreamsProvider = FutureProvider<List<VodStream>>((ref) async {
     }
   }
 
-  // Run heavy sort in background isolate to prevent ANR
+  // Run heavy sort in background isolate to prevent ANR.
+  // Cap input to 20k for non-search views to prevent OOM on 60k+ libraries.
+  // For search/favorites/recent the list is already small.
+  final sortInput = (filter == VodFilter.all && query.isEmpty &&
+      allStreams.length > 20000)
+      ? allStreams.sublist(0, 20000)
+      : allStreams;
+
   return Isolate.run(
-    () => _vodSortIsolate(
+        () => _vodSortIsolate(
       _VodSortMsg(
-        streams: allStreams,
+        streams: sortInput,
         filterIndex: filter.index,
         sortIndex: sort.index,
         query: query,
@@ -214,10 +221,15 @@ enum VodFilter { all, favorites, recent, recentlyAdded }
 
 final vodFilterProvider = StateProvider<VodFilter>((ref) => VodFilter.all);
 
-// ── Vod All Streams (no category filter) ─────────────────────────────────────
+// ── Vod All Streams (no category filter) ─────────────────────────────────
+// Hard cap at 20k to prevent OOM on low-end devices.
+// The isolate sort in sortedVodStreamsProvider already caps at 20k, but
+// the decode itself can OOM before we even get there. Cap here too.
 final vodAllStreamsProvider = FutureProvider<List<VodStream>>((ref) async {
   final cached = CacheService.instance.loadVodStreams(ignoreExpiry: true);
-  if (cached != null) return cached;
+  if (cached != null) {
+    return cached.length > 20000 ? cached.sublist(0, 20000) : cached;
+  }
   final service = ref.watch(xtreamServiceProvider);
   if (service == null) return [];
   return service.getVodStreams();

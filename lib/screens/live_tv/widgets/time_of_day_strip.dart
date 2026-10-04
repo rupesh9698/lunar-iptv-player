@@ -1,11 +1,11 @@
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 
 import '../../../core/theme/app_theme.dart';
+import '../../../core/utils/focus_utils.dart';
 import '../../../models/xtream_models.dart';
 import '../../../providers/live_tv_provider.dart';
 import '../../../services/behavior_service.dart';
@@ -118,127 +118,100 @@ class _TimeOfDayChip extends ConsumerStatefulWidget {
   ConsumerState<_TimeOfDayChip> createState() => _TimeOfDayChipState();
 }
 
-class _TimeOfDayChipState extends ConsumerState<_TimeOfDayChip> {
-  bool _focused = false;
-  bool _pressed = false;
-
+class _TimeOfDayChipState extends ConsumerState<_TimeOfDayChip>
+    with TvFocusMixin {
   @override
   Widget build(BuildContext context) {
     final isSelected =
         ref.watch(selectedChannelProvider)?.streamId == widget.channel.streamId;
 
-    return Focus(
-          onFocusChange: (f) => setState(() => _focused = f),
-          onKeyEvent: (_, event) {
-            if (event is KeyDownEvent &&
-                (event.logicalKey == LogicalKeyboardKey.select ||
-                    event.logicalKey == LogicalKeyboardKey.enter ||
-                    event.logicalKey == LogicalKeyboardKey.space)) {
-              setState(() => _pressed = true);
-              _select();
-              return KeyEventResult.handled;
-            }
-            if (event is KeyUpEvent) {
-              setState(() => _pressed = false);
-              return KeyEventResult.ignored;
-            }
-            return KeyEventResult.ignored;
-          },
-          child: MouseRegion(
-            cursor: SystemMouseCursors.click,
-            child: GestureDetector(
-              onTap: _select,
-              onTapDown: (_) => setState(() => _pressed = true),
-              onTapUp: (_) => setState(() => _pressed = false),
-              onTapCancel: () => setState(() => _pressed = false),
-              child: AnimatedScale(
-                scale: _pressed
-                    ? 0.93
-                    : _focused
-                    ? 1.05
-                    : 1.0,
-                duration: const Duration(milliseconds: 130),
-                child: AnimatedContainer(
-                  duration: const Duration(milliseconds: 150),
-                  height: 52,
-                  padding: const EdgeInsets.symmetric(horizontal: 10),
-                  decoration: BoxDecoration(
-                    color: isSelected
-                        ? AppTheme.selectedItem
-                        : (_focused)
-                        ? AppTheme.surfaceVariant
-                        : AppTheme.surface,
-                    borderRadius: BorderRadius.circular(10),
-                    border: Border.all(
-                      color: isSelected
-                          ? AppTheme.primary
-                          : _focused
-                          ? Colors.white.withValues(alpha: 0.4)
-                          : AppTheme.divider,
-                      width: (isSelected || _focused) ? 1.5 : 1,
-                    ),
-                    boxShadow: (isSelected || _focused)
-                        ? [
-                            BoxShadow(
-                              color: AppTheme.primary.withValues(alpha: 0.20),
-                              blurRadius: 8,
-                            ),
-                          ]
-                        : null,
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      // Logo
-                      ClipRRect(
-                        borderRadius: BorderRadius.circular(6),
-                        child: SizedBox(
-                          width: 36,
-                          height: 28,
-                          child: widget.channel.streamIcon?.isNotEmpty == true
-                              ? CachedNetworkImage(
-                                  imageUrl: widget.channel.streamIcon!,
-                                  fit: BoxFit.contain,
-                                  placeholder: (_, _) => const Icon(
-                                    Icons.tv,
-                                    color: AppTheme.textMuted,
-                                    size: 16,
-                                  ),
-                                  errorWidget: (_, _, _) => const Icon(
-                                    Icons.tv,
-                                    color: AppTheme.textMuted,
-                                    size: 16,
-                                  ),
-                                )
-                              : const Icon(
-                                  Icons.tv,
-                                  color: AppTheme.textMuted,
-                                  size: 16,
-                                ),
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      // Name
-                      ConstrainedBox(
-                        constraints: const BoxConstraints(maxWidth: 100),
-                        child: Text(
-                          widget.channel.name,
-                          style: TextStyle(
-                            color: isSelected
-                                ? AppTheme.textPrimary
-                                : AppTheme.textSecondary,
-                            fontSize: 12,
-                            fontWeight: isSelected
-                                ? FontWeight.w600
-                                : FontWeight.w400,
-                          ),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ),
-                    ],
-                  ),
+    return TvFocusable(
+          onActivate: _select,
+          onFocusChange: setTvFocused,
+          builder: (focused, pressed) => AnimatedScale(
+            scale: pressed
+                ? 0.93
+                : focused
+                ? 1.05
+                : 1.0,
+            duration: const Duration(milliseconds: 130),
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 150),
+              height: 52,
+              padding: const EdgeInsets.symmetric(horizontal: 10),
+              decoration: BoxDecoration(
+                color: isSelected
+                    ? AppTheme.selectedItem
+                    : focused
+                    ? AppTheme.surfaceVariant
+                    : AppTheme.surface,
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(
+                  color: isSelected
+                      ? AppTheme.primary
+                      : focused
+                      ? Colors.white.withValues(alpha: 0.55)
+                      : AppTheme.divider,
+                  width: (isSelected || focused) ? 1.5 : 1,
                 ),
+                boxShadow: (isSelected || focused)
+                    ? [
+                        BoxShadow(
+                          color: AppTheme.primary.withValues(alpha: 0.20),
+                          blurRadius: 8,
+                        ),
+                      ]
+                    : null,
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(6),
+                    child: SizedBox(
+                      width: 36,
+                      height: 28,
+                      child: widget.channel.streamIcon?.isNotEmpty == true
+                          ? CachedNetworkImage(
+                              imageUrl: widget.channel.streamIcon!,
+                              fit: BoxFit.contain,
+                              placeholder: (_, _) => const Icon(
+                                Icons.tv,
+                                color: AppTheme.textMuted,
+                                size: 16,
+                              ),
+                              errorWidget: (_, _, _) => const Icon(
+                                Icons.tv,
+                                color: AppTheme.textMuted,
+                                size: 16,
+                              ),
+                            )
+                          : const Icon(
+                              Icons.tv,
+                              color: AppTheme.textMuted,
+                              size: 16,
+                            ),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 100),
+                    child: Text(
+                      widget.channel.name,
+                      style: TextStyle(
+                        color: isSelected
+                            ? AppTheme.textPrimary
+                            : AppTheme.textSecondary,
+                        fontSize: 12,
+                        fontWeight: isSelected
+                            ? FontWeight.w600
+                            : FontWeight.w400,
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                ],
               ),
             ),
           ),

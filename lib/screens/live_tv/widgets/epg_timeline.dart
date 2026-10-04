@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
+import 'package:lunar_iptv_player/core/utils/focus_utils.dart';
 
 import '../../../core/theme/app_theme.dart';
 import '../../../models/xtream_models.dart';
@@ -11,7 +12,33 @@ import '../../../providers/app_providers.dart';
 import '../../../providers/live_tv_provider.dart';
 
 class EpgTimeline extends ConsumerStatefulWidget {
-  const EpgTimeline({super.key});
+  final bool isFullscreen;
+  final VoidCallback onToggleFullscreen;
+  final FocusNode? searchFocusNode;
+  final FocusNode? refreshFocusNode;
+  final FocusNode? fullscreenFocusNode;
+
+  /// "Watch Now" button's FocusNode — Up from search/refresh/fullscreen.
+  final FocusNode? watchNowFocus;
+
+  /// Returns the currently-focused/selected category tile's FocusNode —
+  /// used for "Left" from the first channel-list item.
+  final FocusNode? Function()? categoryEntryFocus;
+
+  /// Reports the first channel cell's FocusNode once built.
+  final ValueChanged<FocusNode>? onFirstItemFocusReady;
+
+  const EpgTimeline({
+    super.key,
+    required this.isFullscreen,
+    required this.onToggleFullscreen,
+    this.searchFocusNode,
+    this.refreshFocusNode,
+    this.fullscreenFocusNode,
+    this.watchNowFocus,
+    this.categoryEntryFocus,
+    this.onFirstItemFocusReady,
+  });
 
   @override
   ConsumerState<EpgTimeline> createState() => _EpgTimelineState();
@@ -24,6 +51,16 @@ class _EpgTimelineState extends ConsumerState<EpgTimeline> {
   bool _syncing = false;
   Timer? _clockTimer;
   DateTime _now = DateTime.now();
+
+  // Per-channel-row focus nodes, indexed by position in the visible list.
+  final List<FocusNode> _channelFocusNodes = [];
+
+  FocusNode _channelNode(int index) {
+    while (_channelFocusNodes.length <= index) {
+      _channelFocusNodes.add(FocusNode(debugLabel: 'epgChannel$index'));
+    }
+    return _channelFocusNodes[index];
+  }
 
   static const double _chColW = 240.0;
   static const double _rowH = 58.0;
@@ -47,6 +84,9 @@ class _EpgTimelineState extends ConsumerState<EpgTimeline> {
     _rightCtrl.dispose();
     _horizCtrl.dispose();
     _clockTimer?.cancel();
+    for (final n in _channelFocusNodes) {
+      n.dispose();
+    }
     super.dispose();
   }
 
@@ -108,6 +148,15 @@ class _EpgTimelineState extends ConsumerState<EpgTimeline> {
       children: [
         // ── Controls bar ──────────────────────────────────────────
         _EpgControlBar(
+          isFullscreen: widget.isFullscreen,
+          onToggleFullscreen: widget.onToggleFullscreen,
+          searchFocusNode: widget.searchFocusNode,
+          refreshFocusNode: widget.refreshFocusNode,
+          fullscreenFocusNode: widget.fullscreenFocusNode,
+          watchNowFocus: widget.watchNowFocus,
+          categoryEntryFocus: widget.categoryEntryFocus,
+          firstChannelFocus: () =>
+              _channelFocusNodes.isNotEmpty ? _channelFocusNodes[0] : null,
           onRefresh: () {
             ref.read(epgCacheProvider.notifier).clear();
             ref.invalidate(liveStreamsProvider);
@@ -216,8 +265,19 @@ class _EpgTimelineState extends ConsumerState<EpgTimeline> {
                       physics: const ClampingScrollPhysics(),
                       itemBuilder: (_, i) {
                         final ch = streams[i];
+                        if (i == 0) {
+                          // Report first item's focus node once built.
+                          WidgetsBinding.instance.addPostFrameCallback((_) {
+                            if (mounted) {
+                              widget.onFirstItemFocusReady?.call(
+                                _channelNode(0),
+                              );
+                            }
+                          });
+                        }
                         return _ChannelCell(
                           key: ValueKey('ch_${ch.streamId}'),
+                          focusNode: _channelNode(i),
                           channel: ch,
                           isSelected: selected?.streamId == ch.streamId,
                           isFavorite: favorites.contains(ch.streamId),
@@ -226,6 +286,14 @@ class _EpgTimelineState extends ConsumerState<EpgTimeline> {
                           onFavorite: () => ref
                               .read(liveFavoritesNotifierProvider.notifier)
                               .toggle(ch.streamId),
+                          onUpAtTop: i == 0
+                              ? () => widget.searchFocusNode?.requestFocus()
+                              : () => _channelNode(i - 1).requestFocus(),
+                          onDownNext: i < streams.length - 1
+                              ? () => _channelNode(i + 1).requestFocus()
+                              : null,
+                          onLeftToCategory: () =>
+                              widget.categoryEntryFocus?.call()?.requestFocus(),
                         );
                       },
                     ),
@@ -319,8 +387,27 @@ class _EpgTimelineState extends ConsumerState<EpgTimeline> {
 // EPG CONTROLS BAR
 // ─────────────────────────────────────────────────────────────────────────────
 class _EpgControlBar extends ConsumerStatefulWidget {
+  final bool isFullscreen;
+  final VoidCallback onToggleFullscreen;
   final VoidCallback onRefresh;
-  const _EpgControlBar({required this.onRefresh});
+  final FocusNode? searchFocusNode;
+  final FocusNode? refreshFocusNode;
+  final FocusNode? fullscreenFocusNode;
+  final FocusNode? watchNowFocus;
+  final FocusNode? Function()? firstChannelFocus;
+  final FocusNode? Function()? categoryEntryFocus;
+
+  const _EpgControlBar({
+    required this.isFullscreen,
+    required this.onToggleFullscreen,
+    required this.onRefresh,
+    this.searchFocusNode,
+    this.refreshFocusNode,
+    this.fullscreenFocusNode,
+    this.watchNowFocus,
+    this.firstChannelFocus,
+    this.categoryEntryFocus,
+  });
 
   @override
   ConsumerState<_EpgControlBar> createState() => _EpgControlBarState();
@@ -336,6 +423,10 @@ class _EpgControlBarState extends ConsumerState<_EpgControlBar> {
     super.dispose();
   }
 
+  void _goFirstChannelOrSelf(FocusNode self) {
+    (widget.firstChannelFocus?.call() ?? self).requestFocus();
+  }
+
   @override
   Widget build(BuildContext context) {
     return Container(
@@ -345,11 +436,57 @@ class _EpgControlBarState extends ConsumerState<_EpgControlBar> {
       child: Row(
         children: [
           _buildInlineSearch(),
-          const SizedBox(width: 6),
+          const Spacer(),
           _buildIconBtn(
+            focusNode: widget.refreshFocusNode,
             icon: Icons.refresh,
             tooltip: 'Refresh EPG',
             onTap: widget.onRefresh,
+            onArrowKey: (key) {
+              if (key == LogicalKeyboardKey.arrowUp) {
+                widget.watchNowFocus?.requestFocus();
+                return KeyEventResult.handled;
+              }
+              if (key == LogicalKeyboardKey.arrowDown) {
+                _goFirstChannelOrSelf(widget.refreshFocusNode!);
+                return KeyEventResult.handled;
+              }
+              if (key == LogicalKeyboardKey.arrowLeft) {
+                widget.searchFocusNode?.requestFocus();
+                return KeyEventResult.handled;
+              }
+              if (key == LogicalKeyboardKey.arrowRight) {
+                widget.fullscreenFocusNode?.requestFocus();
+                return KeyEventResult.handled;
+              }
+              return KeyEventResult.ignored;
+            },
+          ),
+          const SizedBox(width: 4),
+          _buildIconBtn(
+            focusNode: widget.fullscreenFocusNode,
+            icon: widget.isFullscreen
+                ? Icons.fullscreen_exit
+                : Icons.fit_screen_outlined,
+            tooltip: widget.isFullscreen
+                ? 'Exit EPG Fullscreen'
+                : 'EPG Fullscreen',
+            onTap: widget.onToggleFullscreen,
+            onArrowKey: (key) {
+              if (key == LogicalKeyboardKey.arrowUp) {
+                widget.watchNowFocus?.requestFocus();
+                return KeyEventResult.handled;
+              }
+              if (key == LogicalKeyboardKey.arrowDown) {
+                _goFirstChannelOrSelf(widget.fullscreenFocusNode!);
+                return KeyEventResult.handled;
+              }
+              if (key == LogicalKeyboardKey.arrowLeft) {
+                widget.refreshFocusNode?.requestFocus();
+                return KeyEventResult.handled;
+              }
+              return KeyEventResult.ignored; // Right = No Action
+            },
           ),
         ],
       ),
@@ -357,62 +494,97 @@ class _EpgControlBarState extends ConsumerState<_EpgControlBar> {
   }
 
   Widget _buildInlineSearch() {
-    return AnimatedContainer(
-      duration: const Duration(milliseconds: 250),
-      curve: Curves.easeInOut,
-      width: _searchOpen ? 220 : 32,
-      height: 30,
-      decoration: BoxDecoration(
-        color: _searchOpen ? AppTheme.surfaceVariant : Colors.transparent,
-        borderRadius: BorderRadius.circular(8),
-        border: _searchOpen ? Border.all(color: AppTheme.divider) : null,
-      ),
-      clipBehavior: Clip.hardEdge,
-      child: Row(
-        children: [
-          // Search icon / close button
-          GestureDetector(
-            onTap: () {
-              setState(() => _searchOpen = !_searchOpen);
-              if (!_searchOpen) {
-                _searchCtrl.clear();
-                // Clear EPG search query
-                ref.read(liveSearchQueryProvider.notifier).state = '';
-              }
-            },
-            child: SizedBox(
-              width: 32,
+    return TvFocusable(
+      focusNode: widget.searchFocusNode,
+      autoScroll: false,
+      onActivate: () {
+        setState(() => _searchOpen = !_searchOpen);
+        if (!_searchOpen) {
+          _searchCtrl.clear();
+          ref.read(liveSearchQueryProvider.notifier).state = '';
+        }
+      },
+      onArrowKey: (key) {
+        if (key == LogicalKeyboardKey.arrowUp) {
+          widget.watchNowFocus?.requestFocus();
+          return KeyEventResult.handled;
+        }
+        if (key == LogicalKeyboardKey.arrowDown) {
+          _goFirstChannelOrSelf(widget.searchFocusNode!);
+          return KeyEventResult.handled;
+        }
+        if (key == LogicalKeyboardKey.arrowLeft) {
+          widget.categoryEntryFocus?.call()?.requestFocus();
+          return KeyEventResult.handled;
+        }
+        if (key == LogicalKeyboardKey.arrowRight) {
+          widget.refreshFocusNode?.requestFocus();
+          return KeyEventResult.handled;
+        }
+        return KeyEventResult.ignored;
+      },
+      builder: (focused, _) => AnimatedContainer(
+        duration: const Duration(milliseconds: 250),
+        curve: Curves.easeInOut,
+        width: _searchOpen ? 220 : 32,
+        height: 30,
+        decoration: BoxDecoration(
+          color: _searchOpen ? AppTheme.surfaceVariant : Colors.transparent,
+          borderRadius: BorderRadius.circular(8),
+          border: _searchOpen
+              ? Border.all(color: AppTheme.divider)
+              : focused
+              ? Border.all(
+                  color: Colors.white.withValues(alpha: 0.55),
+                  width: 1.5,
+                )
+              : null,
+        ),
+        clipBehavior: Clip.hardEdge,
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            // Use flexible so it never overflows at fractional pixel sizes
+            SizedBox(
+              width: 30,
               height: 30,
-              child: Icon(
-                _searchOpen ? Icons.close : Icons.search,
-                size: 16,
-                color: _searchOpen ? AppTheme.primary : AppTheme.textSecondary,
-              ),
-            ),
-          ),
-          if (_searchOpen)
-            Expanded(
-              child: TextField(
-                controller: _searchCtrl,
-                autofocus: true,
-                onChanged: (v) =>
-                    ref.read(liveSearchQueryProvider.notifier).state = v,
-                style: const TextStyle(
-                  color: AppTheme.textPrimary,
-                  fontSize: 12,
-                ),
-                decoration: const InputDecoration(
-                  hintText: 'Search channels...',
-                  hintStyle: TextStyle(color: AppTheme.textMuted, fontSize: 12),
-                  border: InputBorder.none,
-                  focusedBorder: InputBorder.none,
-                  enabledBorder: InputBorder.none,
-                  contentPadding: EdgeInsets.zero,
-                  isDense: true,
+              child: Center(
+                child: Icon(
+                  _searchOpen ? Icons.close : Icons.search,
+                  size: 15,
+                  color: _searchOpen || focused
+                      ? AppTheme.primary
+                      : AppTheme.textSecondary,
                 ),
               ),
             ),
-        ],
+            if (_searchOpen)
+              Expanded(
+                child: TextField(
+                  controller: _searchCtrl,
+                  autofocus: true,
+                  onChanged: (v) =>
+                      ref.read(liveSearchQueryProvider.notifier).state = v,
+                  style: const TextStyle(
+                    color: AppTheme.textPrimary,
+                    fontSize: 12,
+                  ),
+                  decoration: const InputDecoration(
+                    hintText: 'Search channels...',
+                    hintStyle: TextStyle(
+                      color: AppTheme.textMuted,
+                      fontSize: 12,
+                    ),
+                    border: InputBorder.none,
+                    focusedBorder: InputBorder.none,
+                    enabledBorder: InputBorder.none,
+                    contentPadding: EdgeInsets.zero,
+                    isDense: true,
+                  ),
+                ),
+              ),
+          ],
+        ),
       ),
     );
   }
@@ -421,8 +593,16 @@ class _EpgControlBarState extends ConsumerState<_EpgControlBar> {
     required IconData icon,
     required String tooltip,
     required VoidCallback onTap,
+    FocusNode? focusNode,
+    KeyEventResult Function(LogicalKeyboardKey)? onArrowKey,
   }) {
-    return _EpgBarBtn(icon: icon, tooltip: tooltip, onTap: onTap);
+    return _EpgBarBtn(
+      icon: icon,
+      tooltip: tooltip,
+      onTap: onTap,
+      focusNode: focusNode,
+      onArrowKey: onArrowKey,
+    );
   }
 }
 
@@ -431,80 +611,53 @@ class _EpgBarBtn extends StatefulWidget {
   final IconData icon;
   final String tooltip;
   final VoidCallback onTap;
+  final FocusNode? focusNode;
+  final KeyEventResult Function(LogicalKeyboardKey)? onArrowKey;
+
   const _EpgBarBtn({
     required this.icon,
     required this.tooltip,
     required this.onTap,
+    this.focusNode,
+    this.onArrowKey,
   });
+
   @override
   State<_EpgBarBtn> createState() => _EpgBarBtnState();
 }
 
 class _EpgBarBtnState extends State<_EpgBarBtn> {
-  bool _focused = false;
-
-  bool get _showFocusRing =>
-      _focused &&
-      FocusManager.instance.highlightMode == FocusHighlightMode.traditional;
-
-  @override
-  void initState() {
-    super.initState();
-    FocusManager.instance.addHighlightModeListener(_onHighlight);
-  }
-
-  void _onHighlight(FocusHighlightMode _) => setState(() {});
-
-  @override
-  void dispose() {
-    FocusManager.instance.removeHighlightModeListener(_onHighlight);
-    super.dispose();
-  }
-
   @override
   Widget build(BuildContext context) {
-    return Focus(
-      onFocusChange: (f) => setState(() => _focused = f),
-      onKeyEvent: (_, e) {
-        if (e is KeyDownEvent &&
-            (e.logicalKey == LogicalKeyboardKey.select ||
-                e.logicalKey == LogicalKeyboardKey.enter ||
-                e.logicalKey == LogicalKeyboardKey.space)) {
-          widget.onTap();
-          return KeyEventResult.handled;
-        }
-        return KeyEventResult.ignored;
-      },
-      child: Tooltip(
+    return TvFocusable(
+      focusNode: widget.focusNode,
+      autoScroll: false,
+      onActivate: widget.onTap,
+      onArrowKey: widget.onArrowKey != null
+          ? (key) => widget.onArrowKey!(key)
+          : null,
+      builder: (focused, _) => Tooltip(
         message: widget.tooltip,
-        child: MouseRegion(
-          cursor: SystemMouseCursors.click,
-          child: GestureDetector(
-            onTap: widget.onTap,
-            child: AnimatedContainer(
-              duration: const Duration(milliseconds: 150),
-              width: 28,
-              height: 28,
-              decoration: BoxDecoration(
-                color: _showFocusRing
-                    ? AppTheme.primary.withValues(alpha: 0.15)
-                    : AppTheme.surfaceVariant,
-                borderRadius: BorderRadius.circular(6),
-                border: _showFocusRing
-                    ? Border.all(
-                        color: AppTheme.primary.withValues(alpha: 0.7),
-                        width: 1.5,
-                      )
-                    : Border.all(color: AppTheme.divider),
-              ),
-              child: Icon(
-                widget.icon,
-                size: 15,
-                color: _showFocusRing
-                    ? AppTheme.primary
-                    : AppTheme.textSecondary,
-              ),
-            ),
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 150),
+          width: 28,
+          height: 28,
+          decoration: BoxDecoration(
+            color: focused
+                ? AppTheme.primary.withValues(alpha: 0.15)
+                : AppTheme.surfaceVariant,
+            borderRadius: BorderRadius.circular(6),
+            border: focused
+                ? Border.all(
+                    color: AppTheme.primary.withValues(alpha: 0.7),
+                    width: 1.5,
+                  )
+                : Border.all(color: AppTheme.divider),
+          ),
+          child: Icon(
+            widget.icon,
+            size: 15,
+            color: focused ? AppTheme.primary : AppTheme.textSecondary,
           ),
         ),
       ),
@@ -522,6 +675,10 @@ class _ChannelCell extends StatefulWidget {
   final bool showChannelNumber;
   final VoidCallback onTap;
   final VoidCallback onFavorite;
+  final FocusNode? focusNode;
+  final VoidCallback? onUpAtTop;
+  final VoidCallback? onDownNext;
+  final VoidCallback? onLeftToCategory;
 
   const _ChannelCell({
     super.key,
@@ -531,34 +688,17 @@ class _ChannelCell extends StatefulWidget {
     required this.isFavorite,
     required this.onFavorite,
     this.showChannelNumber = true,
+    this.focusNode,
+    this.onUpAtTop,
+    this.onDownNext,
+    this.onLeftToCategory,
   });
 
   @override
   State<_ChannelCell> createState() => _ChannelCellState();
 }
 
-class _ChannelCellState extends State<_ChannelCell> {
-  bool _hovering = false;
-  bool _focused = false;
-
-  bool get _showFocusRing =>
-      _focused &&
-      FocusManager.instance.highlightMode == FocusHighlightMode.traditional;
-
-  @override
-  void initState() {
-    super.initState();
-    FocusManager.instance.addHighlightModeListener(_onHighlight);
-  }
-
-  void _onHighlight(FocusHighlightMode _) => setState(() {});
-
-  @override
-  void dispose() {
-    FocusManager.instance.removeHighlightModeListener(_onHighlight);
-    super.dispose();
-  }
-
+class _ChannelCellState extends State<_ChannelCell> with TvFocusMixin {
   @override
   Widget build(BuildContext context) {
     final hasNum =
@@ -566,145 +706,115 @@ class _ChannelCellState extends State<_ChannelCell> {
         widget.channel.num.isNotEmpty &&
         widget.channel.num != '0';
 
-    return Focus(
-      onFocusChange: (f) {
-        setState(() => _focused = f);
-        // Auto-scroll this row into view when focused via remote
-        if (f) {
-          WidgetsBinding.instance.addPostFrameCallback((_) {
-            if (!mounted) return;
-            final ctx = context;
-            Scrollable.ensureVisible(
-              ctx,
-              alignment: 0.3,
-              duration: const Duration(milliseconds: 200),
-              curve: Curves.easeOut,
-            );
-          });
+    return TvFocusable(
+      focusNode: widget.focusNode,
+      autoScroll: true,
+      scrollAlignment: 0.3,
+      onActivate: widget.onTap,
+      onFocusChange: setTvFocused,
+      onArrowKey: (key) {
+        if (key == LogicalKeyboardKey.arrowUp) {
+          (widget.onUpAtTop ?? () {})();
+          return KeyEventResult.handled;
         }
-      },
-      onKeyEvent: (_, event) {
-        if (event is KeyDownEvent) {
-          // Select/OK → select channel; if already selected → maximize
-          if (event.logicalKey == LogicalKeyboardKey.select ||
-              event.logicalKey == LogicalKeyboardKey.enter ||
-              event.logicalKey == LogicalKeyboardKey.space ||
-              event.logicalKey == LogicalKeyboardKey.gameButtonA) {
-            widget.onTap(); // first tap selects; caller decides if maximize
-            return KeyEventResult.handled;
-          }
-          // LEFT → back to categories (via focusInDirection)
-          if (event.logicalKey == LogicalKeyboardKey.arrowLeft) {
-            FocusScope.of(context).focusInDirection(TraversalDirection.left);
-            return KeyEventResult.handled;
-          }
+        if (key == LogicalKeyboardKey.arrowDown) {
+          if (widget.onDownNext != null) widget.onDownNext!();
+          return KeyEventResult.handled; // last item: No Action
+        }
+        if (key == LogicalKeyboardKey.arrowLeft) {
+          (widget.onLeftToCategory ?? () {})();
+          return KeyEventResult.handled;
         }
         return KeyEventResult.ignored;
       },
-      child: MouseRegion(
-        onEnter: (_) => setState(() => _hovering = true),
-        onExit: (_) => setState(() => _hovering = false),
-        child: GestureDetector(
-          onTap: widget.onTap,
-          child: AnimatedContainer(
-            duration: const Duration(milliseconds: 150),
-            height: 56,
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-            decoration: BoxDecoration(
-              color: widget.isSelected
-                  ? AppTheme.selectedItem
-                  : (_hovering || _showFocusRing) // ← was: _focused
-                  ? AppTheme.surfaceVariant
-                  : AppTheme.epgFuture,
-              border: Border(
-                bottom: const BorderSide(color: AppTheme.epgBorder, width: 0.5),
-                left:
-                    _showFocusRing &&
-                        !widget
-                            .isSelected // ← was: _focused
-                    ? const BorderSide(color: AppTheme.primary, width: 2.5)
-                    : BorderSide.none,
+      builder: (focused, _) => AnimatedContainer(
+        duration: const Duration(milliseconds: 150),
+        height: 56,
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+        decoration: BoxDecoration(
+          color: widget.isSelected
+              ? AppTheme.selectedItem
+              : (isTvHovered || focused)
+              ? AppTheme.surfaceVariant
+              : AppTheme.epgFuture,
+          border: Border(
+            bottom: const BorderSide(color: AppTheme.epgBorder, width: 0.5),
+            left: focused && !widget.isSelected
+                ? const BorderSide(color: AppTheme.primary, width: 2.5)
+                : BorderSide.none,
+          ),
+        ),
+        child: Row(
+          children: [
+            AnimatedContainer(
+              duration: const Duration(milliseconds: 200),
+              width: 3,
+              height: 36,
+              decoration: BoxDecoration(
+                color: widget.isSelected
+                    ? AppTheme.primary
+                    : Colors.transparent,
+                borderRadius: BorderRadius.circular(2),
               ),
             ),
-            child: Row(
-              children: [
-                AnimatedContainer(
-                  duration: const Duration(milliseconds: 200),
-                  width: 3,
-                  height: 36,
-                  decoration: BoxDecoration(
-                    color: widget.isSelected
-                        ? AppTheme.primary
-                        : Colors.transparent,
-                    borderRadius: BorderRadius.circular(2),
-                  ),
-                ),
-                const SizedBox(width: 8),
-                ClipRRect(
-                  borderRadius: BorderRadius.circular(6),
-                  child: SizedBox(width: 40, height: 32, child: _logo()),
-                ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      if (hasNum)
-                        Text(
-                          'CH ${widget.channel.num}',
-                          style: const TextStyle(
-                            color: AppTheme.textMuted,
-                            fontSize: 8,
-                            fontWeight: FontWeight.w700,
-                            letterSpacing: 0.5,
-                          ),
-                        ),
-                      Text(
-                        widget.channel.name,
-                        style: TextStyle(
-                          color: widget.isSelected
-                              ? AppTheme.textPrimary
-                              : AppTheme.textSecondary,
-                          fontSize: 11,
-                          fontWeight: widget.isSelected
-                              ? FontWeight.w600
-                              : FontWeight.w400,
-                        ),
-                        maxLines: hasNum ? 1 : 2,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ],
-                  ),
-                ),
-                if (_hovering ||
-                    _showFocusRing ||
-                    widget.isFavorite) // ← was: _focused
-                  GestureDetector(
-                    onTap: widget.onFavorite,
-                    child: Icon(
-                      widget.isFavorite
-                          ? Icons.favorite
-                          : Icons.favorite_border,
-                      size: 14,
-                      color: widget.isFavorite
-                          ? AppTheme.error
-                          : AppTheme.textMuted,
-                    ),
-                  ),
-                if (_hovering ||
-                    _showFocusRing ||
-                    widget.isSelected) // ← was: _focused
-                  Icon(
-                    Icons.play_circle_outline,
-                    size: 16,
-                    color: widget.isSelected
-                        ? AppTheme.primary
-                        : AppTheme.textMuted,
-                  ),
-              ],
+            const SizedBox(width: 8),
+            ClipRRect(
+              borderRadius: BorderRadius.circular(6),
+              child: SizedBox(width: 40, height: 32, child: _logo()),
             ),
-          ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  if (hasNum)
+                    Text(
+                      'CH ${widget.channel.num}',
+                      style: const TextStyle(
+                        color: AppTheme.textMuted,
+                        fontSize: 8,
+                        fontWeight: FontWeight.w700,
+                        letterSpacing: 0.5,
+                      ),
+                    ),
+                  Text(
+                    widget.channel.name,
+                    style: TextStyle(
+                      color: widget.isSelected
+                          ? AppTheme.textPrimary
+                          : AppTheme.textSecondary,
+                      fontSize: 11,
+                      fontWeight: widget.isSelected
+                          ? FontWeight.w600
+                          : FontWeight.w400,
+                    ),
+                    maxLines: hasNum ? 1 : 2,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ],
+              ),
+            ),
+            if (isTvHovered || focused || widget.isFavorite)
+              GestureDetector(
+                onTap: widget.onFavorite,
+                child: Icon(
+                  widget.isFavorite ? Icons.favorite : Icons.favorite_border,
+                  size: 14,
+                  color: widget.isFavorite
+                      ? AppTheme.error
+                      : AppTheme.textMuted,
+                ),
+              ),
+            if (isTvHovered || focused || widget.isSelected)
+              Icon(
+                Icons.play_circle_outline,
+                size: 16,
+                color: widget.isSelected
+                    ? AppTheme.primary
+                    : AppTheme.textMuted,
+              ),
+          ],
         ),
       ),
     );
@@ -716,7 +826,7 @@ class _ChannelCellState extends State<_ChannelCell> {
       return Image.network(
         icon,
         fit: BoxFit.contain,
-        errorBuilder: (_, __, ___) => _placeholder(),
+        errorBuilder: (_, _, _) => _placeholder(),
       );
     }
     return _placeholder();

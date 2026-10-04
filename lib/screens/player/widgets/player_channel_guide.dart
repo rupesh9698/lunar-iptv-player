@@ -7,6 +7,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 
 import '../../../core/theme/app_theme.dart';
+import '../../../core/utils/focus_utils.dart';
 import '../../../models/xtream_models.dart';
 import '../../../providers/app_providers.dart';
 import '../../../providers/live_player_provider.dart';
@@ -308,60 +309,47 @@ class _GuideBtn extends StatefulWidget {
 }
 
 class _GuideBtnState extends State<_GuideBtn> {
-  bool _focused = false;
-
   @override
   Widget build(BuildContext context) {
-    return Focus(
-      onFocusChange: (f) => setState(() => _focused = f),
-      onKeyEvent: (_, event) {
-        if (event is KeyDownEvent &&
-            (event.logicalKey == LogicalKeyboardKey.select ||
-                event.logicalKey == LogicalKeyboardKey.enter  ||
-                event.logicalKey == LogicalKeyboardKey.space)) {
-          widget.onTap();
-          return KeyEventResult.handled;
-        }
-        return KeyEventResult.ignored;
-      },
-      child: GestureDetector(
-        onTap: widget.onTap,
-        child: MouseRegion(
-          cursor: SystemMouseCursors.click,
-          child: AnimatedContainer(
-            duration: const Duration(milliseconds: 150),
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-            decoration: BoxDecoration(
-              color: (widget.active || _focused)
-                  ? AppTheme.primary.withValues(alpha: 0.25)
-                  : Colors.white.withValues(alpha: 0.1),
-              borderRadius: BorderRadius.circular(8),
-              border: Border.all(
-                color: (widget.active || _focused)
-                    ? AppTheme.primary
-                    : Colors.white.withValues(alpha: 0.2),
-                width: (widget.active || _focused) ? 2 : 1,
-              ),
+    return TvFocusable(
+      onActivate: widget.onTap,
+      builder: (focused, _) {
+        final lit = widget.active || focused;
+        return AnimatedContainer(
+          duration: const Duration(milliseconds: 150),
+          padding:
+          const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+          decoration: BoxDecoration(
+            color: lit
+                ? AppTheme.primary.withValues(alpha: 0.25)
+                : Colors.white.withValues(alpha: 0.1),
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(
+              color: lit
+                  ? AppTheme.primary
+                  : Colors.white.withValues(alpha: 0.2),
+              width: lit ? 2 : 1,
             ),
-            child: Row(mainAxisSize: MainAxisSize.min, children: [
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
               Icon(widget.icon,
-                  color: (widget.active || _focused)
-                      ? AppTheme.primary
-                      : Colors.white70,
+                  color: lit ? AppTheme.primary : Colors.white70,
                   size: 16),
               const SizedBox(width: 6),
-              Text(widget.label,
-                  style: TextStyle(
-                    color: (widget.active || _focused)
-                        ? AppTheme.primary
-                        : Colors.white70,
-                    fontSize: 12,
-                    fontWeight: FontWeight.w600,
-                  )),
-            ]),
+              Text(
+                widget.label,
+                style: TextStyle(
+                  color: lit ? AppTheme.primary : Colors.white70,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ],
           ),
-        ),
-      ),
+        );
+      },
     );
   }
 }

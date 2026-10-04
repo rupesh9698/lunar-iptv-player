@@ -142,7 +142,9 @@ class CacheService {
     if (raw == null) return null;
     try {
       final list = jsonDecode(raw) as List;
-      return list
+      // Cap at 20k before building objects to prevent OOM
+      final capped = list.length > 20000 ? list.sublist(0, 20000) : list;
+      return capped
           .map((e) => VodStream.fromJson(Map<String, dynamic>.from(e)))
           .toList();
     } catch (_) {
@@ -161,7 +163,8 @@ class CacheService {
     if (raw == null) return null;
     try {
       final list = jsonDecode(raw) as List;
-      return list
+      final capped = list.length > 20000 ? list.sublist(0, 20000) : list;
+      return capped
           .map((e) => Series.fromJson(Map<String, dynamic>.from(e)))
           .toList();
     } catch (_) {

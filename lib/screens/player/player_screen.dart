@@ -12,7 +12,9 @@ import 'package:media_kit_video/media_kit_video_controls/src/controls/extensions
 import 'package:url_launcher/url_launcher.dart';
 
 import '../../core/theme/app_theme.dart';
+import '../../core/utils/focus_utils.dart';
 import '../../core/utils/platform_utils.dart';
+import '../../providers/app_providers.dart';
 import '../../providers/live_tv_provider.dart';
 import '../../services/web_proxy_client.dart';
 
@@ -144,53 +146,93 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
     );
     _ctrl = VideoController(
       _player,
-      configuration: VideoControllerConfiguration(
-        // Use low-res surface on Android to reduce GPU pressure
+      configuration: const VideoControllerConfiguration(
         enableHardwareAcceleration: true,
-        // Limit surface size — huge benefit on 720p TV displays
-        width: 1280,
-        height: 720,
+        // No fixed width/height — forcing every stream through a 1280x720
+        // scaler was causing an extra GPU pass on every frame, which is
+        // *more* expensive than rendering at native resolution on most
+        // Android TV SoCs. Let the decoder output its native size and let
+        // the compositor scale to the view bounds (cheap, hardware-composited).
       ),
     );
 
     // ── MPV properties ────────────────────────────────────────────────────────
-    await _setMpvProp('network-timeout', '15');
+    // Fast profile first — mpv's own low-end preset, disables a cluster of
+    // expensive default post-processing filters in one call. Every
+    // override below still wins since profile is applied first.
+    await _setMpvProp('profile', 'fast');
+
+    // Leaner render path than gpu-next on Android's GLES surface.
+    await _setMpvProp('vo', 'gpu');
+    await _setMpvProp('gpu-context', 'android');
+    await _setMpvProp('swapchain-depth', '3');
+
+    // hwdec='auto' engages MediaCodec hardware decode reliably; falls back
+    // to software automatically per-codec if unsupported.
+    await _setMpvProp('hwdec', 'auto');
+    await _setMpvProp('hwdec-codecs', 'h264,hevc,mpeg2video,vp8,vp9,av1');
 
     if (_isLive) {
+      // Live: 8s forward buffer absorbs HLS segment boundaries and network
+      // jitter without ever seeking backward (demuxer-max-back-bytes stays
+      // tiny).
       await _setMpvProp('cache', 'yes');
-      await _setMpvProp('cache-secs', '5');
+      await _setMpvProp('cache-secs', '8');
       await _setMpvProp('cache-initial', '0');
       await _setMpvProp('cache-pause', 'no');
       await _setMpvProp('cache-pause-initial', 'no');
-      await _setMpvProp('demuxer-max-bytes', '6MiB');
-      await _setMpvProp('demuxer-max-back-bytes', '2MiB');
+      await _setMpvProp('cache-pause-wait', '0');
+      await _setMpvProp('demuxer-max-bytes', '16MiB');
+      await _setMpvProp('demuxer-max-back-bytes', '1MiB');
+      await _setMpvProp('demuxer-seekable-cache', 'no');
+      await _setMpvProp('hls-bitrate', 'max');
       await _setMpvProp(
         'stream-lavf-o',
         'reconnect=1,reconnect_at_eof=1,reconnect_streamed=1,'
-            'reconnect_delay_max=5,timeout=15000000',
+            'reconnect_delay_max=2,timeout=12000000,'
+            'live_start_index=-1,fflags=nobuffer,analyzeduration=1000000',
       );
     } else {
+      // VOD: 10s cache is plenty for smooth seek/playback without holding
+      // minutes of data in RAM.
       await _setMpvProp('cache', 'yes');
-      await _setMpvProp('cache-secs', '30');
-      await _setMpvProp('cache-initial', '500000');
-      await _setMpvProp('demuxer-max-bytes', '16MiB');
-      await _setMpvProp('demuxer-max-back-bytes', '8MiB');
+      await _setMpvProp('cache-secs', '10');
+      await _setMpvProp('cache-initial', '512');
+      await _setMpvProp('cache-pause', 'yes');
+      await _setMpvProp('cache-pause-wait', '1');
+      await _setMpvProp('demuxer-max-bytes', '20MiB');
+      await _setMpvProp('demuxer-max-back-bytes', '5MiB');
       await _setMpvProp('demuxer-readahead-secs', '10');
     }
 
-    // ── Universal low-spec optimisations ─────────────────────────────────────
-    await _setMpvProp('hwdec', 'auto-safe');
+    // ── Universal optimisations ───────────────────────────────────────────
+    await _setMpvProp('network-timeout', '15');
     await _setMpvProp('video-sync', 'audio');
-    await _setMpvProp('framedrop', 'decoder+vo');
-    await _setMpvProp('vd-lavc-threads', '1');
+    // Drop at the video-output stage only — decoder-side dropping on an
+    // already-slow decoder just adds bookkeeping overhead without helping.
+    await _setMpvProp('framedrop', 'vo');
+    await _setMpvProp('vd-lavc-threads', '0');
     await _setMpvProp('vd-lavc-fast', 'yes');
-    await _setMpvProp('vd-lavc-skiploopfilter', 'nonkey');
+    // 'all' (not just nonkey) skips the deblocking filter on every frame —
+    // measurable win on weak CPUs, minor visible softness only on very
+    // low-bitrate streams.
+    await _setMpvProp('vd-lavc-skiploopfilter', 'all');
+    await _setMpvProp('vd-lavc-skipidct', 'nonkey');
     await _setMpvProp('vd-lavc-skipframe', 'nonref');
-    await _setMpvProp('audio-buffer', '0.1');
+    await _setMpvProp('hr-seek', 'no');
+    await _setMpvProp('audio-buffer', '0.2');
+    await _setMpvProp('audio-latency-hack', 'yes');
     await _setMpvProp('scale', 'bilinear');
     await _setMpvProp('dscale', 'bilinear');
+    await _setMpvProp('cscale', 'bilinear');
     await _setMpvProp('correct-downscaling', 'no');
     await _setMpvProp('sigmoid-upscaling', 'no');
+    await _setMpvProp('video-latency-hacks', 'yes');
+    await _setMpvProp('deband', 'no');
+    await _setMpvProp('blend-subtitles', 'no');
+    await _setMpvProp('interpolation', 'no');
+    await _setMpvProp('dither-depth', 'no');
+    await _setMpvProp('osd-scale-by-window', 'no');
 
     // ── Subscriptions ─────────────────────────────────────────────────────────
     _subs.addAll([
@@ -496,176 +538,261 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
     ref.read(liveFavoritesNotifierProvider.notifier).toggle(widget.id);
   }
 
-  // ─────────────────────────────────────────────────────────────────────
+  void _exitPlayer() {
+    if (mounted) setState(() => _playerDisposed = true);
+    _exitImmersive();
+    try {
+      _player.stop();
+    } catch (_) {}
+    if (context.canPop()) {
+      Navigator.of(context).pop();
+    } else {
+      context.go('/home');
+    }
+  }
+
+  /// Handles hardware TV-remote / keyboard keys that aren't tied to a
+  /// specific focusable widget: media transport keys, channel up/down
+  /// (live only), and Escape/Back to exit the player.
+  KeyEventResult _handleGlobalKey(FocusNode node, KeyEvent event) {
+    if (event is! KeyDownEvent) return KeyEventResult.ignored;
+    final key = event.logicalKey;
+
+    if (key == LogicalKeyboardKey.escape ||
+        key == LogicalKeyboardKey.goBack ||
+        key == LogicalKeyboardKey.browserBack) {
+      if (_locked) return KeyEventResult.ignored; // let lock UI handle it
+      _exitPlayer();
+      return KeyEventResult.handled;
+    }
+
+    if (_locked) return KeyEventResult.ignored;
+
+    if (key == LogicalKeyboardKey.mediaPlayPause ||
+        key == LogicalKeyboardKey.mediaPlay ||
+        key == LogicalKeyboardKey.mediaPause) {
+      _togglePlay();
+      return KeyEventResult.handled;
+    }
+    if (!_isLive) {
+      if (key == LogicalKeyboardKey.mediaRewind ||
+          key == LogicalKeyboardKey.mediaStepBackward) {
+        _seekRelative(-_skipSecs);
+        return KeyEventResult.handled;
+      }
+      if (key == LogicalKeyboardKey.mediaFastForward ||
+          key == LogicalKeyboardKey.mediaStepForward) {
+        _seekRelative(_skipSecs);
+        return KeyEventResult.handled;
+      }
+    }
+    if (_isLive) {
+      if (key == LogicalKeyboardKey.channelUp ||
+          key == LogicalKeyboardKey.pageUp) {
+        _switchChannel(-1);
+        return KeyEventResult.handled;
+      }
+      if (key == LogicalKeyboardKey.channelDown ||
+          key == LogicalKeyboardKey.pageDown) {
+        _switchChannel(1);
+        return KeyEventResult.handled;
+      }
+    }
+    // Any other key press should reveal controls and reset the auto-hide
+    // timer, matching remote UX where any button wakes the overlay.
+    if (!_ctrlVisible) {
+      _resetHideTimer();
+    }
+    return KeyEventResult.ignored;
+  }
+
+  /// Switches to the next/previous channel in the currently active Live TV
+  /// filter list. Only meaningful when opened directly for a live channel.
+  void _switchChannel(int delta) {
+    final streams = ref.read(filteredLiveStreamsProvider).value;
+    if (streams == null || streams.isEmpty) return;
+    final idx = streams.indexWhere((s) => s.streamId == widget.id);
+    if (idx < 0) return;
+    final newIdx = (idx + delta).clamp(0, streams.length - 1);
+    if (newIdx == idx) return;
+    final next = streams[newIdx];
+    final service = ref.read(xtreamServiceProvider);
+    if (service == null) return;
+    final url = service.getLiveUrl(next.streamId);
+    ref.read(recentlyViewedLiveProvider.notifier).add(next.streamId);
+    context.pushReplacement(
+      '/player',
+      extra: {
+        'title': next.name,
+        'url': url,
+        'imageUrl': next.streamIcon,
+        'type': 'live',
+        'id': next.streamId,
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return PopScope(
       canPop: false,
       onPopInvokedWithResult: (didPop, _) {
         if (didPop) return;
-        if (mounted) setState(() => _playerDisposed = true);
-        _exitImmersive();
-        try {
-          _player.stop();
-        } catch (_) {}
-        // Always use Navigator.pop so we return to calling screen (not home)
-        if (context.canPop()) {
-          Navigator.of(context).pop();
-        } else {
-          context.go('/home');
-        }
+        _exitPlayer();
       },
-      child: Scaffold(
-        backgroundColor: Colors.black,
-        body: Stack(
-          children: [
-            // ── Video ────────────────────────────────────────────────
-            _error.isNotEmpty
-                ? _ErrorView(
-                    title: widget.title,
-                    url: widget.url,
-                    errorMsg: _error,
+      child: Focus(
+        autofocus: true,
+        onKeyEvent: _handleGlobalKey,
+        child: Scaffold(
+          backgroundColor: Colors.black,
+          body: Stack(
+            children: [
+              // ── Video ────────────────────────────────────────────────
+              _error.isNotEmpty
+                  ? _ErrorView(
+                      title: widget.title,
+                      url: widget.url,
+                      errorMsg: _error,
+                      isLive: _isLive,
+                      onRetry: _retry,
+                    )
+                  : Video(
+                      controller: _ctrl,
+                      fit: _videoFill ? BoxFit.cover : BoxFit.contain,
+                      controls: NoVideoControls,
+                    ),
+
+              // ── Buffering indicator (subtle — over video) ────────────
+              if (_buffering && _error.isEmpty && !_isReconnecting)
+                Positioned(
+                  bottom: _isLive ? 20 : 90,
+                  right: 20,
+                  child: _BufferingBadge(
                     isLive: _isLive,
-                    onRetry: _retry,
-                  )
-                : Video(
-                    controller: _ctrl,
-                    fit: _videoFill ? BoxFit.cover : BoxFit.contain,
-                    controls: NoVideoControls,
-                  ),
-
-            // ── Buffering indicator (subtle — over video) ────────────
-            if (_buffering && _error.isEmpty && !_isReconnecting)
-              Positioned(
-                bottom: _isLive ? 20 : 90,
-                right: 20,
-                child: _BufferingBadge(
-                  isLive: _isLive,
-                  bufPct: _isLive ? null : _bufferPct(),
-                ),
-              ),
-
-            // ── Reconnecting overlay ──────────────────────────────────
-            if (_isReconnecting)
-              Center(
-                child: _ReconnectOverlay(
-                  attempt: _reconnectAttempt,
-                  max: _maxReconnects,
-                  onCancel: () {
-                    _reconnectTimer?.cancel();
-                    setState(() {
-                      _isReconnecting = false;
-                      _error = 'Cancelled';
-                    });
-                  },
-                ),
-              ),
-
-            // ── Gesture layer ─────────────────────────────────────────
-            if (_error.isEmpty && !_isReconnecting && !_playerDisposed)
-              Positioned.fill(
-                child: GestureDetector(
-                  behavior: HitTestBehavior.opaque,
-                  onTapDown: (d) => _lastTap = d.localPosition,
-                  onTap: _toggleControls,
-                  onDoubleTap: _onDoubleTap,
-                  onVerticalDragStart: _onDragStart,
-                  onVerticalDragUpdate: _onDragUpdate,
-                  onVerticalDragEnd: _onDragEnd,
-                ),
-              ),
-
-            // ── Controls overlay ──────────────────────────────────────
-            if (!_locked && _error.isEmpty)
-              AnimatedOpacity(
-                opacity: _ctrlVisible ? 1.0 : 0.0,
-                duration: const Duration(milliseconds: 250),
-                child: IgnorePointer(
-                  ignoring: !_ctrlVisible,
-                  child: _ControlsOverlay(
-                    title: widget.title,
-                    isLive: _isLive,
-                    playing: _playing,
-                    quality: _quality,
-                    isFavorite: _isLive ? _isFavorite : false,
-                    pos: _pos,
-                    dur: _dur,
-                    isSeeking: _isSeeking,
-                    seekVal: _seekVal,
-                    volume: _volume,
-                    onBack: () {
-                      _exitImmersive();
-                      Navigator.of(context).pop();
-                    },
-                    onTogglePlay: _togglePlay,
-                    onToggleLock: () => setState(() => _locked = true),
-                    onToggleFav: _isLive ? _toggleFavorite : null,
-                    onShowTracks: _showTracks,
-                    onSeekStart: (v) => setState(() {
-                      _isSeeking = true;
-                      _seekVal = v;
-                    }),
-                    onSeekChange: (v) => setState(() => _seekVal = v),
-                    onSeekEnd: (v) {
-                      setState(() => _isSeeking = false);
-                      _seekTo(v);
-                    },
-                    onVolumeChange: (v) {
-                      setState(() => _volume = v);
-                      _player.setVolume(v * 100);
-                    },
-                    isVideoFill: _videoFill,
-                    onToggleFit: () => setState(() => _videoFill = !_videoFill),
-                    onSeekBack: () => _seekRelative(-10),
-                    onSeekFwd: () => _seekRelative(10),
+                    bufPct: _isLive ? null : _bufferPct(),
                   ),
                 ),
-              ),
 
-            // ── Lock overlay ──────────────────────────────────────────
-            if (_locked)
-              _LockOverlay(onUnlock: () => setState(() => _locked = false)),
-
-            // ── Skip indicators ───────────────────────────────────────
-            if (_showSkipLeft)
-              const Positioned(
-                left: 32,
-                top: 0,
-                bottom: 0,
-                child: Center(child: _SkipIndicator(seconds: -_skipSecs)),
-              ),
-            if (_showSkipRight)
-              const Positioned(
-                right: 32,
-                top: 0,
-                bottom: 0,
-                child: Center(child: _SkipIndicator(seconds: _skipSecs)),
-              ),
-
-            // ── Volume / Brightness overlays ──────────────────────────
-            if (_showVol)
-              Center(
-                child: _GestureOverlay(
-                  icon: _volume > 0.5
-                      ? Icons.volume_up_rounded
-                      : _volume > 0
-                      ? Icons.volume_down_rounded
-                      : Icons.volume_off_rounded,
-                  value: _volume,
-                  color: Colors.white,
+              // ── Reconnecting overlay ──────────────────────────────────
+              if (_isReconnecting)
+                Center(
+                  child: _ReconnectOverlay(
+                    attempt: _reconnectAttempt,
+                    max: _maxReconnects,
+                    onCancel: () {
+                      _reconnectTimer?.cancel();
+                      setState(() {
+                        _isReconnecting = false;
+                        _error = 'Cancelled';
+                      });
+                    },
+                  ),
                 ),
-              ),
-            if (_showBright)
-              Center(
-                child: _GestureOverlay(
-                  icon: _brightness > 0.5
-                      ? Icons.brightness_high_rounded
-                      : Icons.brightness_low_rounded,
-                  value: _brightness,
-                  color: Colors.amber,
+
+              // ── Gesture layer ─────────────────────────────────────────
+              if (_error.isEmpty && !_isReconnecting && !_playerDisposed)
+                Positioned.fill(
+                  child: GestureDetector(
+                    behavior: HitTestBehavior.opaque,
+                    onTapDown: (d) => _lastTap = d.localPosition,
+                    onTap: _toggleControls,
+                    onDoubleTap: _onDoubleTap,
+                    onVerticalDragStart: _onDragStart,
+                    onVerticalDragUpdate: _onDragUpdate,
+                    onVerticalDragEnd: _onDragEnd,
+                  ),
                 ),
-              ),
-          ],
+
+              // ── Controls overlay ──────────────────────────────────────
+              if (!_locked && _error.isEmpty)
+                AnimatedOpacity(
+                  opacity: _ctrlVisible ? 1.0 : 0.0,
+                  duration: const Duration(milliseconds: 250),
+                  child: IgnorePointer(
+                    ignoring: !_ctrlVisible,
+                    child: _ControlsOverlay(
+                      title: widget.title,
+                      isLive: _isLive,
+                      playing: _playing,
+                      quality: _quality,
+                      isFavorite: _isLive ? _isFavorite : false,
+                      pos: _pos,
+                      dur: _dur,
+                      isSeeking: _isSeeking,
+                      seekVal: _seekVal,
+                      volume: _volume,
+                      onBack: _exitPlayer,
+                      onTogglePlay: _togglePlay,
+                      onToggleLock: () => setState(() => _locked = true),
+                      onToggleFav: _isLive ? _toggleFavorite : null,
+                      onShowTracks: _showTracks,
+                      onSeekStart: (v) => setState(() {
+                        _isSeeking = true;
+                        _seekVal = v;
+                      }),
+                      onSeekChange: (v) => setState(() => _seekVal = v),
+                      onSeekEnd: (v) {
+                        setState(() => _isSeeking = false);
+                        _seekTo(v);
+                      },
+                      onVolumeChange: (v) {
+                        setState(() => _volume = v);
+                        _player.setVolume(v * 100);
+                      },
+                      isVideoFill: _videoFill,
+                      onToggleFit: () =>
+                          setState(() => _videoFill = !_videoFill),
+                      onSeekBack: () => _seekRelative(-10),
+                      onSeekFwd: () => _seekRelative(10),
+                    ),
+                  ),
+                ),
+
+              // ── Lock overlay ──────────────────────────────────────────
+              if (_locked)
+                _LockOverlay(onUnlock: () => setState(() => _locked = false)),
+
+              // ── Skip indicators ───────────────────────────────────────
+              if (_showSkipLeft)
+                const Positioned(
+                  left: 32,
+                  top: 0,
+                  bottom: 0,
+                  child: Center(child: _SkipIndicator(seconds: -_skipSecs)),
+                ),
+              if (_showSkipRight)
+                const Positioned(
+                  right: 32,
+                  top: 0,
+                  bottom: 0,
+                  child: Center(child: _SkipIndicator(seconds: _skipSecs)),
+                ),
+
+              // ── Volume / Brightness overlays ──────────────────────────
+              if (_showVol)
+                Center(
+                  child: _GestureOverlay(
+                    icon: _volume > 0.5
+                        ? Icons.volume_up_rounded
+                        : _volume > 0
+                        ? Icons.volume_down_rounded
+                        : Icons.volume_off_rounded,
+                    value: _volume,
+                    color: Colors.white,
+                  ),
+                ),
+              if (_showBright)
+                Center(
+                  child: _GestureOverlay(
+                    icon: _brightness > 0.5
+                        ? Icons.brightness_high_rounded
+                        : Icons.brightness_low_rounded,
+                    value: _brightness,
+                    color: Colors.amber,
+                  ),
+                ),
+            ],
+          ),
         ),
       ),
     );
@@ -913,14 +1040,7 @@ class _TopBar extends StatelessWidget {
       padding: const EdgeInsets.fromLTRB(4, 4, 12, 4),
       child: Row(
         children: [
-          IconButton(
-            onPressed: onBack,
-            icon: const Icon(
-              Icons.arrow_back_ios_new,
-              color: Colors.white,
-              size: 20,
-            ),
-          ),
+          _PlayerIconBtn(icon: Icons.arrow_back_ios_new, onTap: onBack),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -968,27 +1088,65 @@ class _TopBar extends StatelessWidget {
             ),
           const SizedBox(width: 6),
           if (onFav != null)
-            IconButton(
-              onPressed: onFav,
-              icon: Icon(
-                isFavorite ? Icons.favorite : Icons.favorite_border,
-                color: isFavorite ? AppTheme.error : Colors.white,
-                size: 22,
-              ),
+            _PlayerIconBtn(
+              icon: isFavorite ? Icons.favorite : Icons.favorite_border,
+              iconColor: isFavorite ? AppTheme.error : Colors.white,
+              onTap: onFav!,
             ),
-          IconButton(
-            onPressed: onTracks,
-            icon: const Icon(Icons.settings, color: Colors.white, size: 22),
+          _PlayerIconBtn(
+            icon: Icons.settings,
             tooltip: 'Audio & Subtitles',
+            onTap: onTracks,
           ),
-          IconButton(
-            onPressed: onLock,
-            icon: const Icon(Icons.lock_outline, color: Colors.white, size: 22),
+          _PlayerIconBtn(
+            icon: Icons.lock_outline,
             tooltip: 'Lock screen',
+            onTap: onLock,
           ),
         ],
       ),
     );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PLAYER ICON BUTTON — TV-focusable replacement for IconButton in overlays
+// ─────────────────────────────────────────────────────────────────────────────
+class _PlayerIconBtn extends StatelessWidget {
+  final IconData icon;
+  final VoidCallback onTap;
+  final Color iconColor;
+  final String? tooltip;
+  final double size;
+
+  const _PlayerIconBtn({
+    required this.icon,
+    required this.onTap,
+    this.iconColor = Colors.white,
+    this.tooltip,
+    this.size = 22,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    Widget btn = TvFocusable(
+      autoScroll: false,
+      onActivate: onTap,
+      builder: (focused, _) => AnimatedContainer(
+        duration: const Duration(milliseconds: 120),
+        padding: const EdgeInsets.all(8),
+        decoration: BoxDecoration(
+          shape: BoxShape.circle,
+          color: focused ? Colors.white.withValues(alpha: 0.20) : null,
+          border: focused
+              ? Border.all(color: Colors.white.withValues(alpha: 0.7), width: 2)
+              : null,
+        ),
+        child: Icon(icon, color: iconColor, size: size),
+      ),
+    );
+    if (tooltip != null) btn = Tooltip(message: tooltip!, child: btn);
+    return btn;
   }
 }
 
@@ -1002,44 +1160,29 @@ class _CenterPlay extends StatefulWidget {
 }
 
 class _CenterPlayState extends State<_CenterPlay> {
-  bool _focused = false;
-
   @override
   Widget build(BuildContext context) {
-    return Focus(
+    return TvFocusable(
       autofocus: true,
-      onFocusChange: (f) => setState(() => _focused = f),
-      onKeyEvent: (_, event) {
-        if (event is KeyDownEvent &&
-            (event.logicalKey == LogicalKeyboardKey.select ||
-                event.logicalKey == LogicalKeyboardKey.enter ||
-                event.logicalKey == LogicalKeyboardKey.space)) {
-          widget.onTap();
-          return KeyEventResult.handled;
-        }
-        return KeyEventResult.ignored;
-      },
-      child: GestureDetector(
-        onTap: widget.onTap,
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 200),
-          width: 60,
-          height: 60,
-          decoration: BoxDecoration(
-            color: Colors.white.withValues(alpha: 0.18),
-            shape: BoxShape.circle,
-            border: Border.all(
-              color: _focused
-                  ? AppTheme.primary
-                  : Colors.white.withValues(alpha: 0.35),
-              width: _focused ? 3 : 1.5,
-            ),
+      onActivate: widget.onTap,
+      builder: (focused, _) => AnimatedContainer(
+        duration: const Duration(milliseconds: 200),
+        width: 60,
+        height: 60,
+        decoration: BoxDecoration(
+          color: Colors.white.withValues(alpha: 0.18),
+          shape: BoxShape.circle,
+          border: Border.all(
+            color: focused
+                ? AppTheme.primary
+                : Colors.white.withValues(alpha: 0.35),
+            width: focused ? 3 : 1.5,
           ),
-          child: Icon(
-            widget.playing ? Icons.pause_rounded : Icons.play_arrow_rounded,
-            color: Colors.white,
-            size: 34,
-          ),
+        ),
+        child: Icon(
+          widget.playing ? Icons.pause_rounded : Icons.play_arrow_rounded,
+          color: Colors.white,
+          size: 34,
         ),
       ),
     );
@@ -1142,20 +1285,21 @@ class _BottomBar extends StatelessWidget {
           // Controls row
           Row(
             children: [
-              // Play/Pause
-              IconButton(
-                onPressed: onTogglePlay,
-                padding: const EdgeInsets.all(8),
-                icon: Icon(
-                  playing ? Icons.pause_rounded : Icons.play_arrow_rounded,
-                  color: Colors.white,
-                  size: 30,
-                ),
+              _PlayerIconBtn(
+                icon: playing ? Icons.pause_rounded : Icons.play_arrow_rounded,
+                size: 30,
+                onTap: onTogglePlay,
               ),
 
               if (!isLive) ...[
-                _CtrlBtn(Icons.replay_10_rounded, onSeekBack),
-                _CtrlBtn(Icons.forward_10_rounded, onSeekFwd),
+                _PlayerIconBtn(
+                  icon: Icons.replay_10_rounded,
+                  onTap: onSeekBack,
+                ),
+                _PlayerIconBtn(
+                  icon: Icons.forward_10_rounded,
+                  onTap: onSeekFwd,
+                ),
               ],
 
               const Spacer(),
@@ -1188,15 +1332,11 @@ class _BottomBar extends StatelessWidget {
                 const SizedBox(width: 8),
               ],
 
-              GestureDetector(
+              _PlayerIconBtn(
+                icon: isVideoFill
+                    ? Icons.fullscreen_exit_rounded
+                    : Icons.fullscreen_rounded,
                 onTap: onToggleFit,
-                child: Icon(
-                  isVideoFill
-                      ? Icons.fullscreen_exit_rounded
-                      : Icons.fullscreen_rounded,
-                  color: Colors.white,
-                  size: 24,
-                ),
               ),
             ],
           ),
@@ -1204,21 +1344,6 @@ class _BottomBar extends StatelessWidget {
       ),
     );
   }
-}
-
-class _CtrlBtn extends StatelessWidget {
-  final IconData icon;
-  final VoidCallback onTap;
-  const _CtrlBtn(this.icon, this.onTap);
-
-  @override
-  Widget build(BuildContext context) => GestureDetector(
-    onTap: onTap,
-    child: Padding(
-      padding: const EdgeInsets.all(8),
-      child: Icon(icon, color: Colors.white, size: 24),
-    ),
-  );
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1233,20 +1358,28 @@ class _LockOverlay extends StatelessWidget {
     return SafeArea(
       child: Align(
         alignment: Alignment.centerRight,
-        child: GestureDetector(
-          onTap: onUnlock,
-          child: Container(
-            margin: const EdgeInsets.only(right: 16),
-            padding: const EdgeInsets.all(12),
-            decoration: BoxDecoration(
-              color: Colors.black.withValues(alpha: 0.55),
-              shape: BoxShape.circle,
-              border: Border.all(color: Colors.white30, width: 1.5),
-            ),
-            child: const Icon(
-              Icons.lock_rounded,
-              color: Colors.white,
-              size: 22,
+        child: Padding(
+          padding: const EdgeInsets.only(right: 16),
+          child: TvFocusable(
+            autofocus: true,
+            autoScroll: false,
+            onActivate: onUnlock,
+            builder: (focused, _) => AnimatedContainer(
+              duration: const Duration(milliseconds: 150),
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Colors.black.withValues(alpha: 0.55),
+                shape: BoxShape.circle,
+                border: Border.all(
+                  color: focused ? AppTheme.primary : Colors.white30,
+                  width: focused ? 2.5 : 1.5,
+                ),
+              ),
+              child: const Icon(
+                Icons.lock_rounded,
+                color: Colors.white,
+                size: 22,
+              ),
             ),
           ),
         ),
@@ -1517,15 +1650,37 @@ class _ErrorView extends StatelessWidget {
             style: TextStyle(color: Colors.white54, fontSize: 13),
           ),
           const SizedBox(height: 28),
-          ElevatedButton.icon(
-            onPressed: onRetry,
-            icon: const Icon(Icons.refresh_rounded),
-            label: const Text('Retry'),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: AppTheme.primary,
-              padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 12),
-              shape: RoundedRectangleBorder(
+          TvFocusable(
+            autofocus: true,
+            autoScroll: false,
+            onActivate: onRetry,
+            builder: (focused, _) => AnimatedContainer(
+              duration: const Duration(milliseconds: 150),
+              decoration: BoxDecoration(
                 borderRadius: BorderRadius.circular(30),
+                border: focused
+                    ? Border.all(
+                        color: Colors.white.withValues(alpha: 0.7),
+                        width: 2,
+                      )
+                    : null,
+              ),
+              child: ElevatedButton.icon(
+                onPressed: onRetry,
+                icon: const Icon(Icons.refresh_rounded),
+                label: const Text('Retry'),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: focused
+                      ? AppTheme.primary.withValues(alpha: 0.85)
+                      : AppTheme.primary,
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 32,
+                    vertical: 12,
+                  ),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(30),
+                  ),
+                ),
               ),
             ),
           ),

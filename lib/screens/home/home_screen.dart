@@ -398,154 +398,128 @@ class _PlaylistItem extends StatefulWidget {
   State<_PlaylistItem> createState() => _PlaylistItemState();
 }
 
-class _PlaylistItemState extends State<_PlaylistItem> {
-  bool _hover = false;
-  bool _focused = false;
-
+class _PlaylistItemState extends State<_PlaylistItem> with TvFocusMixin {
   @override
   Widget build(BuildContext context) {
     final pl = widget.playlist;
-
-    return Focus(
-      onFocusChange: (f) => setState(() => _focused = f),
-      onKeyEvent: (_, event) {
-        if (event is KeyDownEvent &&
-            (event.logicalKey == LogicalKeyboardKey.select ||
-                event.logicalKey == LogicalKeyboardKey.enter ||
-                event.logicalKey == LogicalKeyboardKey.space)) {
-          widget.onTap();
-          return KeyEventResult.handled;
-        }
-        return KeyEventResult.ignored;
-      },
-      child: MouseRegion(
-        cursor: SystemMouseCursors.click,
-        onEnter: (_) => setState(() => _hover = true),
-        onExit: (_) => setState(() => _hover = false),
-        child: GestureDetector(
-          onTap: widget.onTap,
-          child: AnimatedContainer(
-            duration: const Duration(milliseconds: 150),
-            margin: const EdgeInsets.symmetric(vertical: 2),
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
-            decoration: BoxDecoration(
-              color: widget.isActive
-                  ? AppTheme.selectedItem
-                  : (_hover || _focused)
-                  ? AppTheme.surface
-                  : Colors.transparent,
-              borderRadius: BorderRadius.circular(10),
-              border: widget.isActive
-                  ? Border.all(color: AppTheme.primary.withValues(alpha: 0.35))
-                  : _focused
-                  ? Border.all(color: Colors.white.withValues(alpha: 0.2))
-                  : null,
-            ),
-            child: Row(
-              children: [
-                // Type icon
-                Container(
-                  width: 32,
-                  height: 32,
-                  decoration: BoxDecoration(
-                    color: widget.isActive
-                        ? AppTheme.primary.withValues(alpha: 0.18)
-                        : AppTheme.surfaceVariant,
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  child: Icon(
-                    pl.isM3u
-                        ? Icons.subscriptions_outlined
-                        : Icons.api_outlined,
-                    size: 16,
-                    color: widget.isActive
-                        ? AppTheme.primary
-                        : AppTheme.textMuted,
-                  ),
+    return TvFocusable(
+      onActivate: widget.onTap,
+      onFocusChange: setTvFocused,
+      builder: (focused, pressed) {
+        final lit = isTvHovered || focused;
+        return AnimatedContainer(
+          duration: const Duration(milliseconds: 150),
+          margin: const EdgeInsets.symmetric(vertical: 2),
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
+          decoration: BoxDecoration(
+            color: widget.isActive
+                ? AppTheme.selectedItem
+                : lit
+                ? AppTheme.surface
+                : Colors.transparent,
+            borderRadius: BorderRadius.circular(10),
+            border: widget.isActive
+                ? Border.all(color: AppTheme.primary.withValues(alpha: 0.35))
+                : focused
+                ? Border.all(
+                    color: Colors.white.withValues(alpha: 0.55),
+                    width: 2.0,
+                  )
+                : null,
+          ),
+          child: Row(
+            children: [
+              Container(
+                width: 32,
+                height: 32,
+                decoration: BoxDecoration(
+                  color: widget.isActive
+                      ? AppTheme.primary.withValues(alpha: 0.18)
+                      : AppTheme.surfaceVariant,
+                  borderRadius: BorderRadius.circular(8),
                 ),
-                const SizedBox(width: 10),
-
-                // Name + URL
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        pl.name,
-                        style: TextStyle(
-                          color: widget.isActive
-                              ? AppTheme.textPrimary
-                              : AppTheme.textSecondary,
-                          fontSize: 13,
-                          fontWeight: widget.isActive
-                              ? FontWeight.w600
-                              : FontWeight.w400,
-                        ),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                      Text(
-                        pl.isM3u ? (pl.m3uUrl ?? 'M3U Playlist') : pl.serverUrl,
-                        style: const TextStyle(
-                          color: AppTheme.textMuted,
-                          fontSize: 10,
-                        ),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ],
-                  ),
+                child: Icon(
+                  pl.isM3u ? Icons.subscriptions_outlined : Icons.api_outlined,
+                  size: 16,
+                  color: widget.isActive
+                      ? AppTheme.primary
+                      : AppTheme.textMuted,
                 ),
-
-                // Active chip
-                if (widget.isActive) ...[
-                  const SizedBox(width: 4),
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 5,
-                      vertical: 2,
-                    ),
-                    decoration: BoxDecoration(
-                      color: AppTheme.success.withValues(alpha: 0.15),
-                      borderRadius: BorderRadius.circular(4),
-                      border: Border.all(
-                        color: AppTheme.success.withValues(alpha: 0.3),
-                      ),
-                    ),
-                    child: const Text(
-                      'Active',
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      pl.name,
                       style: TextStyle(
-                        color: AppTheme.success,
-                        fontSize: 9,
-                        fontWeight: FontWeight.w700,
+                        color: widget.isActive
+                            ? AppTheme.textPrimary
+                            : AppTheme.textSecondary,
+                        fontSize: 13,
+                        fontWeight: widget.isActive
+                            ? FontWeight.w600
+                            : FontWeight.w400,
                       ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    Text(
+                      pl.isM3u ? (pl.m3uUrl ?? 'M3U Playlist') : pl.serverUrl,
+                      style: const TextStyle(
+                        color: AppTheme.textMuted,
+                        fontSize: 10,
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ],
+                ),
+              ),
+              if (widget.isActive) ...[
+                const SizedBox(width: 4),
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 5,
+                    vertical: 2,
+                  ),
+                  decoration: BoxDecoration(
+                    color: AppTheme.success.withValues(alpha: 0.15),
+                    borderRadius: BorderRadius.circular(4),
+                    border: Border.all(
+                      color: AppTheme.success.withValues(alpha: 0.3),
                     ),
                   ),
-                ],
-
-                // Delete (appears on hover/focus)
-                AnimatedOpacity(
-                  opacity: (_hover || _focused) ? 1.0 : 0.0,
-                  duration: const Duration(milliseconds: 150),
-                  child: GestureDetector(
-                    onTap: widget.onDelete,
-                    child: Padding(
-                      padding: const EdgeInsets.only(left: 6),
-                      child: Icon(
-                        Icons.delete_outline_rounded,
-                        size: 15,
-                        color: (_hover || _focused)
-                            ? AppTheme.error
-                            : Colors.transparent,
-                      ),
+                  child: const Text(
+                    'Active',
+                    style: TextStyle(
+                      color: AppTheme.success,
+                      fontSize: 9,
+                      fontWeight: FontWeight.w700,
                     ),
                   ),
                 ),
               ],
-            ),
+              AnimatedOpacity(
+                opacity: lit ? 1.0 : 0.0,
+                duration: const Duration(milliseconds: 150),
+                child: GestureDetector(
+                  onTap: widget.onDelete,
+                  child: Padding(
+                    padding: const EdgeInsets.only(left: 6),
+                    child: Icon(
+                      Icons.delete_outline_rounded,
+                      size: 15,
+                      color: AppTheme.error,
+                    ),
+                  ),
+                ),
+              ),
+            ],
           ),
-        ),
-      ),
+        );
+      },
     );
   }
 }
@@ -649,8 +623,9 @@ class _RightPanel extends ConsumerWidget {
             shrinkWrap: true,
             physics: const NeverScrollableScrollPhysics(),
             children: [
-              // Live TV — always show
+              // Live TV — always show, autofocus for TV remote
               _NavCard(
+                    autofocus: true,
                     label: 'Live TV',
                     sublabel: _buildSublabel(
                       cache.lastUpdatedLive(),
@@ -766,6 +741,7 @@ class _NavCard extends StatefulWidget {
   final IconData icon;
   final LinearGradient gradient;
   final VoidCallback onTap;
+  final bool autofocus;
 
   const _NavCard({
     required this.label,
@@ -773,6 +749,7 @@ class _NavCard extends StatefulWidget {
     required this.icon,
     required this.gradient,
     required this.onTap,
+    this.autofocus = false,
   });
 
   @override
@@ -783,6 +760,7 @@ class _NavCardState extends State<_NavCard> {
   @override
   Widget build(BuildContext context) {
     return TvFocusable(
+      autofocus: widget.autofocus,
       onActivate: widget.onTap,
       builder: (focused, pressed) {
         return AnimatedScale(

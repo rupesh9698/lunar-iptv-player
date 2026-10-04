@@ -122,51 +122,97 @@ class LivePlayerNotifier extends StateNotifier<LivePlayerState> {
     );
 
     await _configureMpv();
-    await _player!.open(Media(resolvedUrl));
-    await _player!.setVolume(state.volume * 100);
+    try {
+      await _player!.open(Media(resolvedUrl));
+      await _player!.setVolume(state.volume * 100);
+    } catch (e) {
+      if (mounted) {
+        state = state.copyWith(
+          isBuffering: false,
+          error: 'Stream unavailable',
+        );
+      }
+    }
   }
 
   Future<void> _configureMpv() async {
     try {
       final p = _player as dynamic;
 
+      // ── Fast profile FIRST — mpv's built-in low-end preset. Applying it
+      // first means every explicit override below wins, but we inherit
+      // every low-cost default mpv maintainers already tuned (disables
+      // a cluster of expensive post-processing filters in one shot,
+      // safer/more complete than hand-picking flags one by one).
+      await p.setProperty('profile', 'fast');
+
+      // ── Video output — 'gpu' (not 'gpu-next') is the leaner, more
+      // battle-tested path on Android's OpenGL ES surface. gpu-next uses
+      // a heavier internal pipeline that isn't worth it below 1080p60.
+      await p.setProperty('vo', 'gpu');
+      await p.setProperty('gpu-context', 'android');
+      // Keep the swapchain shallow — deeper queues add latency and let
+      // weak GPUs fall further behind before a dropped frame is visible.
+      await p.setProperty('swapchain-depth', '3');
+
+      // ── Decode — 'auto' engages MediaCodec hardware decode on Android;
+      // falls back to software automatically if a codec path is missing.
+      await p.setProperty('hwdec', 'auto');
+      await p.setProperty(
+          'hwdec-codecs', 'h264,hevc,mpeg2video,vp8,vp9,av1');
+
       // ── Network ────────────────────────────────────────────────────────────
       await p.setProperty('network-timeout', '15');
       await p.setProperty(
         'stream-lavf-o',
         'reconnect=1,reconnect_at_eof=1,reconnect_streamed=1,'
-            'reconnect_delay_max=5,timeout=15000000',
+            'reconnect_delay_max=2,timeout=12000000,'
+            'live_start_index=-1,fflags=nobuffer,analyzeduration=1000000',
       );
 
-      // ── Buffer — extremely tight for low-RAM TV devices ────────────────────
+      // ── Buffer — 8s absorbs HLS segment boundaries and jitter without
+      // ever seeking backward.
       await p.setProperty('cache', 'yes');
-      await p.setProperty('cache-secs', '5'); // ← was 8
+      await p.setProperty('cache-secs', '8');
       await p.setProperty('cache-initial', '0');
       await p.setProperty('cache-pause', 'no');
       await p.setProperty('cache-pause-initial', 'no');
-      await p.setProperty('demuxer-max-bytes', '8MiB'); // ← was 20MiB
-      await p.setProperty('demuxer-max-back-bytes', '4MiB'); // ← new
+      await p.setProperty('cache-pause-wait', '0');
+      await p.setProperty('demuxer-max-bytes', '16MiB');
+      await p.setProperty('demuxer-max-back-bytes', '1MiB');
+      await p.setProperty('demuxer-seekable-cache', 'no');
+      await p.setProperty('hls-bitrate', 'max');
 
-      // ── Video decode — low-spec aggressive ────────────────────────────────
-      await p.setProperty('hwdec', 'auto-safe');
+      // ── Video decode / drop ──────────────────────────────────────────────
       await p.setProperty('video-sync', 'audio');
-      await p.setProperty('framedrop', 'decoder+vo'); // ← was vo only
-      await p.setProperty('vd-lavc-threads', '1'); // ← was 2
-      await p.setProperty('vd-lavc-fast', 'yes'); // ← new: skip quality
-      await p.setProperty(
-        'vd-lavc-skiploopfilter',
-        'nonkey',
-      ); // ← new: skip deblocking
-      await p.setProperty('vd-lavc-skipframe', 'nonref'); // ← new: skip non-ref
+      await p.setProperty('framedrop', 'vo');
+      await p.setProperty('vd-lavc-threads', '0');
+      await p.setProperty('vd-lavc-fast', 'yes');
+      await p.setProperty('vd-lavc-skiploopfilter', 'all');
+      await p.setProperty('vd-lavc-skipidct', 'nonkey');
+      await p.setProperty('vd-lavc-skipframe', 'nonref');
+      // Disable dropped-frame-on-seek precision — never needed for live/IPTV
+      await p.setProperty('hr-seek', 'no');
 
       // ── Audio ──────────────────────────────────────────────────────────────
-      await p.setProperty('audio-buffer', '0.1'); // ← was 0.2
+      await p.setProperty('audio-buffer', '0.2');
+      await p.setProperty('audio-latency-hack', 'yes');
 
-      // ── Output — reduce GPU memory footprint ──────────────────────────────
-      await p.setProperty('scale', 'bilinear'); // ← fast scaler
+      // ── Output — every one of these is a real per-frame GPU pass; none
+      // are needed for compressed IPTV/streaming content.
+      await p.setProperty('scale', 'bilinear');
       await p.setProperty('dscale', 'bilinear');
+      await p.setProperty('cscale', 'bilinear');
       await p.setProperty('correct-downscaling', 'no');
       await p.setProperty('sigmoid-upscaling', 'no');
+      await p.setProperty('video-latency-hacks', 'yes');
+      await p.setProperty('deband', 'no');
+      await p.setProperty('blend-subtitles', 'no');
+      await p.setProperty('interpolation', 'no');
+      await p.setProperty('dither-depth', 'no');
+      await p.setProperty('correct-pts', 'yes');
+      // OSD/subtitle scaling at video resolution is cheaper than display res
+      await p.setProperty('osd-scale-by-window', 'no');
     } catch (_) {}
   }
 
@@ -202,10 +248,13 @@ class LivePlayerNotifier extends StateNotifier<LivePlayerState> {
     if (mounted) state = state.copyWith(volume: c);
   }
 
-  void stop() {
+  Future<void> stop() async {
     _reconnectTimer?.cancel();
     try {
-      _player?.stop();
+      // pause() cuts audio immediately on all platforms;
+      // stop() then releases the demuxer/decoder pipeline.
+      await _player?.pause();
+      await _player?.stop();
     } catch (_) {}
     if (mounted) {
       state = const LivePlayerState();

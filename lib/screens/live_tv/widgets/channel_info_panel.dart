@@ -1,10 +1,10 @@
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 
 import '../../../core/theme/app_theme.dart';
+import '../../../core/utils/focus_utils.dart';
 import '../../../models/xtream_models.dart';
 import '../../../providers/live_tv_provider.dart';
 import '../live_tv_screen.dart';
@@ -430,31 +430,18 @@ class _FocusWatchButton extends StatefulWidget {
 }
 
 class _FocusWatchButtonState extends State<_FocusWatchButton> {
-  bool _focused = false;
-
   @override
   Widget build(BuildContext context) {
-    return Focus(
-      onFocusChange: (f) => setState(() => _focused = f),
-      onKeyEvent: (_, event) {
-        if (event is KeyDownEvent &&
-            (event.logicalKey == LogicalKeyboardKey.select ||
-                event.logicalKey == LogicalKeyboardKey.enter ||
-                event.logicalKey == LogicalKeyboardKey.space)) {
-          widget.onTap();
-          return KeyEventResult.handled;
-        }
-        return KeyEventResult.ignored;
-      },
-      child: AnimatedContainer(
+    return TvFocusable(
+      onActivate: widget.onTap,
+      builder: (focused, _) => AnimatedContainer(
         duration: const Duration(milliseconds: 150),
         decoration: BoxDecoration(
           borderRadius: BorderRadius.circular(10),
-          border: _focused
+          border: focused
               ? Border.all(
-                  color: Colors.white.withValues(alpha: 0.7),
-                  width: 2.5,
-                )
+              color: Colors.white.withValues(alpha: 0.70),
+              width: 2.5)
               : null,
         ),
         child: ElevatedButton.icon(

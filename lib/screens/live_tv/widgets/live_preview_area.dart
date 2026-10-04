@@ -1,14 +1,15 @@
 import 'dart:async';
 
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 import 'package:media_kit_video/media_kit_video.dart';
-import 'package:cached_network_image/cached_network_image.dart';
 
 import '../../../core/theme/app_theme.dart';
+import '../../../core/utils/focus_utils.dart';
 import '../../../core/utils/platform_utils.dart';
 import '../../../models/xtream_models.dart';
 import '../../../providers/live_player_provider.dart';
@@ -23,12 +24,22 @@ class LiveInlinePlayer extends ConsumerStatefulWidget {
   final bool isMaximized;
   final VoidCallback onMaximize;
   final VoidCallback onMinimize;
+  final FocusNode? watchNowFocusNode;
+  final FocusNode? playPauseFocusNode;
+  final FocusNode? Function()? categoryEntryFocus;
+  final FocusNode? channelSearchFocus;
+  final FocusNode? backFocusNode;
 
   const LiveInlinePlayer({
     super.key,
     required this.isMaximized,
     required this.onMaximize,
     required this.onMinimize,
+    this.watchNowFocusNode,
+    this.playPauseFocusNode,
+    this.categoryEntryFocus,
+    this.channelSearchFocus,
+    this.backFocusNode,
   });
 
   @override
@@ -259,6 +270,7 @@ class _LiveInlinePlayerState extends ConsumerState<LiveInlinePlayer> {
                 next: next,
                 ps: ps,
                 onWatchNow: widget.onMaximize,
+                watchNowFocusNode: widget.watchNowFocusNode,
                 onTogglePlay: () =>
                     ref.read(livePlayerProvider.notifier).togglePlayPause(),
                 onVolumeChange: (v) =>
@@ -293,12 +305,16 @@ class _LiveInlinePlayerState extends ConsumerState<LiveInlinePlayer> {
           padding: const EdgeInsets.fromLTRB(8, 0, 8, 8),
           child: Row(
             children: [
-              _OverlayBtn(
-                icon: ps.isPlaying
-                    ? Icons.pause_rounded
-                    : Icons.play_arrow_rounded,
+              _PlayPauseFocusBtn(
+                focusNode: widget.playPauseFocusNode,
+                isPlaying: ps.isPlaying,
                 onTap: () =>
                     ref.read(livePlayerProvider.notifier).togglePlayPause(),
+                onUp: () => widget.backFocusNode?.requestFocus(),
+                onDown: () => widget.channelSearchFocus?.requestFocus(),
+                onLeft: () =>
+                    widget.categoryEntryFocus?.call()?.requestFocus(),
+                onRight: () => widget.watchNowFocusNode?.requestFocus(),
               ),
               const SizedBox(width: 4),
               Icon(
@@ -918,43 +934,25 @@ class _ChannelBtn extends StatefulWidget {
 }
 
 class _ChannelBtnState extends State<_ChannelBtn> {
-  bool _focused = false;
-
   @override
   Widget build(BuildContext context) {
-    return Focus(
-      onFocusChange: (f) => setState(() => _focused = f),
-      onKeyEvent: (_, event) {
-        if (event is KeyDownEvent &&
-            (event.logicalKey == LogicalKeyboardKey.select ||
-                event.logicalKey == LogicalKeyboardKey.enter ||
-                event.logicalKey == LogicalKeyboardKey.space)) {
-          widget.onTap();
-          return KeyEventResult.handled;
-        }
-        return KeyEventResult.ignored;
-      },
-      child: Tooltip(
+    return TvFocusable(
+      onActivate: widget.onTap,
+      builder: (focused, _) => Tooltip(
         message: widget.tooltip,
-        child: GestureDetector(
-          onTap: widget.onTap,
-          child: MouseRegion(
-            cursor: SystemMouseCursors.click,
-            child: AnimatedContainer(
-              duration: const Duration(milliseconds: 150),
-              padding: const EdgeInsets.all(8),
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                color: _focused
-                    ? Colors.white.withValues(alpha: 0.2)
-                    : Colors.transparent,
-                border: _focused
-                    ? Border.all(color: Colors.white.withValues(alpha: 0.5))
-                    : null,
-              ),
-              child: Icon(widget.icon, color: Colors.white, size: 24),
-            ),
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 150),
+          padding: const EdgeInsets.all(8),
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            color: focused
+                ? Colors.white.withValues(alpha: 0.2)
+                : Colors.transparent,
+            border: focused
+                ? Border.all(color: Colors.white.withValues(alpha: 0.55))
+                : null,
           ),
+          child: Icon(widget.icon, color: Colors.white, size: 24),
         ),
       ),
     );
@@ -972,6 +970,7 @@ class _InfoPane extends StatelessWidget {
   final VoidCallback onWatchNow;
   final VoidCallback onTogglePlay;
   final ValueChanged<double> onVolumeChange;
+  final FocusNode? watchNowFocusNode;
 
   const _InfoPane({
     required this.channel,
@@ -981,6 +980,7 @@ class _InfoPane extends StatelessWidget {
     required this.onWatchNow,
     required this.onTogglePlay,
     required this.onVolumeChange,
+    this.watchNowFocusNode,
   });
 
   @override
@@ -1120,6 +1120,7 @@ class _InfoPane extends StatelessWidget {
           SizedBox(
             width: double.infinity,
             child: _FocusableElevatedButton(
+              focusNode: watchNowFocusNode,
               label: 'Watch Now',
               icon: Icons.fullscreen_rounded,
               onTap: onWatchNow,
@@ -1138,10 +1139,12 @@ class _FocusableElevatedButton extends StatefulWidget {
   final String label;
   final IconData icon;
   final VoidCallback onTap;
+  final FocusNode? focusNode;
   const _FocusableElevatedButton({
     required this.label,
     required this.icon,
     required this.onTap,
+    this.focusNode,
   });
 
   @override
@@ -1149,29 +1152,23 @@ class _FocusableElevatedButton extends StatefulWidget {
       _FocusableElevatedButtonState();
 }
 
-class _FocusableElevatedButtonState extends State<_FocusableElevatedButton> {
-  bool _focused = false;
-
+class _FocusableElevatedButtonState
+    extends State<_FocusableElevatedButton> {
   @override
   Widget build(BuildContext context) {
-    return Focus(
-      onFocusChange: (f) => setState(() => _focused = f),
-      onKeyEvent: (_, event) {
-        if (event is KeyDownEvent &&
-            (event.logicalKey == LogicalKeyboardKey.select ||
-                event.logicalKey == LogicalKeyboardKey.enter ||
-                event.logicalKey == LogicalKeyboardKey.space)) {
-          widget.onTap();
-          return KeyEventResult.handled;
-        }
-        return KeyEventResult.ignored;
-      },
-      child: AnimatedContainer(
+    return TvFocusable(
+      focusNode: widget.focusNode,
+      autoScroll: false,
+      onActivate: widget.onTap,
+      builder: (focused, _) => AnimatedContainer(
         duration: const Duration(milliseconds: 150),
         decoration: BoxDecoration(
           borderRadius: BorderRadius.circular(10),
-          border: _focused
-              ? Border.all(color: Colors.white.withValues(alpha: 0.7), width: 2)
+          border: focused
+              ? Border.all(
+                  color: Colors.white.withValues(alpha: 0.70),
+                  width: 2,
+                )
               : null,
         ),
         child: ElevatedButton.icon(
@@ -1179,7 +1176,7 @@ class _FocusableElevatedButtonState extends State<_FocusableElevatedButton> {
           icon: Icon(widget.icon, size: 18),
           label: Text(widget.label),
           style: ElevatedButton.styleFrom(
-            backgroundColor: _focused
+            backgroundColor: focused
                 ? AppTheme.primary.withValues(alpha: 0.9)
                 : AppTheme.primary,
             foregroundColor: Colors.white,
@@ -1298,6 +1295,7 @@ class _LiveBadge extends StatelessWidget {
 
 class _LiveDot extends StatelessWidget {
   const _LiveDot();
+
   @override
   Widget build(BuildContext context) => Container(
     width: 5,
@@ -1312,6 +1310,7 @@ class _LiveDot extends StatelessWidget {
 class _QualityBadge extends StatelessWidget {
   final String quality;
   const _QualityBadge(this.quality);
+
   @override
   Widget build(BuildContext context) => Container(
     padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
@@ -1353,9 +1352,79 @@ class _OverlayBtn extends StatelessWidget {
   );
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// PLAY/PAUSE BUTTON — mini-player, fully focusable with explicit nav graph.
+// ─────────────────────────────────────────────────────────────────────────────
+class _PlayPauseFocusBtn extends StatelessWidget {
+  final FocusNode? focusNode;
+  final bool isPlaying;
+  final VoidCallback onTap;
+  final VoidCallback? onUp;
+  final VoidCallback? onDown;
+  final VoidCallback? onLeft;
+  final VoidCallback? onRight;
+
+  const _PlayPauseFocusBtn({
+    required this.focusNode,
+    required this.isPlaying,
+    required this.onTap,
+    this.onUp,
+    this.onDown,
+    this.onLeft,
+    this.onRight,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return TvFocusable(
+      focusNode: focusNode,
+      autoScroll: false,
+      onActivate: onTap,
+      onArrowKey: (key) {
+        if (key == LogicalKeyboardKey.arrowUp) {
+          (onUp ?? () {})();
+          return KeyEventResult.handled;
+        }
+        if (key == LogicalKeyboardKey.arrowDown) {
+          (onDown ?? () {})();
+          return KeyEventResult.handled;
+        }
+        if (key == LogicalKeyboardKey.arrowLeft) {
+          (onLeft ?? () {})();
+          return KeyEventResult.handled;
+        }
+        if (key == LogicalKeyboardKey.arrowRight) {
+          (onRight ?? () {})();
+          return KeyEventResult.handled;
+        }
+        return KeyEventResult.ignored;
+      },
+      builder: (focused, _) => Container(
+        padding: const EdgeInsets.all(5),
+        decoration: BoxDecoration(
+          color: focused
+              ? AppTheme.primary.withValues(alpha: 0.85)
+              : Colors.black.withValues(alpha: 0.6),
+          borderRadius: BorderRadius.circular(6),
+          border: focused
+              ? Border.all(
+              color: Colors.white.withValues(alpha: 0.7), width: 1.5)
+              : null,
+        ),
+        child: Icon(
+          isPlaying ? Icons.pause_rounded : Icons.play_arrow_rounded,
+          color: Colors.white,
+          size: 16,
+        ),
+      ),
+    );
+  }
+}
+
 class _Label extends StatelessWidget {
   final String text;
   const _Label(this.text);
+
   @override
   Widget build(BuildContext context) => Text(
     text,
@@ -1370,6 +1439,7 @@ class _Label extends StatelessWidget {
 
 class _BufferingBadge extends StatelessWidget {
   const _BufferingBadge();
+
   @override
   Widget build(BuildContext context) => Container(
     padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
@@ -1402,6 +1472,7 @@ class _ReconnectOverlay extends StatelessWidget {
   final int attempt;
   final VoidCallback onCancel;
   const _ReconnectOverlay({required this.attempt, required this.onCancel});
+
   @override
   Widget build(BuildContext context) => Container(
     padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 20),
@@ -1448,6 +1519,7 @@ class _ReconnectOverlay extends StatelessWidget {
 class _LockOverlay extends StatelessWidget {
   final VoidCallback onUnlock;
   const _LockOverlay({required this.onUnlock});
+
   @override
   Widget build(BuildContext context) => SafeArea(
     child: Align(
@@ -1472,6 +1544,7 @@ class _LockOverlay extends StatelessWidget {
 class _SkipIndicator extends StatelessWidget {
   final bool forward;
   const _SkipIndicator({required this.forward});
+
   @override
   Widget build(BuildContext context) => Container(
     padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
@@ -1510,6 +1583,7 @@ class _GestureOverlay extends StatelessWidget {
     required this.value,
     required this.color,
   });
+
   @override
   Widget build(BuildContext context) => Container(
     padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),

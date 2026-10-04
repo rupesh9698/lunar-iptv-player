@@ -404,17 +404,23 @@ class _Cards extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 32),
+      padding: const EdgeInsets.symmetric(horizontal: 24),
       child: Row(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: items
+            .asMap()
+            .entries
             .map(
-              (item) => Expanded(
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 8),
-                  child: _SyncCard(item: item),
-                ),
+              (e) => Expanded(
+            child: Padding(
+              padding: EdgeInsets.only(
+                left: e.key == 0 ? 0 : 8,
+                right: e.key == items.length - 1 ? 0 : 8,
               ),
-            )
+              child: _SyncCard(item: e.value),
+            ),
+          ),
+        )
             .toList(),
       ),
     );
@@ -428,142 +434,175 @@ class _SyncCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final isLoading = item.status == _FetchStatus.loading;
-    final isDone = item.status == _FetchStatus.done;
-    final isFailed = item.status == _FetchStatus.failed;
+    final isDone    = item.status == _FetchStatus.done;
+    final isFailed  = item.status == _FetchStatus.failed;
+
+    final borderColor = isDone
+        ? AppTheme.success.withValues(alpha: 0.4)
+        : isFailed
+        ? AppTheme.error.withValues(alpha: 0.4)
+        : isLoading
+        ? AppTheme.primary.withValues(alpha: 0.4)
+        : AppTheme.divider;
 
     return AnimatedContainer(
       duration: const Duration(milliseconds: 400),
       curve: Curves.easeOutCubic,
       clipBehavior: Clip.hardEdge,
-      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
       decoration: BoxDecoration(
         color: isLoading
             ? AppTheme.surface
             : AppTheme.surface.withValues(alpha: 0.6),
         borderRadius: BorderRadius.circular(20),
-        border: Border.all(
-          color: isDone
-              ? AppTheme.success.withValues(alpha: 0.4)
-              : isFailed
-              ? AppTheme.error.withValues(alpha: 0.4)
-              : isLoading
-              ? AppTheme.primary.withValues(alpha: 0.4)
-              : AppTheme.divider,
-          width: isLoading ? 2 : 1,
-        ),
+        border: Border.all(color: borderColor, width: isLoading ? 2 : 1),
         boxShadow: isLoading
             ? [
-                BoxShadow(
-                  color: AppTheme.primary.withValues(alpha: 0.15),
-                  blurRadius: 30,
-                  spreadRadius: 2,
-                ),
-              ]
+          BoxShadow(
+            color: AppTheme.primary.withValues(alpha: 0.15),
+            blurRadius: 30,
+            spreadRadius: 2,
+          ),
+        ]
             : null,
       ),
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          // Status Badge
-          SizedBox(
-            height: 26,
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.end,
-              children: [
-                if (isDone)
-                  const Icon(
-                    Icons.check_circle,
-                    color: AppTheme.success,
-                    size: 24,
-                  ).animate().scale(duration: 400.ms),
-                if (isFailed)
-                  const Icon(Icons.error, color: AppTheme.error, size: 24),
-              ],
-            ),
-          ),
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          // Responsive icon size — shrinks on small screens / TVs at 720p
+          final availH   = constraints.maxHeight;
+          final iconSize = (availH * 0.22).clamp(28.0, 48.0);
+          final ringSize = (availH * 0.32).clamp(56.0, 100.0);
+          final spinSize = ringSize + 12;
 
-          const SizedBox(height: 8),
+          return Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              // ── Status badge row ──────────────────────────────────────
+              Padding(
+                padding: const EdgeInsets.fromLTRB(12, 12, 12, 0),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.end,
+                  children: [
+                    if (isDone)
+                      const Icon(Icons.check_circle,
+                          color: AppTheme.success, size: 22)
+                          .animate()
+                          .scale(duration: 400.ms),
+                    if (isFailed)
+                      const Icon(Icons.error,
+                          color: AppTheme.error, size: 22),
+                    if (!isDone && !isFailed) const SizedBox(height: 22),
+                  ],
+                ),
+              ),
 
-          // Icon + Loader
-          SizedBox(
-            width: 110,
-            height: 110,
-            child: Stack(
-              alignment: Alignment.center,
-              children: [
-                Container(
-                  width: 90,
-                  height: 90,
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    color: AppTheme.surfaceVariant,
-                    border: Border.all(
-                      color: isDone
-                          ? AppTheme.success.withValues(alpha: 0.3)
-                          : AppTheme.divider,
-                      width: 3,
+              const Spacer(),
+
+              // ── Icon + spinner ────────────────────────────────────────
+              SizedBox(
+                width: spinSize,
+                height: spinSize,
+                child: Stack(
+                  alignment: Alignment.center,
+                  children: [
+                    Container(
+                      width: ringSize,
+                      height: ringSize,
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        color: AppTheme.surfaceVariant,
+                        border: Border.all(
+                          color: isDone
+                              ? AppTheme.success.withValues(alpha: 0.3)
+                              : AppTheme.divider,
+                          width: 2.5,
+                        ),
+                      ),
+                      child: Icon(
+                        item.icon,
+                        size: iconSize,
+                        color: isDone || isLoading
+                            ? AppTheme.textPrimary
+                            : AppTheme.textMuted,
+                      ),
                     ),
-                  ),
-                  child: Icon(
-                    item.icon,
-                    size: 38,
+                    if (isLoading)
+                      SizedBox(
+                        width: spinSize,
+                        height: spinSize,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 3.5,
+                          strokeCap: StrokeCap.round,
+                          valueColor: const AlwaysStoppedAnimation(
+                              AppTheme.primary),
+                        ),
+                      )
+                          .animate(onPlay: (c) => c.repeat())
+                          .rotate(
+                        duration: 1200.ms,
+                        curve: Curves.linear,
+                      ),
+                  ],
+                ),
+              ),
+
+              const Spacer(),
+
+              // ── Label ─────────────────────────────────────────────────
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 8),
+                child: Text(
+                  item.label,
+                  textAlign: TextAlign.center,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
                     color: isDone || isLoading
                         ? AppTheme.textPrimary
                         : AppTheme.textMuted,
+                    fontSize: 14,
+                    fontWeight: FontWeight.w600,
                   ),
                 ),
-                if (isLoading)
-                  SizedBox(
-                    width: 108,
-                    height: 108,
-                    child: CircularProgressIndicator(
-                      strokeWidth: 4,
-                      strokeCap: StrokeCap.round,
-                      valueColor: const AlwaysStoppedAnimation(
-                        AppTheme.primary,
-                      ),
+              ),
+
+              // ── Subtitle / count ──────────────────────────────────────
+              if (item.subtitle != null) ...[
+                const SizedBox(height: 4),
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 8),
+                  child: Text(
+                    item.subtitle!,
+                    textAlign: TextAlign.center,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      color: AppTheme.textSecondary,
+                      fontSize: 11.5,
                     ),
-                  ).animate().rotate(duration: 1200.ms, curve: Curves.linear),
-              ],
-            ),
-          ),
-
-          const SizedBox(height: 20),
-
-          Text(
-            item.label,
-            style: TextStyle(
-              color: isDone || isLoading
-                  ? AppTheme.textPrimary
-                  : AppTheme.textMuted,
-              fontSize: 15.5,
-              fontWeight: FontWeight.w600,
-            ),
-          ),
-
-          if (item.subtitle != null) ...[
-            const SizedBox(height: 6),
-            Text(
-              item.subtitle!,
-              style: const TextStyle(
-                color: AppTheme.textSecondary,
-                fontSize: 12.5,
-              ),
-            ),
-          ],
-
-          if (item.errorMessage != null && isFailed)
-            Padding(
-              padding: const EdgeInsets.only(top: 8),
-              child: Text(
-                'Tap to retry later',
-                style: TextStyle(
-                  color: AppTheme.error.withValues(alpha: 0.8),
-                  fontSize: 11,
+                  ),
                 ),
-              ),
-            ),
-        ],
+              ],
+
+              // ── Error hint ────────────────────────────────────────────
+              if (isFailed && item.errorMessage != null) ...[
+                const SizedBox(height: 4),
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 8),
+                  child: Text(
+                    'Tap to retry later',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      color: AppTheme.error.withValues(alpha: 0.8),
+                      fontSize: 10,
+                    ),
+                  ),
+                ),
+              ],
+
+              const SizedBox(height: 14),
+            ],
+          );
+        },
       ),
     ).animate().fadeIn(duration: 400.ms).slideY(begin: 0.1);
   }

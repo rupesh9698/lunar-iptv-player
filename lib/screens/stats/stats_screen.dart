@@ -8,6 +8,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../core/theme/app_theme.dart';
+import '../../core/utils/focus_utils.dart';
 import '../../providers/app_providers.dart';
 import '../../providers/behavior_providers.dart';
 import '../../services/behavior_service.dart';
@@ -718,46 +719,28 @@ class _FocusableIconBtn extends StatefulWidget {
 }
 
 class _FocusableIconBtnState extends State<_FocusableIconBtn> {
-  bool _focused = false;
-
   @override
   Widget build(BuildContext context) {
-    return Focus(
-      onFocusChange: (f) => setState(() => _focused = f),
-      onKeyEvent: (_, event) {
-        if (event is KeyDownEvent &&
-            (event.logicalKey == LogicalKeyboardKey.select ||
-                event.logicalKey == LogicalKeyboardKey.enter ||
-                event.logicalKey == LogicalKeyboardKey.space)) {
-          widget.onTap();
-          return KeyEventResult.handled;
-        }
-        return KeyEventResult.ignored;
-      },
-      child: Tooltip(
+    return TvFocusable(
+      onActivate: widget.onTap,
+      builder: (focused, _) => Tooltip(
         message: widget.tooltip,
-        child: MouseRegion(
-          cursor: SystemMouseCursors.click,
-          child: GestureDetector(
-            onTap: widget.onTap,
-            child: AnimatedContainer(
-              duration: const Duration(milliseconds: 150),
-              padding: const EdgeInsets.all(6),
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(8),
-                color: _focused
-                    ? widget.color.withValues(alpha: 0.12)
-                    : Colors.transparent,
-                border: _focused
-                    ? Border.all(color: widget.color.withValues(alpha: 0.5))
-                    : null,
-              ),
-              child: Icon(
-                widget.icon,
-                color: _focused ? widget.color : AppTheme.textSecondary,
-                size: 18,
-              ),
-            ),
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 150),
+          padding: const EdgeInsets.all(6),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(8),
+            color: focused
+                ? widget.color.withValues(alpha: 0.12)
+                : Colors.transparent,
+            border: focused
+                ? Border.all(color: widget.color.withValues(alpha: 0.5))
+                : null,
+          ),
+          child: Icon(
+            widget.icon,
+            color: focused ? widget.color : AppTheme.textSecondary,
+            size: 18,
           ),
         ),
       ),

@@ -1,3 +1,4 @@
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -296,12 +297,12 @@ class _SeriesPosterCardState
   Widget _buildPoster() {
     final cover = widget.series.cover;
     if (cover != null && cover.isNotEmpty) {
-      return Image.network(
-        cover,
+      return CachedNetworkImage(
+        imageUrl: cover,
         fit: BoxFit.cover,
-        errorBuilder: (_, _, _) => _placeholder(),
-        loadingBuilder: (_, child, progress) =>
-        progress == null ? child : _shimmer(),
+        placeholder: (_, _) => _shimmer(),
+        errorWidget: (_, _, _) => _placeholder(),
+        fadeInDuration: const Duration(milliseconds: 200),
       );
     }
     return _placeholder();

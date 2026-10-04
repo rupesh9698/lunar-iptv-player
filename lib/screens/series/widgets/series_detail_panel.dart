@@ -6,6 +6,7 @@ import 'package:lunar_iptv_player/widgets/auto_fav_banner.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../../../core/theme/app_theme.dart';
+import '../../../core/utils/focus_utils.dart';
 import '../../../core/utils/launcher_utils.dart';
 import '../../../models/xtream_models.dart';
 import '../../../providers/app_providers.dart';
@@ -696,51 +697,80 @@ class _SeriesDetailPanelState extends ConsumerState<SeriesDetailPanel> {
           Row(
             children: [
               Expanded(
-                child: ElevatedButton.icon(
-                  onPressed: () => _playEpisode(context, ref, info, first),
-                  icon: const Icon(Icons.play_arrow, size: 20),
-                  label: Text(
-                    'Watch S${first.season}E'
-                    '${first.episodeNum.padLeft(2, '0')}',
-                  ),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: AppTheme.primary,
-                    foregroundColor: Colors.white,
-                    padding: const EdgeInsets.symmetric(vertical: 13),
-                    shape: RoundedRectangleBorder(
+                child: TvFocusable(
+                  autoScroll: false,
+                  onActivate: () => _playEpisode(context, ref, info, first),
+                  builder: (focused, _) => AnimatedContainer(
+                    duration: const Duration(milliseconds: 150),
+                    decoration: BoxDecoration(
                       borderRadius: BorderRadius.circular(12),
+                      border: focused
+                          ? Border.all(
+                          color: Colors.white.withValues(alpha: 0.7),
+                          width: 2)
+                          : null,
+                    ),
+                    child: ElevatedButton.icon(
+                      onPressed: () =>
+                          _playEpisode(context, ref, info, first),
+                      icon: const Icon(Icons.play_arrow, size: 20),
+                      label: Text(
+                        'Watch S${first.season}E'
+                            '${first.episodeNum.padLeft(2, '0')}',
+                      ),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor:
+                        focused ? AppTheme.primary.withValues(alpha: 0.85)
+                            : AppTheme.primary,
+                        foregroundColor: Colors.white,
+                        padding:
+                        const EdgeInsets.symmetric(vertical: 13),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                      ),
                     ),
                   ),
                 ),
               ),
               const SizedBox(width: 8),
-              // Favourite button (moved from hero)
-              AnimatedContainer(
-                duration: const Duration(milliseconds: 200),
-                decoration: BoxDecoration(
-                  color: isFav
-                      ? AppTheme.error.withValues(alpha: 0.12)
-                      : AppTheme.surfaceVariant,
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(
+              TvFocusable(
+                autoScroll: false,
+                onActivate: () => ref
+                    .read(seriesFavoritesProvider.notifier)
+                    .toggle(series.seriesId),
+                builder: (focused, _) => AnimatedContainer(
+                  duration: const Duration(milliseconds: 200),
+                  decoration: BoxDecoration(
                     color: isFav
-                        ? AppTheme.error.withValues(alpha: 0.4)
-                        : AppTheme.divider,
+                        ? AppTheme.error.withValues(alpha: 0.12)
+                        : focused
+                        ? AppTheme.surfaceVariant.withValues(alpha: 0.8)
+                        : AppTheme.surfaceVariant,
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(
+                      color: focused
+                          ? Colors.white.withValues(alpha: 0.55)
+                          : isFav
+                          ? AppTheme.error.withValues(alpha: 0.4)
+                          : AppTheme.divider,
+                      width: focused ? 2 : 1,
+                    ),
                   ),
-                ),
-                child: IconButton(
-                  onPressed: () => ref
-                      .read(seriesFavoritesProvider.notifier)
-                      .toggle(series.seriesId),
-                  tooltip: isFav
-                      ? 'Remove from Favourites'
-                      : 'Add to Favourites',
-                  icon: Icon(
-                    isFav ? Icons.favorite : Icons.favorite_border,
-                    color: isFav ? AppTheme.error : AppTheme.textMuted,
-                    size: 22,
+                  child: IconButton(
+                    onPressed: () => ref
+                        .read(seriesFavoritesProvider.notifier)
+                        .toggle(series.seriesId),
+                    tooltip: isFav
+                        ? 'Remove from Favourites'
+                        : 'Add to Favourites',
+                    icon: Icon(
+                      isFav ? Icons.favorite : Icons.favorite_border,
+                      color: isFav ? AppTheme.error : AppTheme.textMuted,
+                      size: 22,
+                    ),
+                    padding: const EdgeInsets.all(10),
                   ),
-                  padding: const EdgeInsets.all(10),
                 ),
               ),
             ],
@@ -748,15 +778,38 @@ class _SeriesDetailPanelState extends ConsumerState<SeriesDetailPanel> {
           // Trailer button
           if (trailerKey != null && trailerKey.isNotEmpty) ...[
             const SizedBox(height: 8),
-            OutlinedButton.icon(
-              onPressed: () => launchYouTubeTrailer(context, trailerKey),
-              icon: const Icon(Icons.play_circle_outline, size: 18),
-              label: const Text('Trailer'),
-              style: OutlinedButton.styleFrom(
-                foregroundColor: AppTheme.textSecondary,
-                side: const BorderSide(color: AppTheme.divider),
-                shape: RoundedRectangleBorder(
+            TvFocusable(
+              autoScroll: false,
+              onActivate: () =>
+                  launchYouTubeTrailer(context, trailerKey),
+              builder: (focused, _) => AnimatedContainer(
+                duration: const Duration(milliseconds: 150),
+                decoration: BoxDecoration(
                   borderRadius: BorderRadius.circular(12),
+                  border: focused
+                      ? Border.all(
+                      color: Colors.white.withValues(alpha: 0.55),
+                      width: 2)
+                      : null,
+                ),
+                child: OutlinedButton.icon(
+                  onPressed: () =>
+                      launchYouTubeTrailer(context, trailerKey),
+                  icon: const Icon(
+                      Icons.play_circle_outline, size: 18),
+                  label: const Text('Trailer'),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: focused
+                        ? AppTheme.primary
+                        : AppTheme.textSecondary,
+                    side: BorderSide(
+                        color: focused
+                            ? AppTheme.primary
+                            : AppTheme.divider),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                  ),
                 ),
               ),
             ),
@@ -873,129 +926,107 @@ class _EpisodeTile extends StatefulWidget {
   State<_EpisodeTile> createState() => _EpisodeTileState();
 }
 
-class _EpisodeTileState extends State<_EpisodeTile> {
-  bool _hovering = false;
-  bool _focused = false;
-
+class _EpisodeTileState extends State<_EpisodeTile> with TvFocusMixin {
   @override
   Widget build(BuildContext context) {
-    final ep = widget.episode;
+    final ep    = widget.episode;
     final epNum = ep.episodeNum.padLeft(2, '0');
     final title = _cleanTitle(ep.title, ep.episodeNum);
-    final dur = ep.formattedDuration;
+    final dur   = ep.formattedDuration;
 
-    return Focus(
-      onFocusChange: (f) => setState(() => _focused = f),
-      onKeyEvent: (_, event) {
-        if (event is KeyDownEvent &&
-            (event.logicalKey == LogicalKeyboardKey.select ||
-                event.logicalKey == LogicalKeyboardKey.enter ||
-                event.logicalKey == LogicalKeyboardKey.space)) {
-          widget.onPlay();
-          return KeyEventResult.handled;
-        }
-        return KeyEventResult.ignored;
-      },
-      child: MouseRegion(
-        onEnter: (_) => setState(() => _hovering = true),
-        onExit: (_) => setState(() => _hovering = false),
-        child: GestureDetector(
-          onTap: widget.onPlay,
-          child: AnimatedContainer(
-            duration: const Duration(milliseconds: 150),
-            color: (_hovering || _focused)
-                ? AppTheme.primary.withValues(alpha: 0.08)
-                : Colors.transparent,
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-            // Focus indicator on left edge
-            foregroundDecoration: _focused
-                ? const BoxDecoration(
-                    border: Border(
-                      left: BorderSide(color: AppTheme.primary, width: 3),
-                    ),
-                  )
-                : null,
-            child: Row(
-              children: [
-                Container(
-                  width: 38,
-                  height: 38,
-                  decoration: BoxDecoration(
-                    color: (_hovering || _focused)
-                        ? AppTheme.primary.withValues(alpha: 0.15)
-                        : AppTheme.surfaceVariant,
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  alignment: Alignment.center,
-                  child: Text(
-                    'E$epNum',
-                    style: TextStyle(
-                      color: (_hovering || _focused)
-                          ? AppTheme.primary
-                          : AppTheme.textMuted,
-                      fontSize: 11,
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        title,
-                        style: TextStyle(
-                          color: (_hovering || _focused)
-                              ? AppTheme.textPrimary
-                              : AppTheme.textSecondary,
-                          fontSize: 13,
-                          fontWeight: (_hovering || _focused)
-                              ? FontWeight.w600
-                              : FontWeight.w400,
-                        ),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                      if (dur.isNotEmpty)
-                        Text(
-                          dur,
-                          style: const TextStyle(
-                            color: AppTheme.textMuted,
-                            fontSize: 11,
-                          ),
-                        ),
-                    ],
-                  ),
-                ),
-                GestureDetector(
-                  onTap: () {
-                    widget.onDownload?.call();
-                  },
-                  child: AnimatedContainer(
-                    duration: const Duration(milliseconds: 200),
-                    width: 32,
-                    height: 32,
-                    decoration: BoxDecoration(
-                      color: (_hovering || _focused)
-                          ? AppTheme.primary
-                          : Colors.transparent,
-                      shape: BoxShape.circle,
-                    ),
-                    child: Icon(
-                      Icons.download_rounded,
-                      size: 18,
-                      color: (_hovering || _focused)
-                          ? Colors.white
-                          : AppTheme.textMuted,
-                    ),
-                  ),
-                ),
-              ],
+    return TvFocusable(
+      onActivate: widget.onPlay,
+      onFocusChange: setTvFocused,
+      builder: (focused, _) {
+        final lit = isTvHovered || focused;
+        return AnimatedContainer(
+          duration: const Duration(milliseconds: 150),
+          color: lit
+              ? AppTheme.primary.withValues(alpha: 0.08)
+              : Colors.transparent,
+          padding: const EdgeInsets.symmetric(
+              horizontal: 14, vertical: 10),
+          foregroundDecoration: focused
+              ? const BoxDecoration(
+            border: Border(
+              left: BorderSide(
+                  color: AppTheme.primary, width: 3),
             ),
+          )
+              : null,
+          child: Row(
+            children: [
+              Container(
+                width: 38,
+                height: 38,
+                decoration: BoxDecoration(
+                  color: lit
+                      ? AppTheme.primary.withValues(alpha: 0.15)
+                      : AppTheme.surfaceVariant,
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                alignment: Alignment.center,
+                child: Text(
+                  'E$epNum',
+                  style: TextStyle(
+                    color: lit ? AppTheme.primary : AppTheme.textMuted,
+                    fontSize: 11,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      title,
+                      style: TextStyle(
+                        color: lit
+                            ? AppTheme.textPrimary
+                            : AppTheme.textSecondary,
+                        fontSize: 13,
+                        fontWeight: lit
+                            ? FontWeight.w600
+                            : FontWeight.w400,
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    if (dur.isNotEmpty)
+                      Text(
+                        dur,
+                        style: const TextStyle(
+                            color: AppTheme.textMuted,
+                            fontSize: 11),
+                      ),
+                  ],
+                ),
+              ),
+              GestureDetector(
+                onTap: widget.onDownload,
+                child: AnimatedContainer(
+                  duration: const Duration(milliseconds: 200),
+                  width: 32,
+                  height: 32,
+                  decoration: BoxDecoration(
+                    color: lit
+                        ? AppTheme.primary
+                        : Colors.transparent,
+                    shape: BoxShape.circle,
+                  ),
+                  child: Icon(
+                    Icons.download_rounded,
+                    size: 18,
+                    color: lit ? Colors.white : AppTheme.textMuted,
+                  ),
+                ),
+              ),
+            ],
           ),
-        ),
-      ),
+        );
+      },
     );
   }
 
@@ -1062,54 +1093,35 @@ class _FocusableSeasonChip extends StatefulWidget {
 }
 
 class _FocusableSeasonChipState extends State<_FocusableSeasonChip> {
-  bool _focused = false;
-
   @override
   Widget build(BuildContext context) {
-    return Focus(
-      onFocusChange: (f) => setState(() => _focused = f),
-      onKeyEvent: (_, event) {
-        if (event is KeyDownEvent &&
-            (event.logicalKey == LogicalKeyboardKey.select ||
-                event.logicalKey == LogicalKeyboardKey.enter ||
-                event.logicalKey == LogicalKeyboardKey.space)) {
-          widget.onTap();
-          return KeyEventResult.handled;
-        }
-        return KeyEventResult.ignored;
-      },
-      child: MouseRegion(
-        cursor: SystemMouseCursors.click,
-        child: GestureDetector(
-          onTap: widget.onTap,
-          child: AnimatedContainer(
-            duration: const Duration(milliseconds: 200),
-            margin: const EdgeInsets.only(right: 8),
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
-            decoration: BoxDecoration(
-              color: widget.isSelected
-                  ? AppTheme.primary
-                  : AppTheme.surfaceVariant,
-              borderRadius: BorderRadius.circular(20),
-              border: _focused
-                  ? Border.all(
-                      color: Colors.white.withValues(alpha: 0.7),
-                      width: 2,
-                    )
-                  : null,
-            ),
-            child: Text(
-              widget.label,
-              style: TextStyle(
-                color: widget.isSelected || _focused
-                    ? Colors.white
-                    : AppTheme.textSecondary,
-                fontSize: 12,
-                fontWeight: widget.isSelected
-                    ? FontWeight.w700
-                    : FontWeight.w400,
-              ),
-            ),
+    return TvFocusable(
+      onActivate: widget.onTap,
+      builder: (focused, _) => AnimatedContainer(
+        duration: const Duration(milliseconds: 200),
+        margin: const EdgeInsets.only(right: 8),
+        padding:
+        const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+        decoration: BoxDecoration(
+          color: widget.isSelected
+              ? AppTheme.primary
+              : AppTheme.surfaceVariant,
+          borderRadius: BorderRadius.circular(20),
+          border: focused
+              ? Border.all(
+              color: Colors.white.withValues(alpha: 0.70),
+              width: 2)
+              : null,
+        ),
+        child: Text(
+          widget.label,
+          style: TextStyle(
+            color: widget.isSelected || focused
+                ? Colors.white
+                : AppTheme.textSecondary,
+            fontSize: 12,
+            fontWeight:
+            widget.isSelected ? FontWeight.w700 : FontWeight.w400,
           ),
         ),
       ),

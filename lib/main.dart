@@ -20,47 +20,52 @@ void main() async {
   // 2. Pass that captured variable directly here
   FlutterNativeSplash.preserve(widgetsBinding: widgetsBinding);
 
-  // ── Status bar / navigation bar ────────────────────────────────────
-  // Hide system UI for immersive fullscreen experience on Android/iOS
-  if (!kIsWeb) {
-    await SystemChrome.setEnabledSystemUIMode(
-      SystemUiMode.immersiveSticky,
-      overlays: [], // No overlays = fully hidden
-    );
-  }
-
-  // ── Orientation ────────────────────────────────────────────────────
-  if (!kIsWeb &&
-      (defaultTargetPlatform == TargetPlatform.android ||
-          defaultTargetPlatform == TargetPlatform.iOS)) {
-    await SystemChrome.setPreferredOrientations([
-      DeviceOrientation.landscapeLeft,
-      DeviceOrientation.landscapeRight,
-    ]);
-  }
-
-  // ── MediaKit ────────────────────────────────────────────────────────
-  // MUST be called before any Player() is created
+  // ── MediaKit — must be before any Player() is created ───────────────────
   if (!kIsWeb) {
     MediaKit.ensureInitialized();
   }
 
-  // ── Services ────────────────────────────────────────────────────────
+  // ── System UI + Orientation — defer to after first frame ────────────────
+  // Running these before the engine is ready causes frame skips (576 frames
+  // skipped in logs). Schedule for after first frame instead.
+  WidgetsBinding.instance.addPostFrameCallback((_) {
+    if (!kIsWeb) {
+      SystemChrome.setEnabledSystemUIMode(
+        SystemUiMode.immersiveSticky,
+        overlays: [],
+      );
+      if (defaultTargetPlatform == TargetPlatform.android ||
+          defaultTargetPlatform == TargetPlatform.iOS) {
+        SystemChrome.setPreferredOrientations([
+          DeviceOrientation.landscapeLeft,
+          DeviceOrientation.landscapeRight,
+        ]);
+      }
+    }
+  });
+
+  // ── Services — run critical ones first, parallelize the rest ────────────
+  // StorageService must be first (others depend on it)
   await StorageService.instance.init();
-  await CacheService.instance.init();
-  await BehaviorService.instance.init();
-  // Point BehaviorService at the active playlist from first boot
+
+  // Active playlist ID is needed by both cache and behavior services
   final activeId = StorageService.instance.getActivePlaylistId();
+
+  // Run all remaining inits in parallel — none depend on each other
+  await Future.wait([
+    CacheService.instance.init(),
+    BehaviorService.instance.init(),
+    initializeDateFormatting(),
+  ]);
+
+  // Wire active playlist context after parallel init completes
   if (activeId != null) {
     BehaviorService.instance.setPlaylist(activeId);
-  }
-  await initializeDateFormatting();
-  await PlatformUtils.initWakelock();
-
-  // Set active playlist context in cache service
-  if (activeId != null) {
     CacheService.instance.setActivePlaylist(activeId);
   }
+
+  // Wakelock is non-critical — fire and forget, don't block startup
+  PlatformUtils.initWakelock().ignore();
 
   // NOTE: FlutterNativeSplash.remove() is intentionally missing here!
   // The initialization route engine inside app_router.dart drops it now.

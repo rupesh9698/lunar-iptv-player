@@ -8,6 +8,7 @@ import 'package:intl/intl.dart';
 
 import '../../core/constants/app_constants.dart';
 import '../../core/theme/app_theme.dart';
+import '../../core/utils/focus_utils.dart';
 import '../../models/xtream_models.dart';
 import '../../providers/app_providers.dart';
 import '../../providers/live_player_provider.dart';
@@ -46,6 +47,27 @@ class _LiveTVScreenState extends ConsumerState<LiveTVScreen> {
   final _categoryPanelFocus = FocusScopeNode(debugLabel: 'CategoryPanel');
   final _channelPanelFocus = FocusScopeNode(debugLabel: 'ChannelPanel');
   final _previewPanelFocus = FocusScopeNode(debugLabel: 'PreviewPanel');
+
+  // ── Cross-panel navigation nodes (shared with child widgets) ───────────────
+  // These let arrow keys jump directly between regions regardless of which
+  // FocusScope each widget lives in — see TvNav in focus_utils.dart.
+  final FocusNode backBtnFocus = FocusNode(debugLabel: 'liveTvBack');
+  final FocusNode categorySearchFocus = FocusNode(debugLabel: 'categorySearch');
+  final FocusNode channelSearchFocus = FocusNode(debugLabel: 'channelSearch');
+  final FocusNode refreshEpgFocus = FocusNode(debugLabel: 'refreshEpg');
+  final FocusNode epgFullscreenFocus = FocusNode(debugLabel: 'epgFullscreen');
+  final FocusNode watchNowFocus = FocusNode(debugLabel: 'watchNow');
+  final FocusNode miniPlayPauseFocus = FocusNode(debugLabel: 'miniPlayPause');
+
+  /// First focusable category-sidebar item (set by LiveCategorySidebar).
+  FocusNode? firstCategoryItemFocus;
+
+  /// Currently-selected category tile's FocusNode (set by LiveCategorySidebar).
+  FocusNode? selectedCategoryItemFocus;
+
+  /// First focusable channel-list item (set by EpgTimeline / ChannelCell).
+  FocusNode? firstChannelItemFocus;
+
   // ── Category long-press detection (Bug 1 fix) ──────────────────────────────
   Timer? _categoryLongPressTimer;
   bool _categoryLongPressFired = false;
@@ -77,12 +99,70 @@ class _LiveTVScreenState extends ConsumerState<LiveTVScreen> {
       _categoryPanelFocus.onKeyEvent = _handleCategoryPanelKey;
       _previewPanelFocus.onKeyEvent = _handlePreviewPanelKey;
       _channelPanelFocus.onKeyEvent = _handleChannelPanelKey;
+      _wireCrossPanelNav();
       if (_isRefreshing) {
         _doRefresh();
       } else {
         _restoreFromLastWatched();
       }
     });
+  }
+
+  // ── Cross-panel TV remote navigation graph ──────────────────────────────
+  // Wires the fixed navigation spec for: Back, Category Search, Channel
+  // Search, Refresh EPG, EPG Fullscreen, Watch Now, Mini-player Play/Pause.
+  // Category/Channel list internal scrolling is handled by their own
+  // FocusScope key handlers + per-item onArrowKey (see those widgets).
+  void _wireCrossPanelNav() {
+    backBtnFocus.onKeyEvent = TvNav.handler(down: categorySearchFocus);
+
+    categorySearchFocus.onKeyEvent = TvNav.handler(
+      up: backBtnFocus,
+      onDown: () =>
+          (firstCategoryItemFocus ?? categorySearchFocus).requestFocus(),
+      onRight: () {
+        if (firstChannelItemFocus != null) {
+          firstChannelItemFocus!.requestFocus();
+        }
+      },
+    );
+
+    channelSearchFocus.onKeyEvent = TvNav.handler(
+      up: watchNowFocus,
+      onDown: () =>
+          (firstChannelItemFocus ?? channelSearchFocus).requestFocus(),
+      onLeft: () =>
+          (selectedCategoryItemFocus ?? firstCategoryItemFocus)?.requestFocus(),
+      right: refreshEpgFocus,
+    );
+
+    refreshEpgFocus.onKeyEvent = TvNav.handler(
+      up: watchNowFocus,
+      onDown: () => (firstChannelItemFocus ?? refreshEpgFocus).requestFocus(),
+      left: channelSearchFocus,
+      right: epgFullscreenFocus,
+    );
+
+    epgFullscreenFocus.onKeyEvent = TvNav.handler(
+      up: watchNowFocus,
+      onDown: () =>
+          (firstChannelItemFocus ?? epgFullscreenFocus).requestFocus(),
+      left: refreshEpgFocus,
+    );
+
+    watchNowFocus.onKeyEvent = TvNav.handler(
+      up: backBtnFocus,
+      down: channelSearchFocus,
+      left: miniPlayPauseFocus,
+    );
+
+    miniPlayPauseFocus.onKeyEvent = TvNav.handler(
+      up: backBtnFocus,
+      down: channelSearchFocus,
+      onLeft: () =>
+          (selectedCategoryItemFocus ?? firstCategoryItemFocus)?.requestFocus(),
+      right: watchNowFocus,
+    );
   }
 
   // ── Refresh with retry ────────────────────────────────────────────────
@@ -433,10 +513,12 @@ class _LiveTVScreenState extends ConsumerState<LiveTVScreen> {
   Future<void> _restoreFromLastWatched() async {
     if (_hasRestored) return;
 
-    final remember = StorageService.instance.getSetting(
-      AppConstants.rememberPositionKey,
-      true,
-    ) as bool;
+    final remember =
+        StorageService.instance.getSetting(
+              AppConstants.rememberPositionKey,
+              true,
+            )
+            as bool;
     if (!remember) return;
 
     final last = ref.read(lastWatchedLiveProvider);
@@ -456,12 +538,13 @@ class _LiveTVScreenState extends ConsumerState<LiveTVScreen> {
     XtreamCategory? restoredCategory;
     if (last.categoryId != null) {
       restoredCategory = cats.cast<XtreamCategory?>().firstWhere(
-            (c) => c?.categoryId == last.categoryId,
+        (c) => c?.categoryId == last.categoryId,
         orElse: () => null,
       );
       if (restoredCategory != null) {
         ref.read(liveFilterProvider.notifier).state = LiveFilter.all;
-        ref.read(selectedLiveCategoryProvider.notifier).state = restoredCategory;
+        ref.read(selectedLiveCategoryProvider.notifier).state =
+            restoredCategory;
         // Wait for category filter + stream provider to propagate
         await Future.delayed(const Duration(milliseconds: 500));
         if (!mounted) return;
@@ -520,17 +603,31 @@ class _LiveTVScreenState extends ConsumerState<LiveTVScreen> {
   void dispose() {
     _channelInputTimer?.cancel();
     _keyboardFocus.dispose();
-
     _categoryPanelFocus.dispose();
     _channelPanelFocus.dispose();
     _categoryLongPressTimer?.cancel();
     _previewPanelFocus.dispose();
-
-    // Stop inline player — prevents audio bleeding to other screens
-    try {
-      ref.read(livePlayerProvider.notifier).stop();
-    } catch (_) {}
+    backBtnFocus.dispose();
+    categorySearchFocus.dispose();
+    channelSearchFocus.dispose();
+    refreshEpgFocus.dispose();
+    epgFullscreenFocus.dispose();
+    watchNowFocus.dispose();
+    miniPlayPauseFocus.dispose();
+    // Fire-and-forget — dispose() cannot be async.
+    // _stopPlayer was already called in PopScope before navigate,
+    // this is a safety net for cases where dispose fires without pop.
+    unawaited(_stopPlayer());
     super.dispose();
+  }
+
+  /// Stops the inline live player safely.
+  /// Called from both dispose() and PopScope back-navigation.
+  /// Returns a Future so back-navigation can await it before routing away.
+  Future<void> _stopPlayer() async {
+    try {
+      await ref.read(livePlayerProvider.notifier).stop();
+    } catch (_) {}
   }
 
   // ── Build ─────────────────────────────────────────────────────────────
@@ -553,10 +650,9 @@ class _LiveTVScreenState extends ConsumerState<LiveTVScreen> {
 
       // Centrally save last watched (notifier checks rememberPosition internally)
       final category = ref.read(selectedLiveCategoryProvider);
-      ref.read(lastWatchedLiveProvider.notifier).save(
-        categoryId: category?.categoryId,
-        channelId: next.streamId,
-      );
+      ref
+          .read(lastWatchedLiveProvider.notifier)
+          .save(categoryId: category?.categoryId, channelId: next.streamId);
     });
 
     final isMaximized = ref.watch(livePlayerMaximizedProvider);
@@ -576,16 +672,15 @@ class _LiveTVScreenState extends ConsumerState<LiveTVScreen> {
       },
       child: PopScope(
         canPop: false,
-        onPopInvokedWithResult: (didPop, _) {
+        onPopInvokedWithResult: (didPop, _) async {
           if (didPop) return;
           if (isMaximized) {
             ref.read(livePlayerMaximizedProvider.notifier).state = false;
             return;
           }
-          try {
-            ref.read(livePlayerProvider.notifier).stop();
-          } catch (_) {}
-          context.go('/home');
+          // Await stop so audio cuts before the route transition begins.
+          await _stopPlayer();
+          if (mounted) context.go('/home');
         },
         child: Scaffold(
           backgroundColor: AppTheme.background,
@@ -626,6 +721,13 @@ class _LiveTVScreenState extends ConsumerState<LiveTVScreen> {
                         node: _previewPanelFocus,
                         child: LiveInlinePlayer(
                           isMaximized: isMaximized,
+                          watchNowFocusNode: watchNowFocus,
+                          playPauseFocusNode: miniPlayPauseFocus,
+                          categoryEntryFocus: () =>
+                              selectedCategoryItemFocus ??
+                              firstCategoryItemFocus,
+                          channelSearchFocus: channelSearchFocus,
+                          backFocusNode: backBtnFocus,
                           onMaximize: () =>
                               ref
                                       .read(
@@ -661,12 +763,9 @@ class _LiveTVScreenState extends ConsumerState<LiveTVScreen> {
       children: [
         _DesktopTopBar(
           epgVisible: epgVisible,
-          epgFullscreen: _epgFullscreen,
+          backFocusNode: backBtnFocus,
           onToggleEpg: () =>
               ref.read(epgPanelVisibleProvider.notifier).state = !epgVisible,
-          onToggleEpgFullscreen: () =>
-              setState(() => _epgFullscreen = !_epgFullscreen),
-          onSearch: (q) => ref.read(liveSearchQueryProvider.notifier).state = q,
         ),
         Expanded(
           child: Row(
@@ -676,6 +775,12 @@ class _LiveTVScreenState extends ConsumerState<LiveTVScreen> {
                 node: _categoryPanelFocus,
                 child: LiveCategorySidebar(
                   width: ref.watch(categorySidebarWidthProvider),
+                  searchFocusNode: categorySearchFocus,
+                  channelListEntryFocus: () => firstChannelItemFocus,
+                  onFirstItemFocusReady: (node) =>
+                      firstCategoryItemFocus = node,
+                  onSelectedItemFocusReady: (node) =>
+                      selectedCategoryItemFocus = node,
                 ),
               ),
               _ResizeDivider(
@@ -710,7 +815,20 @@ class _LiveTVScreenState extends ConsumerState<LiveTVScreen> {
   ///  - Normal → preview on top, EPG on bottom
   Widget _buildMainContent(bool epgVisible) {
     // EPG fullscreen: hide player, show full EPG
-    if (_epgFullscreen) return const EpgTimeline();
+    if (_epgFullscreen) {
+      return EpgTimeline(
+        isFullscreen: _epgFullscreen,
+        onToggleFullscreen: () =>
+            setState(() => _epgFullscreen = !_epgFullscreen),
+        searchFocusNode: channelSearchFocus,
+        refreshFocusNode: refreshEpgFocus,
+        fullscreenFocusNode: epgFullscreenFocus,
+        watchNowFocus: watchNowFocus,
+        categoryEntryFocus: () =>
+            selectedCategoryItemFocus ?? firstCategoryItemFocus,
+        onFirstItemFocusReady: (node) => firstChannelItemFocus = node,
+      );
+    }
 
     // EPG hidden: player in Stack covers entire right panel
     if (!epgVisible) return const SizedBox.expand();
@@ -734,7 +852,20 @@ class _LiveTVScreenState extends ConsumerState<LiveTVScreen> {
             ref.read(previewAreaHeightProvider.notifier).state = v;
           },
         ),
-        const Expanded(child: EpgTimeline()),
+        Expanded(
+          child: EpgTimeline(
+            isFullscreen: _epgFullscreen,
+            onToggleFullscreen: () =>
+                setState(() => _epgFullscreen = !_epgFullscreen),
+            searchFocusNode: channelSearchFocus,
+            refreshFocusNode: refreshEpgFocus,
+            fullscreenFocusNode: epgFullscreenFocus,
+            watchNowFocus: watchNowFocus,
+            categoryEntryFocus: () =>
+                selectedCategoryItemFocus ?? firstCategoryItemFocus,
+            onFirstItemFocusReady: (node) => firstChannelItemFocus = node,
+          ),
+        ),
       ],
     );
   }
@@ -882,89 +1013,123 @@ class _ScanCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return AnimatedContainer(
-      duration: const Duration(milliseconds: 300),
-      width: 260,
-      padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 36),
-      decoration: BoxDecoration(
-        color: isLoading
-            ? AppTheme.surface
-            : AppTheme.surface.withValues(alpha: 0.5),
-        borderRadius: BorderRadius.circular(18),
-        border: Border.all(
-          color: isLoading
-              ? AppTheme.primary.withValues(alpha: 0.3)
-              : AppTheme.divider,
-          width: isLoading ? 1.5 : 1,
-        ),
-        boxShadow: isLoading
-            ? [
-                BoxShadow(
-                  color: AppTheme.primary.withValues(alpha: 0.08),
-                  blurRadius: 24,
-                  spreadRadius: 2,
-                ),
-              ]
-            : null,
-      ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          const SizedBox(height: 22),
-          SizedBox(
-            width: 120,
-            height: 120,
-            child: Stack(
-              alignment: Alignment.center,
-              children: [
-                Container(
-                  width: 100,
-                  height: 100,
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    color: AppTheme.surfaceVariant,
-                    border: Border.all(color: AppTheme.divider, width: 2),
+    return ConstrainedBox(
+      constraints: const BoxConstraints(maxWidth: 280, minWidth: 160),
+      child: AspectRatio(
+        aspectRatio: 0.78,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 300),
+          decoration: BoxDecoration(
+            color: isLoading
+                ? AppTheme.surface
+                : AppTheme.surface.withValues(alpha: 0.5),
+            borderRadius: BorderRadius.circular(18),
+            border: Border.all(
+              color: isLoading
+                  ? AppTheme.primary.withValues(alpha: 0.3)
+                  : AppTheme.divider,
+              width: isLoading ? 1.5 : 1,
+            ),
+            boxShadow: isLoading
+                ? [
+                    BoxShadow(
+                      color: AppTheme.primary.withValues(alpha: 0.08),
+                      blurRadius: 24,
+                      spreadRadius: 2,
+                    ),
+                  ]
+                : null,
+          ),
+          child: LayoutBuilder(
+            builder: (_, constraints) {
+              final ringSize = (constraints.maxWidth * 0.48).clamp(60.0, 110.0);
+              final iconSize = (ringSize * 0.42).clamp(24.0, 46.0);
+              final spinSize = ringSize + 14;
+              return Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  const Spacer(),
+                  SizedBox(
+                    width: spinSize,
+                    height: spinSize,
+                    child: Stack(
+                      alignment: Alignment.center,
+                      children: [
+                        Container(
+                          width: ringSize,
+                          height: ringSize,
+                          decoration: BoxDecoration(
+                            shape: BoxShape.circle,
+                            color: AppTheme.surfaceVariant,
+                            border: Border.all(
+                              color: AppTheme.divider,
+                              width: 2,
+                            ),
+                          ),
+                          child: Icon(
+                            icon,
+                            size: iconSize,
+                            color: isLoading
+                                ? AppTheme.textPrimary
+                                : AppTheme.textMuted,
+                          ),
+                        ),
+                        if (isLoading)
+                          SizedBox(
+                            width: spinSize,
+                            height: spinSize,
+                            child: const CircularProgressIndicator(
+                              strokeWidth: 3.5,
+                              strokeCap: StrokeCap.round,
+                              valueColor: AlwaysStoppedAnimation<Color>(
+                                AppTheme.primary,
+                              ),
+                            ),
+                          ),
+                      ],
+                    ),
                   ),
-                  child: Icon(
-                    icon,
-                    size: 40,
-                    color: isLoading
-                        ? AppTheme.textPrimary
-                        : AppTheme.textMuted,
-                  ),
-                ),
-                if (isLoading)
-                  const SizedBox(
-                    width: 116,
-                    height: 116,
-                    child: CircularProgressIndicator(
-                      strokeWidth: 3.5,
-                      strokeCap: StrokeCap.round,
-                      valueColor: AlwaysStoppedAnimation<Color>(
-                        AppTheme.primary,
+                  const Spacer(),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 12),
+                    child: Text(
+                      label,
+                      textAlign: TextAlign.center,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        color: isLoading
+                            ? AppTheme.textPrimary
+                            : AppTheme.textMuted,
+                        fontSize: 14,
+                        fontWeight: isLoading
+                            ? FontWeight.w700
+                            : FontWeight.w400,
                       ),
                     ),
                   ),
-              ],
-            ),
+                  if (subtitle != null) ...[
+                    const SizedBox(height: 4),
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 12),
+                      child: Text(
+                        subtitle!,
+                        textAlign: TextAlign.center,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          color: AppTheme.textMuted,
+                          fontSize: 11,
+                        ),
+                      ),
+                    ),
+                  ],
+                  const SizedBox(height: 16),
+                ],
+              );
+            },
           ),
-          const SizedBox(height: 20),
-          Text(
-            label,
-            style: TextStyle(
-              color: isLoading ? AppTheme.textPrimary : AppTheme.textMuted,
-              fontSize: 16,
-              fontWeight: isLoading ? FontWeight.w700 : FontWeight.w400,
-            ),
-          ),
-          if (subtitle != null) ...[
-            const SizedBox(height: 4),
-            Text(
-              subtitle!,
-              style: const TextStyle(color: AppTheme.textMuted, fontSize: 11),
-            ),
-          ],
-        ],
+        ),
       ),
     );
   }
@@ -1046,17 +1211,13 @@ class _ChannelInputOverlay extends StatelessWidget {
 // ─────────────────────────────────────────────────────────────────────────────
 class _DesktopTopBar extends ConsumerWidget {
   final bool epgVisible;
-  final bool epgFullscreen;
   final VoidCallback onToggleEpg;
-  final VoidCallback onToggleEpgFullscreen;
-  final ValueChanged<String> onSearch;
+  final FocusNode? backFocusNode;
 
   const _DesktopTopBar({
     required this.epgVisible,
-    required this.epgFullscreen,
     required this.onToggleEpg,
-    required this.onToggleEpgFullscreen,
-    required this.onSearch,
+    this.backFocusNode,
   });
 
   @override
@@ -1069,6 +1230,7 @@ class _DesktopTopBar extends ConsumerWidget {
       child: Row(
         children: [
           _FocusableIconButton(
+            focusNode: backFocusNode,
             icon: Icons.arrow_back_ios_new,
             iconColor: AppTheme.textSecondary,
             tooltip: 'Back to Home',
@@ -1102,26 +1264,6 @@ class _DesktopTopBar extends ConsumerWidget {
             ),
           ],
           const Spacer(),
-          _TopBtn(
-            icon: epgFullscreen
-                ? Icons.fullscreen_exit
-                : Icons.fit_screen_outlined,
-            tooltip: epgFullscreen ? 'Exit EPG Fullscreen' : 'EPG Fullscreen',
-            isActive: epgFullscreen,
-            onTap: onToggleEpgFullscreen,
-          ),
-          const SizedBox(width: 4),
-          _ExpandableSearch(onChanged: onSearch),
-          const SizedBox(width: 4),
-          _TopBtn(
-            icon: Icons.refresh,
-            tooltip: 'Refresh',
-            onTap: () {
-              ref.invalidate(liveStreamsProvider);
-              ref.invalidate(liveCategoriesProvider);
-              ref.read(epgCacheProvider.notifier).clear();
-            },
-          ),
         ],
       ),
     );
@@ -1136,12 +1278,14 @@ class _FocusableIconButton extends StatefulWidget {
   final Color iconColor;
   final String tooltip;
   final VoidCallback onTap;
+  final FocusNode? focusNode;
 
   const _FocusableIconButton({
     required this.icon,
     required this.iconColor,
     required this.tooltip,
     required this.onTap,
+    this.focusNode,
   });
 
   @override
@@ -1149,73 +1293,34 @@ class _FocusableIconButton extends StatefulWidget {
 }
 
 class _FocusableIconButtonState extends State<_FocusableIconButton> {
-  bool _focused = false;
-
-  bool get _showFocusRing =>
-      _focused &&
-      FocusManager.instance.highlightMode == FocusHighlightMode.traditional;
-
-  @override
-  void initState() {
-    super.initState();
-    FocusManager.instance.addHighlightModeListener(_onHighlight);
-  }
-
-  void _onHighlight(FocusHighlightMode _) => setState(() {});
-
-  @override
-  void dispose() {
-    FocusManager.instance.removeHighlightModeListener(_onHighlight);
-    super.dispose();
-  }
-
   @override
   Widget build(BuildContext context) {
-    return Focus(
-      onFocusChange: (f) => setState(() => _focused = f),
-      onKeyEvent: (_, event) {
-        if (event is KeyDownEvent &&
-            (event.logicalKey == LogicalKeyboardKey.select ||
-                event.logicalKey == LogicalKeyboardKey.enter ||
-                event.logicalKey == LogicalKeyboardKey.space)) {
-          widget.onTap();
-          return KeyEventResult.handled;
-        }
-        return KeyEventResult.ignored;
-      },
-      child: Tooltip(
+    return TvFocusable(
+      focusNode: widget.focusNode,
+      autoScroll: false,
+      onActivate: widget.onTap,
+      builder: (focused, _) => Tooltip(
         message: widget.tooltip,
-        child: MouseRegion(
-          cursor: SystemMouseCursors.click,
-          child: GestureDetector(
-            onTap: widget.onTap,
-            child: AnimatedContainer(
-              duration: const Duration(milliseconds: 150),
-              width: 36,
-              height: 36,
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(8),
-                border:
-                    _showFocusRing // ← was: _focused
-                    ? Border.all(
-                        color: AppTheme.primary.withValues(alpha: 0.7),
-                        width: 2,
-                      )
-                    : null,
-                color:
-                    _showFocusRing // ← was: _focused
-                    ? AppTheme.primary.withValues(alpha: 0.12)
-                    : Colors.transparent,
-              ),
-              child: Icon(
-                widget.icon,
-                size: 16,
-                color:
-                    _showFocusRing // ← was: _focused
-                    ? AppTheme.primary
-                    : widget.iconColor,
-              ),
-            ),
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 150),
+          width: 36,
+          height: 36,
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(8),
+            border: focused
+                ? Border.all(
+                    color: AppTheme.primary.withValues(alpha: 0.7),
+                    width: 2,
+                  )
+                : null,
+            color: focused
+                ? AppTheme.primary.withValues(alpha: 0.12)
+                : Colors.transparent,
+          ),
+          child: Icon(
+            widget.icon,
+            size: 16,
+            color: focused ? AppTheme.primary : widget.iconColor,
           ),
         ),
       ),
@@ -1241,165 +1346,40 @@ class _TopBtn extends StatefulWidget {
 }
 
 class _TopBtnState extends State<_TopBtn> {
-  bool _focused = false;
-  bool _pressed = false;
-
-  bool get _showFocusRing =>
-      _focused &&
-      FocusManager.instance.highlightMode == FocusHighlightMode.traditional;
-
-  @override
-  void initState() {
-    super.initState();
-    FocusManager.instance.addHighlightModeListener(_onHighlight);
-  }
-
-  void _onHighlight(FocusHighlightMode _) => setState(() {});
-
-  @override
-  void dispose() {
-    FocusManager.instance.removeHighlightModeListener(_onHighlight);
-    super.dispose();
-  }
-
   @override
   Widget build(BuildContext context) {
-    return Focus(
-      onFocusChange: (f) => setState(() => _focused = f),
-      onKeyEvent: (_, event) {
-        if (event is KeyDownEvent &&
-            (event.logicalKey == LogicalKeyboardKey.select ||
-                event.logicalKey == LogicalKeyboardKey.enter ||
-                event.logicalKey == LogicalKeyboardKey.space)) {
-          setState(() => _pressed = true);
-          widget.onTap();
-          return KeyEventResult.handled;
-        }
-        if (event is KeyUpEvent) {
-          setState(() => _pressed = false);
-          return KeyEventResult.ignored;
-        }
-        return KeyEventResult.ignored;
-      },
-      child: Tooltip(
+    return TvFocusable(
+      onActivate: widget.onTap,
+      builder: (focused, pressed) => Tooltip(
         message: widget.tooltip,
-        child: MouseRegion(
-          cursor: SystemMouseCursors.click,
-          child: GestureDetector(
-            onTap: widget.onTap,
-            onTapDown: (_) => setState(() => _pressed = true),
-            onTapUp: (_) => setState(() => _pressed = false),
-            onTapCancel: () => setState(() => _pressed = false),
-            child: AnimatedContainer(
-              duration: const Duration(milliseconds: 150),
-              width: 32,
-              height: 32,
-              decoration: BoxDecoration(
-                color:
-                    widget.isActive ||
-                        _showFocusRing // ← was: _focused
-                    ? AppTheme.primary.withValues(alpha: 0.20)
-                    : _pressed
-                    ? AppTheme.primary.withValues(alpha: 0.12)
-                    : Colors.transparent,
-                borderRadius: BorderRadius.circular(8),
-                border:
-                    _showFocusRing // ← was: _focused
-                    ? Border.all(
-                        color: AppTheme.primary.withValues(alpha: 0.8),
-                        width: 2,
-                      )
-                    : widget.isActive
-                    ? Border.all(color: AppTheme.primary.withValues(alpha: 0.3))
-                    : null,
-              ),
-              child: Icon(
-                widget.icon,
-                size: 18,
-                color:
-                    (widget.isActive || _showFocusRing) // ← was: _focused
-                    ? AppTheme.primary
-                    : AppTheme.textSecondary,
-              ),
-            ),
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 150),
+          width: 32,
+          height: 32,
+          decoration: BoxDecoration(
+            color: widget.isActive || focused
+                ? AppTheme.primary.withValues(alpha: 0.20)
+                : pressed
+                ? AppTheme.primary.withValues(alpha: 0.12)
+                : Colors.transparent,
+            borderRadius: BorderRadius.circular(8),
+            border: focused
+                ? Border.all(
+                    color: AppTheme.primary.withValues(alpha: 0.8),
+                    width: 2,
+                  )
+                : widget.isActive
+                ? Border.all(color: AppTheme.primary.withValues(alpha: 0.3))
+                : null,
+          ),
+          child: Icon(
+            widget.icon,
+            size: 18,
+            color: (widget.isActive || focused)
+                ? AppTheme.primary
+                : AppTheme.textSecondary,
           ),
         ),
-      ),
-    );
-  }
-}
-
-class _ExpandableSearch extends StatefulWidget {
-  final ValueChanged<String> onChanged;
-  const _ExpandableSearch({required this.onChanged});
-
-  @override
-  State<_ExpandableSearch> createState() => _ExpandableSearchState();
-}
-
-class _ExpandableSearchState extends State<_ExpandableSearch> {
-  final _ctrl = TextEditingController();
-  bool _expanded = false;
-
-  @override
-  void dispose() {
-    _ctrl.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return AnimatedContainer(
-      duration: const Duration(milliseconds: 250),
-      width: _expanded ? 200 : 32,
-      height: 32,
-      decoration: BoxDecoration(
-        color: _expanded ? AppTheme.surfaceVariant : Colors.transparent,
-        borderRadius: BorderRadius.circular(10),
-        border: _expanded ? Border.all(color: AppTheme.divider) : null,
-      ),
-      child: Row(
-        children: [
-          GestureDetector(
-            onTap: () {
-              setState(() => _expanded = !_expanded);
-              if (!_expanded) {
-                _ctrl.clear();
-                widget.onChanged('');
-              }
-            },
-            child: SizedBox(
-              width: 32,
-              height: 32,
-              child: Icon(
-                _expanded ? Icons.close : Icons.search,
-                size: 18,
-                color: _expanded ? AppTheme.primary : AppTheme.textSecondary,
-              ),
-            ),
-          ),
-          if (_expanded)
-            Expanded(
-              child: TextField(
-                controller: _ctrl,
-                autofocus: true,
-                onChanged: widget.onChanged,
-                style: const TextStyle(
-                  color: AppTheme.textPrimary,
-                  fontSize: 13,
-                ),
-                decoration: const InputDecoration(
-                  hintText: 'Search channels...',
-                  hintStyle: TextStyle(color: AppTheme.textMuted, fontSize: 13),
-                  border: InputBorder.none,
-                  focusedBorder: InputBorder.none,
-                  enabledBorder: InputBorder.none,
-                  contentPadding: EdgeInsets.zero,
-                  isDense: true,
-                ),
-              ),
-            ),
-        ],
       ),
     );
   }

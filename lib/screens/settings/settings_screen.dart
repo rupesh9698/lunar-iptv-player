@@ -8,6 +8,7 @@ import 'package:package_info_plus/package_info_plus.dart';
 
 import '../../core/constants/app_constants.dart';
 import '../../core/theme/app_theme.dart';
+import '../../core/utils/focus_utils.dart';
 import '../../core/utils/platform_utils.dart';
 import '../../models/xtream_models.dart';
 import '../../providers/app_providers.dart';
@@ -239,81 +240,68 @@ class _SidebarItem extends StatefulWidget {
   State<_SidebarItem> createState() => _SidebarItemState();
 }
 
-class _SidebarItemState extends State<_SidebarItem> {
-  bool _hovering = false;
-
+class _SidebarItemState extends State<_SidebarItem> with TvFocusMixin {
   @override
   Widget build(BuildContext context) {
-    return Focus(
-      onFocusChange: (f) => setState(() => _hovering = f ? true : _hovering),
-      onKeyEvent: (_, event) {
-        if (event is KeyDownEvent &&
-            (event.logicalKey == LogicalKeyboardKey.select ||
-                event.logicalKey == LogicalKeyboardKey.enter ||
-                event.logicalKey == LogicalKeyboardKey.space)) {
-          widget.onTap();
-          return KeyEventResult.handled;
-        }
-        if (event is KeyDownEvent &&
-            event.logicalKey == LogicalKeyboardKey.arrowRight) {
+    return TvFocusable(
+      onActivate: widget.onTap,
+      onFocusChange: setTvFocused,
+      onArrowKey: (key) {
+        if (key == LogicalKeyboardKey.arrowRight) {
           FocusScope.of(context).focusInDirection(TraversalDirection.right);
           return KeyEventResult.handled;
         }
         return KeyEventResult.ignored;
       },
-      child: MouseRegion(
-        cursor: SystemMouseCursors.click,
-        onEnter: (_) => setState(() => _hovering = true),
-        onExit: (_) => setState(() => _hovering = false),
-        child: GestureDetector(
-          onTap: widget.onTap,
-          child: AnimatedContainer(
-            duration: const Duration(milliseconds: 150),
-            margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-            decoration: BoxDecoration(
-              color: widget.isSelected
-                  ? AppTheme.selectedItem
-                  : _hovering
-                  ? AppTheme.surface
-                  : Colors.transparent,
-              borderRadius: BorderRadius.circular(10),
-              border: widget.isSelected
-                  ? Border.all(color: AppTheme.primary.withValues(alpha: 0.3))
-                  : _hovering && !widget.isSelected
-                  ? Border.all(
-                      color: Colors.white.withValues(alpha: 0.2),
-                      width: 1.5,
-                    )
-                  : null,
-            ),
-            child: Row(
-              children: [
-                Icon(
-                  widget.section.icon,
-                  size: 18,
-                  color: widget.isSelected
-                      ? AppTheme.primary
-                      : AppTheme.textSecondary,
-                ),
-                const SizedBox(width: 10),
-                Text(
-                  widget.section.label,
-                  style: TextStyle(
-                    color: widget.isSelected
-                        ? AppTheme.textPrimary
-                        : AppTheme.textSecondary,
-                    fontSize: 13,
-                    fontWeight: widget.isSelected
-                        ? FontWeight.w600
-                        : FontWeight.w400,
-                  ),
-                ),
-              ],
-            ),
+      builder: (focused, _) {
+        final lit = isTvHovered || focused;
+        return AnimatedContainer(
+          duration: const Duration(milliseconds: 150),
+          margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+          padding:
+          const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+          decoration: BoxDecoration(
+            color: widget.isSelected
+                ? AppTheme.selectedItem
+                : lit
+                ? AppTheme.surface
+                : Colors.transparent,
+            borderRadius: BorderRadius.circular(10),
+            border: widget.isSelected
+                ? Border.all(
+                color: AppTheme.primary.withValues(alpha: 0.3))
+                : focused
+                ? Border.all(
+                color: Colors.white.withValues(alpha: 0.55),
+                width: 1.5)
+                : null,
           ),
-        ),
-      ),
+          child: Row(
+            children: [
+              Icon(
+                widget.section.icon,
+                size: 18,
+                color: widget.isSelected
+                    ? AppTheme.primary
+                    : AppTheme.textSecondary,
+              ),
+              const SizedBox(width: 10),
+              Text(
+                widget.section.label,
+                style: TextStyle(
+                  color: widget.isSelected
+                      ? AppTheme.textPrimary
+                      : AppTheme.textSecondary,
+                  fontSize: 13,
+                  fontWeight: widget.isSelected
+                      ? FontWeight.w600
+                      : FontWeight.w400,
+                ),
+              ),
+            ],
+          ),
+        );
+      },
     );
   }
 }
@@ -1814,28 +1802,16 @@ class _FocusableSettTile extends StatefulWidget {
 }
 
 class _FocusableSettTileState extends State<_FocusableSettTile> {
-  bool _focused = false;
-
   @override
   Widget build(BuildContext context) {
-    return Focus(
-      onFocusChange: (f) => setState(() => _focused = f),
-      onKeyEvent: (_, event) {
-        if (event is KeyDownEvent &&
-            (event.logicalKey == LogicalKeyboardKey.select ||
-                event.logicalKey == LogicalKeyboardKey.enter ||
-                event.logicalKey == LogicalKeyboardKey.space) &&
-            widget.onTap != null) {
-          widget.onTap!();
-          return KeyEventResult.handled;
-        }
-        return KeyEventResult.ignored;
-      },
-      child: Column(
+    return TvFocusable(
+      onActivate: widget.onTap,
+      autoScroll: false, // settings uses its own scroll view
+      builder: (focused, _) => Column(
         children: [
           AnimatedContainer(
             duration: const Duration(milliseconds: 150),
-            color: _focused
+            color: focused
                 ? AppTheme.primary.withValues(alpha: 0.06)
                 : Colors.transparent,
             child: ListTile(
@@ -1844,14 +1820,12 @@ class _FocusableSettTileState extends State<_FocusableSettTile> {
                 width: 36,
                 height: 36,
                 decoration: BoxDecoration(
-                  color: (widget.iconColor ?? AppTheme.primary).withValues(
-                    alpha: 0.12,
-                  ),
+                  color: (widget.iconColor ?? AppTheme.primary)
+                      .withValues(alpha: 0.12),
                   borderRadius: BorderRadius.circular(10),
-                  border: _focused
+                  border: focused
                       ? Border.all(
-                          color: AppTheme.primary.withValues(alpha: 0.4),
-                        )
+                      color: AppTheme.primary.withValues(alpha: 0.5))
                       : null,
                 ),
                 child: Icon(
@@ -1862,44 +1836,36 @@ class _FocusableSettTileState extends State<_FocusableSettTile> {
               ),
               title: Text(
                 widget.title,
-                style: TextStyle(
-                  color: _focused ? AppTheme.textPrimary : AppTheme.textPrimary,
-                  fontSize: 14,
-                ),
+                style: const TextStyle(
+                    color: AppTheme.textPrimary, fontSize: 14),
               ),
               subtitle: widget.subtitle != null
                   ? Text(
-                      widget.subtitle!,
-                      style: const TextStyle(
-                        color: AppTheme.textSecondary,
-                        fontSize: 12,
-                      ),
-                    )
+                widget.subtitle!,
+                style: const TextStyle(
+                    color: AppTheme.textSecondary, fontSize: 12),
+              )
                   : null,
-              trailing:
-                  widget.trailing ??
+              trailing: widget.trailing ??
                   (widget.onTap != null
                       ? Icon(
-                          Icons.chevron_right,
-                          color: _focused
-                              ? AppTheme.primary
-                              : AppTheme.textMuted,
-                          size: 18,
-                        )
+                    Icons.chevron_right,
+                    color: focused
+                        ? AppTheme.primary
+                        : AppTheme.textMuted,
+                    size: 18,
+                  )
                       : null),
               contentPadding: const EdgeInsets.symmetric(
-                horizontal: 16,
-                vertical: 4,
-              ),
+                  horizontal: 16, vertical: 4),
             ),
           ),
           if (widget.showDivider)
             const Divider(
-              color: AppTheme.divider,
-              height: 1,
-              indent: 68,
-              endIndent: 16,
-            ),
+                color: AppTheme.divider,
+                height: 1,
+                indent: 68,
+                endIndent: 16),
         ],
       ),
     );
