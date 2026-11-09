@@ -555,10 +555,16 @@ class _EpgControlBarState extends ConsumerState<_EpgControlBar> {
         curve: Curves.easeInOut,
         width: _searchOpen
             ? (MediaQuery.sizeOf(context).width * 0.22).clamp(140.0, 220.0)
-            : 32,
+            : 34,
         height: 30,
         decoration: BoxDecoration(
           color: _searchOpen ? AppTheme.surfaceVariant : Colors.transparent,
+          borderRadius: BorderRadius.circular(8),
+        ),
+        // Border painted on top (takes no layout space). As a layout border
+        // it shrank the closed box below the 30 px icon → "overflowed by
+        // 1 pixel" stripes whenever the button was focused.
+        foregroundDecoration: BoxDecoration(
           borderRadius: BorderRadius.circular(8),
           border: _searchOpen
               ? Border.all(color: AppTheme.divider)
@@ -570,54 +576,58 @@ class _EpgControlBarState extends ConsumerState<_EpgControlBar> {
               : null,
         ),
         clipBehavior: Clip.hardEdge,
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            // Use flexible so it never overflows at fractional pixel sizes
-            SizedBox(
-              width: 30,
-              height: 30,
-              child: Center(
-                child: Icon(
-                  _searchOpen ? Icons.close : Icons.search,
-                  size: 15,
-                  color: _searchOpen || focused
-                      ? AppTheme.primary
-                      : AppTheme.textSecondary,
-                ),
-              ),
-            ),
-            if (_searchOpen)
-              Expanded(
-                child: TvTextFieldNav(
-                  controller: _searchCtrl,
-                  onUp: () => widget.watchNowFocus?.requestFocus(),
-                  onDown: () => _goFirstChannelOrSelf(widget.searchFocusNode!),
-                  child: TextField(
-                    controller: _searchCtrl,
-                    autofocus: true,
-                    onChanged: (v) =>
-                        ref.read(liveSearchQueryProvider.notifier).state = v,
-                    style: const TextStyle(
-                      color: AppTheme.textPrimary,
-                      fontSize: 12,
-                    ),
-                    decoration: const InputDecoration(
-                      hintText: 'Search channels...',
-                      hintStyle: TextStyle(
-                        color: AppTheme.textMuted,
-                        fontSize: 12,
-                      ),
-                      border: InputBorder.none,
-                      focusedBorder: InputBorder.none,
-                      enabledBorder: InputBorder.none,
-                      contentPadding: EdgeInsets.zero,
-                      isDense: true,
-                    ),
+        child: LayoutBuilder(
+          // While the box animates open/closed the width passes through
+          // tiny values; only mount the TextField once there is room.
+          builder: (context, box) => Row(
+            children: [
+              SizedBox(
+                width: 30,
+                height: 30,
+                child: Center(
+                  child: Icon(
+                    _searchOpen ? Icons.close : Icons.search,
+                    size: 15,
+                    color: _searchOpen || focused
+                        ? AppTheme.primary
+                        : AppTheme.textSecondary,
                   ),
                 ),
               ),
-          ],
+              if (_searchOpen && box.maxWidth >= 100)
+                Expanded(
+                  child: TvTextFieldNav(
+                    controller: _searchCtrl,
+                    onUp: () => widget.watchNowFocus?.requestFocus(),
+                    onDown: () =>
+                        _goFirstChannelOrSelf(widget.searchFocusNode!),
+                    child: TextField(
+                      controller: _searchCtrl,
+                      autofocus: true,
+                      onChanged: (v) =>
+                          ref.read(liveSearchQueryProvider.notifier).state = v,
+                      style: const TextStyle(
+                        color: AppTheme.textPrimary,
+                        fontSize: 12,
+                      ),
+                      decoration: const InputDecoration(
+                        hintText: 'Search channels...',
+                        hintStyle: TextStyle(
+                          color: AppTheme.textMuted,
+                          fontSize: 12,
+                        ),
+                        border: InputBorder.none,
+                        focusedBorder: InputBorder.none,
+                        enabledBorder: InputBorder.none,
+                        contentPadding: EdgeInsets.zero,
+                        isDense: true,
+                        filled: false,
+                      ),
+                    ),
+                  ),
+                ),
+            ],
+          ),
         ),
       ),
     );
@@ -733,141 +743,211 @@ class _ChannelCell extends StatefulWidget {
 }
 
 class _ChannelCellState extends State<_ChannelCell> with TvFocusMixin {
+  // The favourite heart is its own D-pad stop: Right from the channel moves
+  // onto it, OK toggles, Left goes back (it used to be pointer-only).
+  final FocusNode _heartFocus = FocusNode(debugLabel: 'epgHeart');
+  bool _heartFocused = false;
+
+  @override
+  void dispose() {
+    _heartFocus.dispose();
+    super.dispose();
+  }
+
+  void _toggleFavorite() {
+    widget.onFavorite();
+    final nowFav = !widget.isFavorite;
+    ScaffoldMessenger.maybeOf(context)
+      ?..hideCurrentSnackBar()
+      ..showSnackBar(
+        SnackBar(
+          content: Text(
+            nowFav
+                ? 'Added "${widget.channel.name}" to Favorites'
+                : 'Removed "${widget.channel.name}" from Favorites',
+          ),
+          duration: const Duration(seconds: 2),
+        ),
+      );
+  }
+
+  KeyEventResult _vertical(LogicalKeyboardKey key) {
+    if (key == LogicalKeyboardKey.arrowUp) {
+      (widget.onUpAtTop ?? () {})();
+      return KeyEventResult.handled;
+    }
+    if (key == LogicalKeyboardKey.arrowDown) {
+      if (widget.onDownNext != null) widget.onDownNext!();
+      return KeyEventResult.handled; // last item: No Action
+    }
+    return KeyEventResult.ignored;
+  }
+
   @override
   Widget build(BuildContext context) {
     final hasNum =
         widget.showChannelNumber &&
         widget.channel.num.isNotEmpty &&
         widget.channel.num != '0';
+    final focused = showFocusRing;
+    final heartRing =
+        _heartFocused &&
+        FocusManager.instance.highlightMode == FocusHighlightMode.traditional;
+    final rowLit = isTvHovered || focused || heartRing;
 
-    return TvFocusable(
-      focusNode: widget.focusNode,
-      autoScroll: true,
-      scrollAlignment: 0.3,
-      onActivate: widget.onTap,
-      // TV remote: hold OK (or press Menu) to add/remove favourite —
-      // the heart icon is mouse/touch-only.
-      onLongPress: () {
-        widget.onFavorite();
-        final nowFav = !widget.isFavorite;
-        ScaffoldMessenger.maybeOf(context)
-          ?..hideCurrentSnackBar()
-          ..showSnackBar(
-            SnackBar(
-              content: Text(
-                nowFav
-                    ? 'Added "${widget.channel.name}" to Favorites'
-                    : 'Removed "${widget.channel.name}" from Favorites',
-              ),
-              duration: const Duration(seconds: 2),
-            ),
-          );
-      },
-      onFocusChange: setTvFocused,
-      onArrowKey: (key) {
-        if (key == LogicalKeyboardKey.arrowUp) {
-          (widget.onUpAtTop ?? () {})();
-          return KeyEventResult.handled;
-        }
-        if (key == LogicalKeyboardKey.arrowDown) {
-          if (widget.onDownNext != null) widget.onDownNext!();
-          return KeyEventResult.handled; // last item: No Action
-        }
-        if (key == LogicalKeyboardKey.arrowLeft) {
-          (widget.onLeftToCategory ?? () {})();
-          return KeyEventResult.handled;
-        }
-        return KeyEventResult.ignored;
-      },
-      builder: (focused, _) => AnimatedContainer(
-        duration: const Duration(milliseconds: 150),
-        height: 56,
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-        decoration: BoxDecoration(
-          color: widget.isSelected
-              ? AppTheme.selectedItem
-              : (isTvHovered || focused)
-              ? AppTheme.surfaceVariant
-              : AppTheme.epgFuture,
-          border: Border(
-            bottom: const BorderSide(color: AppTheme.epgBorder, width: 0.5),
-            left: focused && !widget.isSelected
-                ? const BorderSide(color: AppTheme.primary, width: 2.5)
-                : BorderSide.none,
-          ),
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 150),
+      height: 56,
+      padding: const EdgeInsets.only(left: 10, right: 6),
+      decoration: BoxDecoration(
+        color: widget.isSelected
+            ? AppTheme.selectedItem
+            : rowLit
+            ? AppTheme.surfaceVariant
+            : AppTheme.epgFuture,
+        border: Border(
+          bottom: const BorderSide(color: AppTheme.epgBorder, width: 0.5),
+          left: focused && !widget.isSelected
+              ? const BorderSide(color: AppTheme.primary, width: 2.5)
+              : BorderSide.none,
         ),
-        child: Row(
-          children: [
-            AnimatedContainer(
-              duration: const Duration(milliseconds: 200),
-              width: 3,
-              height: 36,
-              decoration: BoxDecoration(
-                color: widget.isSelected
-                    ? AppTheme.primary
-                    : Colors.transparent,
-                borderRadius: BorderRadius.circular(2),
-              ),
-            ),
-            const SizedBox(width: 8),
-            ClipRRect(
-              borderRadius: BorderRadius.circular(6),
-              child: SizedBox(width: 40, height: 32, child: _logo()),
-            ),
-            const SizedBox(width: 8),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisAlignment: MainAxisAlignment.center,
+      ),
+      child: Row(
+        children: [
+          Expanded(
+            child: TvFocusable(
+              focusNode: widget.focusNode,
+              autoScroll: true,
+              scrollAlignment: 0.3,
+              onActivate: widget.onTap,
+              // Hold OK / Menu still toggles favourite too.
+              onLongPress: _toggleFavorite,
+              onFocusChange: setTvFocused,
+              onArrowKey: (key) {
+                if (key == LogicalKeyboardKey.arrowRight) {
+                  _heartFocus.requestFocus();
+                  return KeyEventResult.handled;
+                }
+                if (key == LogicalKeyboardKey.arrowLeft) {
+                  (widget.onLeftToCategory ?? () {})();
+                  return KeyEventResult.handled;
+                }
+                return _vertical(key);
+              },
+              builder: (_, _) => Row(
                 children: [
-                  if (hasNum)
-                    Text(
-                      'CH ${widget.channel.num}',
-                      style: const TextStyle(
-                        color: AppTheme.textMuted,
-                        fontSize: 8,
-                        fontWeight: FontWeight.w700,
-                        letterSpacing: 0.5,
+                  AnimatedContainer(
+                    duration: const Duration(milliseconds: 200),
+                    width: 3,
+                    height: 36,
+                    decoration: BoxDecoration(
+                      color: widget.isSelected
+                          ? AppTheme.primary
+                          : Colors.transparent,
+                      borderRadius: BorderRadius.circular(2),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(6),
+                    child: SizedBox(width: 40, height: 32, child: _logo()),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        if (hasNum)
+                          Text(
+                            'CH ${widget.channel.num}',
+                            style: const TextStyle(
+                              color: AppTheme.textMuted,
+                              fontSize: 8,
+                              fontWeight: FontWeight.w700,
+                              letterSpacing: 0.5,
+                            ),
+                          ),
+                        Text(
+                          widget.channel.name,
+                          style: TextStyle(
+                            color: widget.isSelected
+                                ? AppTheme.textPrimary
+                                : AppTheme.textSecondary,
+                            fontSize: 11,
+                            fontWeight: widget.isSelected
+                                ? FontWeight.w600
+                                : FontWeight.w400,
+                          ),
+                          maxLines: hasNum ? 1 : 2,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ],
+                    ),
+                  ),
+                  if (rowLit || widget.isSelected)
+                    Padding(
+                      padding: const EdgeInsets.only(left: 2),
+                      child: Icon(
+                        Icons.play_circle_outline,
+                        size: 16,
+                        color: widget.isSelected
+                            ? AppTheme.primary
+                            : AppTheme.textMuted,
                       ),
                     ),
-                  Text(
-                    widget.channel.name,
-                    style: TextStyle(
-                      color: widget.isSelected
-                          ? AppTheme.textPrimary
-                          : AppTheme.textSecondary,
-                      fontSize: 11,
-                      fontWeight: widget.isSelected
-                          ? FontWeight.w600
-                          : FontWeight.w400,
-                    ),
-                    maxLines: hasNum ? 1 : 2,
-                    overflow: TextOverflow.ellipsis,
-                  ),
                 ],
               ),
             ),
-            if (isTvHovered || focused || widget.isFavorite)
-              GestureDetector(
-                onTap: widget.onFavorite,
+          ),
+          // ── Favourite heart (separate D-pad stop) ──────────────────────
+          Visibility(
+            visible: rowLit || widget.isFavorite,
+            maintainState: true,
+            maintainAnimation: true,
+            maintainSize: true,
+            maintainInteractivity: false,
+            child: TvFocusable(
+              focusNode: _heartFocus,
+              autoScroll: false,
+              onActivate: _toggleFavorite,
+              onFocusChange: (f) => setState(() => _heartFocused = f),
+              onArrowKey: (key) {
+                if (key == LogicalKeyboardKey.arrowLeft) {
+                  widget.focusNode?.requestFocus();
+                  return KeyEventResult.handled;
+                }
+                if (key == LogicalKeyboardKey.arrowRight) {
+                  return KeyEventResult.handled; // end of row
+                }
+                return _vertical(key);
+              },
+              builder: (_, _) => AnimatedContainer(
+                duration: const Duration(milliseconds: 120),
+                padding: const EdgeInsets.all(5),
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: heartRing
+                      ? Colors.white.withValues(alpha: 0.14)
+                      : Colors.transparent,
+                  border: Border.all(
+                    color: heartRing ? Colors.white : Colors.transparent,
+                    width: 1.5,
+                  ),
+                ),
                 child: Icon(
                   widget.isFavorite ? Icons.favorite : Icons.favorite_border,
-                  size: 14,
+                  size: 15,
                   color: widget.isFavorite
                       ? AppTheme.error
+                      : heartRing
+                      ? Colors.white
                       : AppTheme.textMuted,
                 ),
               ),
-            if (isTvHovered || focused || widget.isSelected)
-              Icon(
-                Icons.play_circle_outline,
-                size: 16,
-                color: widget.isSelected
-                    ? AppTheme.primary
-                    : AppTheme.textMuted,
-              ),
-          ],
-        ),
+            ),
+          ),
+        ],
       ),
     );
   }

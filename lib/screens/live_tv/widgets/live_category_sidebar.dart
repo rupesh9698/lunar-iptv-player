@@ -517,6 +517,14 @@ class _LiveCategorySidebarState extends ConsumerState<LiveCategorySidebar> {
           decoration: const InputDecoration(
             hintText: 'Search categories...',
             hintStyle: TextStyle(color: AppTheme.textMuted, fontSize: 12),
+            prefixIconConstraints: BoxConstraints(
+              minWidth: 32,
+              minHeight: 32,
+            ),
+            suffixIconConstraints: BoxConstraints(
+              minWidth: 32,
+              minHeight: 32,
+            ),
             prefixIcon: Icon(Icons.search, size: 14, color: AppTheme.textMuted),
             contentPadding: EdgeInsets.symmetric(vertical: 8),
             isDense: true,
@@ -553,9 +561,25 @@ class _LiveCategorySidebarState extends ConsumerState<LiveCategorySidebar> {
     }
   }
 
-  void _scrollToCategory(String categoryId) {
+  void _scrollToCategory(String categoryId, [int attempt = 0]) {
     final key = _catKeys[categoryId];
-    if (key?.currentContext == null) return;
+    if (key?.currentContext == null) {
+      // Tile not built yet (far down a long list): jump close to its
+      // estimated position so it gets built, then centre it precisely.
+      final index = _catIndexMap[categoryId];
+      if (index == null || attempt > 2 || !_scrollCtrl.hasClients) return;
+      final pos = _scrollCtrl.position;
+      const pinnedAndHeader = 230.0; // time strip + 3 pinned tiles + labels
+      const rowHeight = 37.0;
+      _scrollCtrl.jumpTo(
+        (pinnedAndHeader + index * rowHeight - pos.viewportDimension / 2)
+            .clamp(0.0, pos.maxScrollExtent),
+      );
+      WidgetsBinding.instance.addPostFrameCallback(
+        (_) => mounted ? _scrollToCategory(categoryId, attempt + 1) : null,
+      );
+      return;
+    }
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;

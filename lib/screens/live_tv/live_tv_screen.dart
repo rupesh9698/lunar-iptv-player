@@ -105,32 +105,51 @@ class _LiveTVScreenState extends ConsumerState<LiveTVScreen> {
       if (_isRefreshing) {
         _doRefresh();
       } else {
-        _restoreFromLastWatched();
-        _focusInitial();
+        // Focus is decided AFTER the last-watched channel is restored.
+        _restoreFromLastWatched().whenComplete(_focusInitial);
       }
     });
   }
 
-  /// Gives the remote a visible starting point: the selected category tile,
-  /// else the first category tile, else the category search button.
-  /// Retried for a few frames because the sidebar reports its nodes
+  /// Category tile to jump to from the guide / player: the selected one if
+  /// it is currently built (on screen), otherwise the first visible tile.
+  /// (The selected tile can be scrolled far out of view; requesting focus on
+  /// an unbuilt tile silently did nothing.)
+  FocusNode? _categoryEntry() {
+    final sel = selectedCategoryItemFocus;
+    if (sel != null && sel.context != null) return sel;
+    return firstCategoryItemFocus;
+  }
+
+  /// Initial remote focus:
+  ///  • a channel is already playing → "Watch Now" (one OK to go full screen)
+  ///  • nothing playing (first visit) → "All Channels", with every channel
+  ///    listed in the guide.
+  /// Retried for a few frames because the panels report their nodes
   /// post-frame.
   void _focusInitial([int attempt = 0]) {
     if (!mounted) return;
-    // Something inside this screen already has focus (e.g. user pressed a key).
-    if (_categoryPanelFocus.hasFocus ||
-        _channelPanelFocus.hasFocus ||
-        _previewPanelFocus.hasFocus ||
-        backBtnFocus.hasFocus) {
+    // The user already started navigating while we were restoring.
+    if (attempt == 0 &&
+        (_categoryPanelFocus.hasFocus ||
+            _channelPanelFocus.hasFocus ||
+            _previewPanelFocus.hasFocus ||
+            backBtnFocus.hasFocus)) {
       return;
     }
-    final moved =
-        TvNav.focus(selectedCategoryItemFocus) ||
-        TvNav.focus(firstCategoryItemFocus) ||
-        (attempt >= 4 && TvNav.focus(categorySearchFocus));
-    if (!moved && attempt < 6) {
+    final playing = ref.read(selectedChannelProvider) != null;
+    if (playing) {
+      if (TvNav.focus(watchNowFocus)) return;
+    } else {
+      if (attempt == 0) {
+        ref.read(liveFilterProvider.notifier).state = LiveFilter.all;
+        ref.read(selectedLiveCategoryProvider.notifier).state = null;
+      }
+      if (TvNav.focus(firstCategoryItemFocus)) return;
+    }
+    if (attempt < 12) {
       Future.delayed(
-        const Duration(milliseconds: 120),
+        const Duration(milliseconds: 150),
         () => _focusInitial(attempt + 1),
       );
     }
@@ -168,7 +187,7 @@ class _LiveTVScreenState extends ConsumerState<LiveTVScreen> {
       onDown: () =>
           (firstChannelItemFocus ?? channelSearchFocus).requestFocus(),
       onLeft: () =>
-          (selectedCategoryItemFocus ?? firstCategoryItemFocus)?.requestFocus(),
+          _categoryEntry()?.requestFocus(),
       right: refreshEpgFocus,
       ),
     );
@@ -208,7 +227,7 @@ class _LiveTVScreenState extends ConsumerState<LiveTVScreen> {
       up: backBtnFocus,
       down: channelSearchFocus,
       onLeft: () =>
-          (selectedCategoryItemFocus ?? firstCategoryItemFocus)?.requestFocus(),
+          _categoryEntry()?.requestFocus(),
       right: watchNowFocus,
       ),
     );
@@ -257,8 +276,8 @@ class _LiveTVScreenState extends ConsumerState<LiveTVScreen> {
           _isRefreshing = false;
           if (success) _hasCache = true;
         });
-        if (!_hasRestored) _restoreFromLastWatched();
-        _focusInitial();
+        (_hasRestored ? Future<void>.value() : _restoreFromLastWatched())
+            .whenComplete(_focusInitial);
       }
       return;
     }
@@ -309,8 +328,8 @@ class _LiveTVScreenState extends ConsumerState<LiveTVScreen> {
     } else {
       // Success, or failed but has old cache to fall back on
       setState(() => _isRefreshing = false);
-      if (!_hasRestored) _restoreFromLastWatched();
-      _focusInitial();
+      (_hasRestored ? Future<void>.value() : _restoreFromLastWatched())
+          .whenComplete(_focusInitial);
     }
   }
 
@@ -483,7 +502,8 @@ class _LiveTVScreenState extends ConsumerState<LiveTVScreen> {
     if (event is! KeyDownEvent) return KeyEventResult.ignored;
     final key = event.logicalKey;
 
-    if (key == LogicalKeyboardKey.escape) {
+    if (key == LogicalKeyboardKey.escape || key == LogicalKeyboardKey.goBack) {
+      // Back from the full-screen player always returns to this screen.
       if (ref.read(livePlayerMaximizedProvider)) {
         ref.read(livePlayerMaximizedProvider.notifier).state = false;
         return KeyEventResult.handled;
@@ -815,8 +835,7 @@ class _LiveTVScreenState extends ConsumerState<LiveTVScreen> {
                           watchNowFocusNode: watchNowFocus,
                           playPauseFocusNode: miniPlayPauseFocus,
                           categoryEntryFocus: () =>
-                              selectedCategoryItemFocus ??
-                              firstCategoryItemFocus,
+                              _categoryEntry(),
                           channelSearchFocus: channelSearchFocus,
                           backFocusNode: backBtnFocus,
                           onMaximize: () =>
@@ -855,7 +874,12 @@ class _LiveTVScreenState extends ConsumerState<LiveTVScreen> {
     double sidebarW,
     double previewH,
   ) {
-    return Column(
+    // While the full-screen player covers everything, the sidebar and guide
+    // must not be focusable — otherwise a stray D-pad press moved focus
+    // behind the video and Back then left the screen.
+    return ExcludeFocus(
+      excluding: isMaximized,
+      child: Column(
       children: [
         _DesktopTopBar(
           epgVisible: epgVisible,
@@ -899,6 +923,7 @@ class _LiveTVScreenState extends ConsumerState<LiveTVScreen> {
           ),
         ),
       ],
+    ),
     );
   }
 
@@ -918,7 +943,7 @@ class _LiveTVScreenState extends ConsumerState<LiveTVScreen> {
         fullscreenFocusNode: epgFullscreenFocus,
         watchNowFocus: watchNowFocus,
         categoryEntryFocus: () =>
-            selectedCategoryItemFocus ?? firstCategoryItemFocus,
+            _categoryEntry(),
         onFirstItemFocusReady: (node) => firstChannelItemFocus = node,
       );
     }
@@ -952,7 +977,7 @@ class _LiveTVScreenState extends ConsumerState<LiveTVScreen> {
             fullscreenFocusNode: epgFullscreenFocus,
             watchNowFocus: watchNowFocus,
             categoryEntryFocus: () =>
-                selectedCategoryItemFocus ?? firstCategoryItemFocus,
+                _categoryEntry(),
             onFirstItemFocusReady: (node) => firstChannelItemFocus = node,
           ),
         ),

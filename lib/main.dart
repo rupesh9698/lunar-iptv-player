@@ -117,7 +117,9 @@ class LunarIPTVPlayerApp extends ConsumerWidget {
       theme: AppTheme.darkTheme,
       routerConfig: router,
       builder: (context, child) => AdaptiveViewport(
-        child: LandscapeEnforcer(child: child ?? const SizedBox.shrink()),
+        child: TvBackKeyGuard(
+          child: LandscapeEnforcer(child: child ?? const SizedBox.shrink()),
+        ),
       ),
     );
   }

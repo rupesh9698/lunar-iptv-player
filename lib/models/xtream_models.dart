@@ -632,24 +632,56 @@ class EpgListing {
     required this.stopTimestamp,
   });
 
-  // ── FIXED: use dart:convert base64 instead of custom decoder ──────
-  String get decodedTitle {
+  // Decoded once and memoised — EPG blocks are rebuilt constantly, and
+  // base64 + UTF-8 decoding on every build was measurable on TV boxes.
+  late final String decodedTitle = _decodeB64(title).trim();
+  late final String decodedDescription = _decodeB64(description).trim();
+
+  static String _decodeB64(String v) {
+    if (v.isEmpty) return '';
     try {
-      if (title.isEmpty) return '';
-      return utf8.decode(base64.decode(base64.normalize(title)));
+      return utf8.decode(base64.decode(base64.normalize(v)));
     } catch (_) {
-      return title;
+      return v; // already plain text
     }
   }
 
-  String get decodedDescription {
-    try {
-      if (description.isEmpty) return '';
-      return utf8.decode(base64.decode(base64.normalize(description)));
-    } catch (_) {
-      return description;
-    }
-  }
+  /// Placeholder / filler entries some providers overlay on real schedules
+  /// ("Movie — Bringing the best in cinema.").
+  bool get isGeneric => _kGenericTitles.contains(decodedTitle.toLowerCase());
+
+  static const Set<String> _kGenericTitles = {
+    '',
+    'movie',
+    'movies',
+    'film',
+    'films',
+    'program',
+    'programme',
+    'programming',
+    'no information',
+    'no info',
+    'no information available',
+    'information not available',
+    'no epg',
+    'epg not available',
+    'not available',
+    'n/a',
+    'tba',
+    'to be announced',
+    'off air',
+  };
+
+  EpgListing copyWith({int? startTimestamp, int? stopTimestamp}) => EpgListing(
+    id: id,
+    epgId: epgId,
+    title: title,
+    description: description,
+    start: start,
+    end: end,
+    startTimestamp: startTimestamp ?? this.startTimestamp,
+    stopTimestamp: stopTimestamp ?? this.stopTimestamp,
+  );
 
   DateTime get startTime =>
       DateTime.fromMillisecondsSinceEpoch(startTimestamp * 1000);
@@ -679,6 +711,114 @@ class EpgListing {
     startTimestamp: _parseInt(json['start_timestamp']),
     stopTimestamp: _parseInt(json['stop_timestamp']),
   );
+}
+
+// ============================================================
+// EPG NORMALISATION
+// Xtream `get_simple_data_table` returns ~2 weeks of listings, starting
+// several days in the PAST, and some providers merge two sources so
+// programmes overlap (e.g. a generic "Movie" block on top of the real film,
+// or the same schedule twice with an offset). The UI used to take
+// `epg.first` as "Now Playing" → titles/descriptions from days ago.
+// ============================================================
+class EpgNormalizer {
+  EpgNormalizer._();
+
+  /// Returns a sorted, non-overlapping schedule starting a little before
+  /// [now]: ended programmes are dropped, generic filler loses to real
+  /// programmes, and other overlaps are resolved by trimming.
+  static List<EpgListing> normalize(
+    List<EpgListing> raw, {
+    DateTime? now,
+    Duration keepPast = const Duration(hours: 3),
+    Duration keepFuture = const Duration(hours: 36),
+  }) {
+    if (raw.isEmpty) return raw;
+    final nowS = (now ?? DateTime.now()).millisecondsSinceEpoch ~/ 1000;
+    final from = nowS - keepPast.inSeconds;
+    final to = nowS + keepFuture.inSeconds;
+
+    final list =
+        raw
+            .where(
+              (e) =>
+                  e.stopTimestamp > e.startTimestamp &&
+                  e.stopTimestamp > from &&
+                  e.startTimestamp < to,
+            )
+            .toList()
+          ..sort((a, b) {
+            final c = a.startTimestamp.compareTo(b.startTimestamp);
+            // Same start: real programmes before filler, shorter first.
+            if (c != 0) return c;
+            if (a.isGeneric != b.isGeneric) return a.isGeneric ? 1 : -1;
+            return a.stopTimestamp.compareTo(b.stopTimestamp);
+          });
+
+    final out = <EpgListing>[];
+    for (var e in list) {
+      while (out.isNotEmpty && e.startTimestamp < out.last.stopTimestamp) {
+        final prev = out.last;
+        if (e.isGeneric && !prev.isGeneric) {
+          // Filler overlapping a real programme: keep only the part of the
+          // filler after the real one ends (if any).
+          if (e.stopTimestamp <= prev.stopTimestamp) {
+            e = prev; // marker: drop e
+            break;
+          }
+          e = e.copyWith(startTimestamp: prev.stopTimestamp);
+          break;
+        }
+        if (prev.isGeneric && !e.isGeneric) {
+          // Real programme beats filler: cut the filler (or drop it).
+          if (prev.startTimestamp < e.startTimestamp) {
+            out[out.length - 1] = prev.copyWith(stopTimestamp: e.startTimestamp);
+            break;
+          }
+          out.removeLast();
+          continue;
+        }
+        if (prev.decodedTitle == e.decodedTitle) {
+          // Same programme twice (offset duplicate source) → keep the
+          // earlier one only.
+          e = prev;
+          break;
+        }
+        // Two different real programmes overlap: the later-starting one
+        // wins from its start time.
+        if (prev.startTimestamp < e.startTimestamp) {
+          out[out.length - 1] = prev.copyWith(stopTimestamp: e.startTimestamp);
+        } else {
+          out.removeLast();
+          continue;
+        }
+        break;
+      }
+      if (identical(e, out.isEmpty ? null : out.last)) continue; // dropped
+      out.add(e);
+    }
+    return out;
+  }
+}
+
+extension EpgListX on List<EpgListing> {
+  /// The programme airing right now, or null (never a past one).
+  EpgListing? currentAt([DateTime? now]) {
+    final s = (now ?? DateTime.now()).millisecondsSinceEpoch ~/ 1000;
+    for (final e in this) {
+      if (e.startTimestamp <= s && s < e.stopTimestamp) return e;
+    }
+    return null;
+  }
+
+  /// The first programme starting after now.
+  EpgListing? nextAt([DateTime? now]) {
+    final s = (now ?? DateTime.now()).millisecondsSinceEpoch ~/ 1000;
+    for (final e in this) {
+      if (e.startTimestamp > s) return e;
+    }
+    return null;
+  }
 }
 
 // ============================================================

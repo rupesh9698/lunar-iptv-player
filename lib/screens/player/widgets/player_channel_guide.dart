@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
+import '../../../services/app_cache_manager.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
@@ -36,6 +37,17 @@ class _PlayerChannelGuideState extends ConsumerState<PlayerChannelGuide>
   final _scrollCtrl = ScrollController();
   final _focusNode = FocusNode(debugLabel: 'channelGuide');
   int _focusedIndex = -1;
+
+  /// The guide closes itself after this long without any key press.
+  static const Duration _kIdleTimeout = Duration(seconds: 5);
+  Timer? _idleTimer;
+
+  void _bumpIdle() {
+    _idleTimer?.cancel();
+    _idleTimer = Timer(_kIdleTimeout, () {
+      if (mounted) widget.onClose();
+    });
+  }
   late final AnimationController _animCtrl;
   late final Animation<Offset> _slideAnim;
 
@@ -61,10 +73,12 @@ class _PlayerChannelGuideState extends ConsumerState<PlayerChannelGuide>
       if (mounted) _focusNode.requestFocus();
       _initFocus();
     });
+    _bumpIdle();
   }
 
   @override
   void dispose() {
+    _idleTimer?.cancel();
     _animCtrl.dispose();
     _scrollCtrl.dispose();
     _focusNode.dispose();
@@ -97,6 +111,7 @@ class _PlayerChannelGuideState extends ConsumerState<PlayerChannelGuide>
   }
 
   Future<void> _selectChannel(int idx, LiveStream ch) async {
+    _bumpIdle();
     setState(() => _focusedIndex = idx);
 
     ref.read(selectedChannelProvider.notifier).state = ch;
@@ -123,8 +138,8 @@ class _PlayerChannelGuideState extends ConsumerState<PlayerChannelGuide>
     final channels     = channelsVal.value ?? [];
 
     final epg     = channel != null ? (epgCache[channel.streamId] ?? []) : <EpgListing>[];
-    final current = epg.isNotEmpty ? epg.first : null;
-    final next    = epg.length > 1 ? epg[1] : null;
+    final current = epg.currentAt();
+    final next    = epg.nextAt();
 
     return SlideTransition(
       position: _slideAnim,
@@ -133,6 +148,7 @@ class _PlayerChannelGuideState extends ConsumerState<PlayerChannelGuide>
         autofocus: true,
         onKeyEvent: (_, event) {
           if (event is KeyUpEvent) return KeyEventResult.ignored;
+          _bumpIdle(); // any key keeps the guide open for another 5 s
           final isDown = event is KeyDownEvent;
 
           if (event.logicalKey == LogicalKeyboardKey.escape ||
@@ -429,6 +445,7 @@ class _ChannelItemState extends State<_ChannelItem> {
                 child: widget.channel.streamIcon?.isNotEmpty == true
                     ? CachedNetworkImage(
                   imageUrl: widget.channel.streamIcon!,
+                  cacheManager: AppCacheManager.instance,
                   fit: BoxFit.contain,
                   memCacheWidth: 110,
                   placeholder: (_, _) =>

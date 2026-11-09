@@ -1,7 +1,9 @@
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 import 'package:hive_flutter/hive_flutter.dart';
+import 'package:path_provider/path_provider.dart';
 
 import '../models/xtream_models.dart';
 
@@ -18,6 +20,11 @@ import '../models/xtream_models.dart';
 /// • Repeated short strings (category ids, stream types, extensions…) are
 ///   interned while decoding, which noticeably cuts heap use for huge lists.
 /// • Cheap `has…()` checks answer "is anything cached?" without decoding.
+/// • On native platforms the three big libraries live in plain files in a
+///   compact one-row-per-item format (see [_LibCodec]) that a background
+///   isolate reads AND parses — nothing touches the UI thread, and no JSON
+///   maps are built (~3-4× faster than JSON on TV boxes). Older Hive/JSON
+///   caches are migrated automatically on first load. Web keeps Hive/JSON.
 class CacheService {
   static const _kContentBox = 'stream1_content_v2';
   static const _kMetaBox = 'stream1_meta_v2';
@@ -64,10 +71,105 @@ class CacheService {
   Future<List<VodStream>?>? _vodLoading;
   Future<List<Series>?>? _seriesLoading;
 
+  /// Folder for the big library files (null on web).
+  Directory? _libDir;
+
   Future<void> init() async {
     _contentBox = await Hive.openLazyBox(_kContentBox);
     _metaBox = await Hive.openBox(_kMetaBox);
     _purgeOldEpg();
+    if (!kIsWeb) {
+      try {
+        final base = await getApplicationSupportDirectory();
+        final dir = Directory('${base.path}${Platform.pathSeparator}lib_cache');
+        await dir.create(recursive: true);
+        _libDir = dir;
+      } catch (e) {
+        debugPrint('Library file cache unavailable: $e');
+      }
+    }
+  }
+
+  /// Test hook: use a specific folder for the library files.
+  @visibleForTesting
+  set libraryDirectory(Directory? dir) => _libDir = dir;
+
+  String? _libPath(String kind) => _libDir == null
+      ? null
+      : '${_libDir!.path}${Platform.pathSeparator}${_playlistId}_$kind.lib';
+
+  bool _libExists(String kind) {
+    final path = _libPath(kind);
+    return path != null && File(path).existsSync();
+  }
+
+  /// Shared loader: memory → library file (isolate read+parse) → legacy
+  /// Hive JSON (isolate decode, then migrated to a file in the background).
+  Future<List<T>?> _loadLib<T>({
+    required String kind,
+    required String hiveKey,
+    required List<T> Function(String path) readFile,
+    required List<T> Function(String json) decodeJson,
+    required Future<void> Function(String path, List<T> list) writeFile,
+  }) async {
+    final sw = Stopwatch()..start();
+    final path = _libPath(kind);
+    if (path != null && File(path).existsSync()) {
+      try {
+        final list = await compute(readFile, path);
+        debugPrint(
+          '[cache] $kind: ${list.length} items in '
+          '${sw.elapsedMilliseconds} ms (file)',
+        );
+        return list;
+      } catch (e) {
+        debugPrint('[cache] $kind file unreadable, falling back: $e');
+      }
+    }
+    final raw = await _raw(hiveKey);
+    if (raw == null) return null;
+    final list = await compute(decodeJson, raw);
+    debugPrint(
+      '[cache] $kind: ${list.length} items in '
+      '${sw.elapsedMilliseconds} ms (legacy json)',
+    );
+    if (path != null) {
+      // Migrate: write the fast file, then drop the big JSON from Hive.
+      () async {
+        try {
+          await writeFile(path, list);
+          await _contentBox?.delete(_k(hiveKey));
+          await _compactSoon();
+        } catch (e) {
+          debugPrint('[cache] $kind migration failed: $e');
+        }
+      }();
+    }
+    return list;
+  }
+
+  /// Shared saver: library file on native, Hive JSON on web.
+  Future<void> _saveLib<T>({
+    required String kind,
+    required String hiveKey,
+    required String countKey,
+    required List<T> list,
+    required Future<void> Function(String path, List<T> list) writeFile,
+    required String Function(List<T>) encodeJson,
+  }) async {
+    final path = _libPath(kind);
+    if (path != null) {
+      await writeFile(path, list);
+      if (_contentBox?.containsKey(_k(hiveKey)) ?? false) {
+        await _contentBox?.delete(_k(hiveKey));
+        _compactSoon().ignore();
+      }
+    } else {
+      final encoded = await compute(encodeJson, list);
+      await _contentBox?.put(_k(hiveKey), encoded);
+      _compactSoon().ignore();
+    }
+    await _metaBox?.put(_k(countKey), list.length);
   }
 
   void setActivePlaylist(String playlistId) {
@@ -139,10 +241,14 @@ class CacheService {
   Future<void> saveLiveStreams(List<LiveStream> streams) async {
     _liveMem = streams;
     _liveLoading = null;
-    final encoded = await compute(_encodeStreams, streams);
-    await _contentBox?.put(_k(_kLiveStreams), encoded);
-    await _metaBox?.put(_k(_kCountLive), streams.length);
-    _compactSoon().ignore();
+    await _saveLib(
+      kind: 'live',
+      hiveKey: _kLiveStreams,
+      countKey: _kCountLive,
+      list: streams,
+      writeFile: (p, l) => compute(writeLiveFile, (p, l)),
+      encodeJson: _encodeStreams,
+    );
   }
 
   Future<void> saveVodCategories(List<XtreamCategory> cats) async {
@@ -154,10 +260,14 @@ class CacheService {
   Future<void> saveVodStreams(List<VodStream> streams) async {
     _vodMem = streams;
     _vodLoading = null;
-    final encoded = await compute(_encodeVodStreams, streams);
-    await _contentBox?.put(_k(_kVodStreams), encoded);
-    await _metaBox?.put(_k(_kCountVod), streams.length);
-    _compactSoon().ignore();
+    await _saveLib(
+      kind: 'vod',
+      hiveKey: _kVodStreams,
+      countKey: _kCountVod,
+      list: streams,
+      writeFile: (p, l) => compute(writeVodFile, (p, l)),
+      encodeJson: _encodeVodStreams,
+    );
   }
 
   Future<void> saveSeriesCategories(List<XtreamCategory> cats) async {
@@ -169,10 +279,14 @@ class CacheService {
   Future<void> saveSeriesList(List<Series> list) async {
     _seriesMem = list;
     _seriesLoading = null;
-    final encoded = await compute(_encodeSeriesList, list);
-    await _contentBox?.put(_k(_kSeriesList), encoded);
-    await _metaBox?.put(_k(_kCountSeries), list.length);
-    _compactSoon().ignore();
+    await _saveLib(
+      kind: 'series',
+      hiveKey: _kSeriesList,
+      countKey: _kCountSeries,
+      list: list,
+      writeFile: (p, l) => compute(writeSeriesFile, (p, l)),
+      encodeJson: _encodeSeriesList,
+    );
   }
 
   Future<void> saveEpg(String streamId, List<EpgListing> epg) async {
@@ -201,20 +315,35 @@ class CacheService {
   // ── Cheap presence checks (no decoding) ───────────────────────────
 
   /// true / false when known, null when nothing is cached at all.
-  bool? _nonEmpty(List? mem, String countKey, String contentKey) {
+  bool? _nonEmpty(List? mem, String countKey, String contentKey, String kind) {
     if (mem != null) return mem.isNotEmpty;
     final count = _metaBox?.get(_k(countKey)) as int?;
     if (count != null) return count > 0;
-    // Caches written before counts existed: presence of the blob.
+    // Caches written before counts existed: presence of the data.
     if (_contentBox?.containsKey(_k(contentKey)) ?? false) return true;
+    if (_libExists(kind)) return true;
     return null;
   }
 
   bool? liveStreamsNonEmpty() =>
-      _nonEmpty(_liveMem, _kCountLive, _kLiveStreams);
-  bool? vodStreamsNonEmpty() => _nonEmpty(_vodMem, _kCountVod, _kVodStreams);
+      _nonEmpty(_liveMem, _kCountLive, _kLiveStreams, 'live');
+  bool? vodStreamsNonEmpty() =>
+      _nonEmpty(_vodMem, _kCountVod, _kVodStreams, 'vod');
   bool? seriesListNonEmpty() =>
-      _nonEmpty(_seriesMem, _kCountSeries, _kSeriesList);
+      _nonEmpty(_seriesMem, _kCountSeries, _kSeriesList, 'series');
+
+  /// Loads the big libraries in the background (one after another, in an
+  /// isolate) so opening Movies / Series is instant. Safe to call often.
+  Future<void> prewarm({bool vod = true, bool series = true}) async {
+    try {
+      if (vod && hasVodStreams()) await loadVodStreams(ignoreExpiry: true);
+      if (series && hasSeriesList()) {
+        await loadSeriesList(ignoreExpiry: true);
+      }
+    } catch (e) {
+      debugPrint('[cache] prewarm failed: $e');
+    }
+  }
 
   bool hasLiveStreams() => liveStreamsNonEmpty() ?? false;
   bool hasVodStreams() => vodStreamsNonEmpty() ?? false;
@@ -248,8 +377,13 @@ class CacheService {
     if (_liveMem != null) return Future.value(_liveMem);
     final pid = _playlistId;
     return _liveLoading ??= () async {
-      final raw = await _raw(_kLiveStreams);
-      final list = raw == null ? null : await compute(decodeLiveList, raw);
+      final list = await _loadLib<LiveStream>(
+        kind: 'live',
+        hiveKey: _kLiveStreams,
+        readFile: readLiveFile,
+        decodeJson: decodeLiveList,
+        writeFile: (p, l) => compute(writeLiveFile, (p, l)),
+      );
       if (pid == _playlistId) {
         _liveMem = list;
         _liveLoading = null;
@@ -263,8 +397,13 @@ class CacheService {
     if (_vodMem != null) return Future.value(_vodMem);
     final pid = _playlistId;
     return _vodLoading ??= () async {
-      final raw = await _raw(_kVodStreams);
-      final list = raw == null ? null : await compute(decodeVodList, raw);
+      final list = await _loadLib<VodStream>(
+        kind: 'vod',
+        hiveKey: _kVodStreams,
+        readFile: readVodFile,
+        decodeJson: decodeVodList,
+        writeFile: (p, l) => compute(writeVodFile, (p, l)),
+      );
       if (pid == _playlistId) {
         _vodMem = list;
         _vodLoading = null;
@@ -278,8 +417,13 @@ class CacheService {
     if (_seriesMem != null) return Future.value(_seriesMem);
     final pid = _playlistId;
     return _seriesLoading ??= () async {
-      final raw = await _raw(_kSeriesList);
-      final list = raw == null ? null : await compute(decodeSeriesList, raw);
+      final list = await _loadLib<Series>(
+        kind: 'series',
+        hiveKey: _kSeriesList,
+        readFile: readSeriesFile,
+        decodeJson: decodeSeriesList,
+        writeFile: (p, l) => compute(writeSeriesFile, (p, l)),
+      );
       if (pid == _playlistId) {
         _seriesMem = list;
         _seriesLoading = null;
@@ -348,6 +492,14 @@ class CacheService {
 
   Future<void> clearAll() async {
     _dropMemory();
+    for (final kind in const ['live', 'vod', 'series']) {
+      final path = _libPath(kind);
+      if (path == null) continue;
+      try {
+        final f = File(path);
+        if (f.existsSync()) await f.delete();
+      } catch (_) {}
+    }
     final keys = [
       _kLiveCats,
       _kLiveStreams,
@@ -552,3 +704,191 @@ List<Series> decodeSeriesList(String raw) {
     );
   }, growable: false);
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// LIBRARY FILE CODEC
+// One item per line, fields separated by U+001F (unit separator). Parsing is
+// a single pass of indexOf/substring over the file — no JSON maps — and the
+// whole read + parse runs in a background isolate.
+// ─────────────────────────────────────────────────────────────────────────────
+class _LibCodec {
+  static const String magic = 'LUNARLIB1';
+  static const String sep = '\u001f';
+  static final RegExp _bad = RegExp('[\n\r\u001f]');
+
+  static String clean(String? v) =>
+      v == null ? '' : (v.contains(_bad) ? v.replaceAll(_bad, ' ') : v);
+
+  static void write(String path, int fields, Iterable<List<String?>> rows) {
+    final sb = StringBuffer(magic)..write('\n');
+    for (final r in rows) {
+      for (var f = 0; f < fields; f++) {
+        if (f > 0) sb.write(sep);
+        sb.write(clean(r[f]));
+      }
+      sb.write('\n');
+    }
+    final tmp = File('$path.tmp');
+    tmp.writeAsStringSync(sb.toString(), flush: true);
+    tmp.renameSync(path); // atomic replace — never a half-written cache
+  }
+
+  static List<T> read<T>(
+    String path,
+    int fields,
+    T Function(List<String> f, _Interner i) build,
+  ) {
+    final raw = File(path).readAsStringSync();
+    if (!raw.startsWith(magic)) {
+      throw const FormatException('Not a library cache file');
+    }
+    final out = <T>[];
+    final interner = _Interner();
+    final f = List<String>.filled(fields, '');
+    var pos = raw.indexOf('\n') + 1;
+    final len = raw.length;
+    while (pos < len) {
+      var end = raw.indexOf('\n', pos);
+      if (end < 0) end = len;
+      if (end > pos) {
+        var start = pos;
+        for (var i = 0; i < fields; i++) {
+          if (start > end) {
+            f[i] = '';
+            continue;
+          }
+          var stop = i == fields - 1 ? end : raw.indexOf(sep, start);
+          if (stop < 0 || stop > end) stop = end;
+          f[i] = raw.substring(start, stop);
+          start = stop + 1;
+        }
+        out.add(build(f, interner));
+      }
+      pos = end + 1;
+    }
+    return out;
+  }
+}
+
+String? _nz(String v) => v.isEmpty ? null : v;
+
+@visibleForTesting
+Future<void> writeVodFile((String, List<VodStream>) a) async => _LibCodec.write(
+  a.$1,
+  10,
+  a.$2.map(
+    (v) => [
+      v.num,
+      v.name,
+      v.streamType,
+      v.streamId,
+      v.streamIcon,
+      v.rating,
+      v.rating5based,
+      v.added,
+      v.categoryId,
+      v.containerExtension,
+    ],
+  ),
+);
+
+@visibleForTesting
+List<VodStream> readVodFile(String path) => _LibCodec.read(
+  path,
+  10,
+  (f, i) => VodStream(
+    num: f[0],
+    name: f[1],
+    streamType: i(f[2].isEmpty ? 'movie' : f[2])!,
+    streamId: f[3],
+    streamIcon: f[4],
+    rating: i(f[5]),
+    rating5based: i(f[6]),
+    added: f[7],
+    categoryId: i(f[8]),
+    containerExtension: i(f[9].isEmpty ? 'mp4' : f[9]),
+  ),
+);
+
+@visibleForTesting
+Future<void> writeSeriesFile((String, List<Series>) a) async => _LibCodec.write(
+  a.$1,
+  12,
+  a.$2.map(
+    (v) => [
+      v.seriesId,
+      v.name,
+      v.cover,
+      v.plot,
+      v.cast,
+      v.director,
+      v.genre,
+      v.releaseDate,
+      v.rating,
+      v.rating5based,
+      v.backdropPath,
+      v.categoryId,
+    ],
+  ),
+);
+
+@visibleForTesting
+List<Series> readSeriesFile(String path) => _LibCodec.read(
+  path,
+  12,
+  (f, i) => Series(
+    seriesId: f[0],
+    name: f[1],
+    cover: _nz(f[2]),
+    plot: _nz(f[3]),
+    cast: _nz(f[4]),
+    director: _nz(f[5]),
+    genre: i(_nz(f[6])),
+    releaseDate: i(_nz(f[7])),
+    rating: i(f[8]),
+    rating5based: i(f[9]),
+    backdropPath: _nz(f[10]),
+    categoryId: i(f[11]),
+  ),
+);
+
+@visibleForTesting
+Future<void> writeLiveFile((String, List<LiveStream>) a) async =>
+    _LibCodec.write(
+      a.$1,
+      11,
+      a.$2.map(
+        (c) => [
+          c.num,
+          c.name,
+          c.streamType,
+          c.streamId,
+          c.streamIcon,
+          c.epgChannelId,
+          c.added,
+          c.categoryId,
+          c.tvArchive,
+          c.directSource,
+          c.customSid,
+        ],
+      ),
+    );
+
+@visibleForTesting
+List<LiveStream> readLiveFile(String path) => _LibCodec.read(
+  path,
+  11,
+  (f, i) => LiveStream(
+    num: f[0],
+    name: f[1],
+    streamType: i(f[2].isEmpty ? 'live' : f[2])!,
+    streamId: f[3],
+    streamIcon: f[4],
+    epgChannelId: f[5],
+    added: i(f[6]),
+    categoryId: i(f[7]),
+    tvArchive: i(f[8]),
+    directSource: i(f[9]),
+    customSid: i(f[10]),
+  ),
+);

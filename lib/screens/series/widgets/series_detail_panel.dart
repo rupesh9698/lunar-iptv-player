@@ -707,7 +707,7 @@ class _SeriesDetailPanelState extends ConsumerState<SeriesDetailPanel> {
               Expanded(
                 child: TvFocusable(
                   focusNode: seriesDetailPlayFocus,
-                  autoScroll: false,
+                  autoScroll: true, // panel scrolls: keep the focused button on screen
                   onActivate: () => _playEpisode(context, ref, info, first),
                   builder: (focused, _) => AnimatedContainer(
                     duration: const Duration(milliseconds: 150),
@@ -744,7 +744,7 @@ class _SeriesDetailPanelState extends ConsumerState<SeriesDetailPanel> {
               ),
               const SizedBox(width: 8),
               TvFocusable(
-                autoScroll: false,
+                autoScroll: true, // panel scrolls: keep the focused button on screen
                 onActivate: () => ref
                     .read(seriesFavoritesProvider.notifier)
                     .toggle(series.seriesId),
@@ -788,7 +788,7 @@ class _SeriesDetailPanelState extends ConsumerState<SeriesDetailPanel> {
           if (trailerKey != null && trailerKey.isNotEmpty) ...[
             const SizedBox(height: 8),
             TvFocusable(
-              autoScroll: false,
+              autoScroll: true, // panel scrolls: keep the focused button on screen
               onActivate: () =>
                   launchYouTubeTrailer(context, trailerKey),
               builder: (focused, _) => AnimatedContainer(

@@ -1,5 +1,6 @@
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
+import '../services/app_cache_manager.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -228,6 +229,7 @@ class _ContinueCardState extends State<_ContinueCard> {
                 imageUrl != null && imageUrl.isNotEmpty
                     ? CachedNetworkImage(
                   imageUrl: imageUrl,
+                  cacheManager: AppCacheManager.instance,
                   fit: BoxFit.cover,
                   memCacheWidth: 420, // card is 212 px wide
                   placeholder: (_, _) =>

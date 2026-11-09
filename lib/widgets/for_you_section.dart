@@ -1,5 +1,6 @@
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
+import '../services/app_cache_manager.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 
 import '../core/theme/app_theme.dart';
@@ -159,6 +160,7 @@ class _ForYouCardState extends State<_ForYouCard> {
                 item.imageUrl?.isNotEmpty == true
                     ? CachedNetworkImage(
                   imageUrl: item.imageUrl!,
+                  cacheManager: AppCacheManager.instance,
                   fit: BoxFit.cover,
                   memCacheWidth: 200, // tile is 94 px wide
                   placeholder: (_, _) =>

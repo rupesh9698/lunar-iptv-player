@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -29,12 +31,61 @@ class TvKeyTracker {
     } else {
       isRepeating = false;
     }
+    // A new Back press starts: nobody has seen it reach the root yet.
+    if (event is KeyDownEvent && TvBackKeyGuard.isBackKey(event.logicalKey)) {
+      TvBackKeyGuard._downReachedRoot = false;
+    }
     return false; // never consume
   }
 
   /// Scroll duration to use when bringing a newly focused widget into view.
   static Duration get scrollDuration =>
       isRepeating ? Duration.zero : const Duration(milliseconds: 220);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// TV BACK KEY GUARD
+// On Android a Back press arrives twice: as a key event (down + up) and —
+// if the framework does not consume the *up* — as a system "back" that pops
+// the route. Screens that handle Back themselves (full-screen player,
+// channel guide…) consumed only the key-DOWN, so the key-UP still triggered
+// a system back a moment later. If the screen had already changed state
+// (e.g. minimised the player) that second back went one level further —
+// straight to Home.
+// This guard sits above the Navigator: if a Back key-DOWN was consumed
+// somewhere below (it never reached the root), the matching key-UP is
+// consumed here too. Unhandled Back presses pass through untouched.
+// ─────────────────────────────────────────────────────────────────────────────
+class TvBackKeyGuard extends StatelessWidget {
+  final Widget child;
+  const TvBackKeyGuard({super.key, required this.child});
+
+  static bool _downReachedRoot = true;
+
+  static bool isBackKey(LogicalKeyboardKey k) =>
+      k == LogicalKeyboardKey.goBack ||
+      k == LogicalKeyboardKey.escape ||
+      k == LogicalKeyboardKey.browserBack;
+
+  @override
+  Widget build(BuildContext context) {
+    return Focus(
+      canRequestFocus: false,
+      skipTraversal: true,
+      onKeyEvent: (node, event) {
+        if (!isBackKey(event.logicalKey)) return KeyEventResult.ignored;
+        if (event is KeyDownEvent) {
+          _downReachedRoot = true; // nobody below handled it → system back
+          return KeyEventResult.ignored;
+        }
+        // Up / repeat of a press that was handled below → swallow.
+        return _downReachedRoot
+            ? KeyEventResult.ignored
+            : KeyEventResult.handled;
+      },
+      child: child,
+    );
+  }
 }
 
 bool _isActivationKey(LogicalKeyboardKey k) =>
@@ -55,10 +106,14 @@ bool _isMenuKey(LogicalKeyboardKey k) =>
     k == LogicalKeyboardKey.contextMenu || k == LogicalKeyboardKey.gameButtonY;
 
 /// How long OK/Select must be held before [TvFocusable.onLongPress] fires.
-const Duration kTvLongPressDuration = Duration(milliseconds: 550);
+/// Slightly under Android's standard long-press timeout (500 ms) so a
+/// system long-press always registers before the key is released.
+const Duration kTvLongPressDuration = Duration(milliseconds: 450);
 
 /// Fallback when key events carry no usable timestamps.
-const int kTvLongPressRepeats = 4;
+/// Android only starts auto-repeat after the long-press timeout, so the
+/// first repeat already means "held".
+const int kTvLongPressRepeats = 1;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // FOCUS HIGHLIGHT MODE MIXIN
@@ -213,8 +268,23 @@ class TvFocusable extends StatefulWidget {
 class _TvFocusableState extends State<TvFocusable> with TvFocusMixin {
   bool _activationDown = false;
   bool _longPressFired = false;
-  Duration? _downAt;
   int _repeatCount = 0;
+  Timer? _longPressTimer;
+
+  @override
+  void dispose() {
+    _longPressTimer?.cancel();
+    super.dispose();
+  }
+
+  void _fireLongPress() {
+    _longPressTimer?.cancel();
+    if (!mounted || !_activationDown || _longPressFired) return;
+    if (widget.onLongPress == null) return;
+    _longPressFired = true;
+    setTvPressed(false);
+    widget.onLongPress!();
+  }
 
   void _ensureVisible() {
     if (!mounted) return;
@@ -236,30 +306,34 @@ class _TvFocusableState extends State<TvFocusable> with TvFocusMixin {
       if (event is KeyDownEvent) {
         _activationDown = true;
         _longPressFired = false;
-        _downAt = event.timeStamp;
         _repeatCount = 0;
         setTvPressed(true);
         // Without a long-press handler, activate immediately (snappier).
         if (!hasLong) widget.onActivate?.call();
+        // Primary long-press signal: a timer. Many TV remotes / Android
+        // builds never deliver key-repeat events for OK, so relying on
+        // repeats alone made "hold OK" do nothing on real TVs.
+        _longPressTimer?.cancel();
+        if (hasLong) {
+          _longPressTimer = Timer(kTvLongPressDuration, _fireLongPress);
+        }
         return KeyEventResult.handled;
       }
       if (event is KeyRepeatEvent) {
         _repeatCount++;
-        // Event timestamps are the primary signal; some platforms (and
-        // synthesized events) report zero timestamps, so a repeat count
-        // (~first repeat ≈ 400 ms, then ≈ 50 ms each) is the fallback.
-        final held = _downAt != null && event.timeStamp > _downAt!
-            ? event.timeStamp - _downAt! >= kTvLongPressDuration
-            : _repeatCount >= kTvLongPressRepeats;
+        // Android (and desktop OSes) only begin auto-repeat once the system
+        // long-press timeout (400–500 ms) has passed, so the first repeat
+        // already means "held". Remotes that never send repeats are covered
+        // by the timer started on key-down.
+        final held = _repeatCount >= kTvLongPressRepeats;
         if (hasLong && _activationDown && !_longPressFired && held) {
-          _longPressFired = true;
-          setTvPressed(false);
-          widget.onLongPress!();
+          _fireLongPress();
         }
         // Swallow repeats so held OK never re-triggers anything.
         return KeyEventResult.handled;
       }
       if (event is KeyUpEvent) {
+        _longPressTimer?.cancel();
         final wasDown = _activationDown;
         _activationDown = false;
         setTvPressed(false);
@@ -303,6 +377,7 @@ class _TvFocusableState extends State<TvFocusable> with TvFocusMixin {
         setTvFocused(focused);
         if (!focused) {
           _activationDown = false;
+          _longPressTimer?.cancel();
           setTvPressed(false);
         }
         widget.onFocusChange?.call(focused);

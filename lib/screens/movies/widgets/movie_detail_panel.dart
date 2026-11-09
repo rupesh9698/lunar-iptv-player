@@ -306,7 +306,7 @@ class MovieDetailPanel extends ConsumerWidget {
                       ),
                     ),
                     TvFocusable(
-                      autoScroll: false,
+                      autoScroll: true, // panel scrolls: keep the focused button on screen
                       onActivate: () => ref
                           .read(vodFavoritesProvider.notifier)
                           .toggle(movie.streamId),
@@ -463,7 +463,7 @@ class MovieDetailPanel extends ConsumerWidget {
             Expanded(
               child: TvFocusable(
                 focusNode: movieDetailPlayFocus,
-                autoScroll: false,
+                autoScroll: true, // panel scrolls: keep the focused button on screen
                 onActivate: service == null
                     ? null
                     : () {
@@ -564,7 +564,7 @@ class MovieDetailPanel extends ConsumerWidget {
             ),
             const SizedBox(width: 8),
             TvFocusable(
-              autoScroll: false,
+              autoScroll: true, // panel scrolls: keep the focused button on screen
               onActivate: () => ref
                   .read(vodFavoritesProvider.notifier)
                   .toggle(movie.streamId),
@@ -607,7 +607,7 @@ class MovieDetailPanel extends ConsumerWidget {
         const SizedBox(height: 8),
         if (service != null)
           TvFocusable(
-            autoScroll: false,
+            autoScroll: true, // panel scrolls: keep the focused button on screen
             onActivate: () {
               final url = service.getVodUrl(movie.streamId, ext);
               launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
@@ -653,7 +653,7 @@ class MovieDetailPanel extends ConsumerWidget {
         if (vodInfo?.info?.youtubeTrailer != null &&
             vodInfo!.info!.youtubeTrailer!.isNotEmpty)
           TvFocusable(
-            autoScroll: false,
+            autoScroll: true, // panel scrolls: keep the focused button on screen
             onActivate: () =>
                 launchYouTubeTrailer(context, vodInfo.info!.youtubeTrailer!),
             builder: (focused, _) => AnimatedContainer(

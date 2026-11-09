@@ -117,7 +117,10 @@ class EpgCacheNotifier extends StateNotifier<Map<String, List<EpgListing>>> {
         maxAge: const Duration(minutes: 30),
       );
       if (diskCached != null) {
-        if (mounted) state = {...state, streamId: diskCached};
+        // Normalised: past days dropped, filler/overlaps resolved.
+        if (mounted) {
+          state = {...state, streamId: EpgNormalizer.normalize(diskCached)};
+        }
         return;
       }
 
@@ -140,7 +143,11 @@ class EpgCacheNotifier extends StateNotifier<Map<String, List<EpgListing>>> {
 
       _lastFetched[streamId] = DateTime.now();
 
-      if (mounted) state = {...state, streamId: listings};
+      // The API returns ~2 weeks starting days in the past; keep only a
+      // clean, non-overlapping window around now.
+      if (mounted) {
+        state = {...state, streamId: EpgNormalizer.normalize(listings)};
+      }
     } catch (_) {
       if (mounted) state = {...state, streamId: []};
     } finally {

@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
+import '../../../services/app_cache_manager.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -50,8 +51,13 @@ class _LiveInlinePlayerState extends ConsumerState<LiveInlinePlayer> {
   bool _ctrlVisible = true;
   Timer? _hideTimer;
   bool _locked = false;
-  bool _videoFill = false;
+  // Video is always "fit to screen" (BoxFit.contain); the fill/fit toggle
+  // was removed.
+  static const bool _videoFill = false;
   bool _showChannelGuide = false;
+
+  /// Android TV: lean, remote-first full-screen UI (see _onMaxKey).
+  static bool get _tv => PlatformUtils.isTV;
 
   // Gesture
   bool _isDragging = false;
@@ -74,13 +80,21 @@ class _LiveInlinePlayerState extends ConsumerState<LiveInlinePlayer> {
   // the player (channel up/down, guide) instead of invisible buttons.
   final FocusNode _maxRootFocus = FocusNode(debugLabel: 'liveMaxRoot');
   final FocusNode _maxPlayFocus = FocusNode(debugLabel: 'liveMaxPlay');
+  // TV info bar buttons (top-left minimize, top-right favourite).
+  final FocusNode _maxMinimizeFocus = FocusNode(debugLabel: 'liveMaxMin');
+  final FocusNode _maxFavFocus = FocusNode(debugLabel: 'liveMaxFav');
+
+  /// Where remote focus goes when the full-screen player opens: on TV the
+  /// player itself (so OK opens the guide and Left/Right zap), elsewhere
+  /// the play/pause button.
+  FocusNode get _maxEntryFocus => _tv ? _maxRootFocus : _maxPlayFocus;
 
   @override
   void initState() {
     super.initState();
     widget.playPauseFocusNode?.addListener(_onMiniPlayFocus);
     _resetHideTimer();
-    if (widget.isMaximized) _focusAfterFrame(_maxPlayFocus);
+    if (widget.isMaximized) _focusAfterFrame(_maxEntryFocus);
   }
 
   @override
@@ -99,7 +113,7 @@ class _LiveInlinePlayerState extends ConsumerState<LiveInlinePlayer> {
       // Move remote focus into the new layout — the previously focused
       // button no longer exists.
       _focusAfterFrame(
-        widget.isMaximized ? _maxPlayFocus : widget.watchNowFocusNode,
+        widget.isMaximized ? _maxEntryFocus : widget.watchNowFocusNode,
       );
     }
   }
@@ -111,6 +125,8 @@ class _LiveInlinePlayerState extends ConsumerState<LiveInlinePlayer> {
     _channelSwitchTimer?.cancel();
     _maxRootFocus.dispose();
     _maxPlayFocus.dispose();
+    _maxMinimizeFocus.dispose();
+    _maxFavFocus.dispose();
     super.dispose();
   }
 
@@ -131,7 +147,7 @@ class _LiveInlinePlayerState extends ConsumerState<LiveInlinePlayer> {
   void _resetHideTimer() {
     _hideTimer?.cancel();
     if (!_ctrlVisible && mounted) setState(() => _ctrlVisible = true);
-    _hideTimer = Timer(const Duration(seconds: 4), () {
+    _hideTimer = Timer(Duration(seconds: _tv ? 6 : 4), () {
       if (!mounted || _locked) return;
       if (!widget.isMaximized &&
           (widget.playPauseFocusNode?.hasFocus ?? false)) {
@@ -153,7 +169,20 @@ class _LiveInlinePlayerState extends ConsumerState<LiveInlinePlayer> {
 
   void _showControls({bool focusPlay = false}) {
     _resetHideTimer();
-    if (focusPlay) _focusAfterFrame(_maxPlayFocus);
+    if (focusPlay) _focusAfterFrame(_tv ? _maxMinimizeFocus : _maxPlayFocus);
+  }
+
+  void _openGuide() {
+    _hideTimer?.cancel();
+    setState(() {
+      _showChannelGuide = true;
+      _ctrlVisible = false;
+    });
+  }
+
+  void _closeGuide() {
+    setState(() => _showChannelGuide = false);
+    _maxRootFocus.requestFocus();
   }
 
   void _toggleControls() {
@@ -180,21 +209,22 @@ class _LiveInlinePlayerState extends ConsumerState<LiveInlinePlayer> {
       k == LogicalKeyboardKey.arrowRight;
 
   /// Maximized-player key handling (TV remote / keyboard).
-  ///  OSD hidden : Up/Down = channel −/+, Left = channel guide,
-  ///               Right/OK = show controls.
-  ///  OSD shown  : D-pad moves between buttons, OK activates.
-  ///  Always     : CH+/CH−/PgUp/PgDn zap, Play/Pause media key, G = guide,
-  ///               Back/Esc = minimize.
+  ///
+  ///  Focus on the player (normal state):
+  ///    Left / Right  → previous / next channel
+  ///    OK            → TV Guide (TV) · show controls (touch/desktop)
+  ///    Up / Down     → show the info bar / controls
+  ///  Focus on an info-bar button (TV): Left/Right move between Minimize and
+  ///    Favourite, Up/Down return to the player, OK activates.
+  ///  Always: CH+/CH−/PgUp/PgDn zap, Play/Pause media key, G = guide,
+  ///    Back/Esc = minimize to the Live TV screen (never straight to Home).
   KeyEventResult _onMaxKey(FocusNode node, KeyEvent event) {
     if (event is KeyUpEvent) return KeyEventResult.ignored;
     final k = event.logicalKey;
     final isDown = event is KeyDownEvent;
 
     if (k == LogicalKeyboardKey.keyG) {
-      if (isDown) {
-        setState(() => _showChannelGuide = !_showChannelGuide);
-        if (!_showChannelGuide) _maxRootFocus.requestFocus();
-      }
+      if (isDown) _showChannelGuide ? _closeGuide() : _openGuide();
       return KeyEventResult.handled;
     }
     if (_showChannelGuide) return KeyEventResult.ignored;
@@ -231,32 +261,48 @@ class _LiveInlinePlayerState extends ConsumerState<LiveInlinePlayer> {
       return KeyEventResult.ignored;
     }
 
-    if (!_ctrlVisible) {
-      if (k == LogicalKeyboardKey.arrowUp) {
-        if (isDown) _switchChannel(-1);
+    final onPlayer = node.hasPrimaryFocus || !_ctrlVisible;
+    if (onPlayer) {
+      if (k == LogicalKeyboardKey.arrowLeft ||
+          k == LogicalKeyboardKey.arrowRight) {
+        if (isDown) _switchChannel(k == LogicalKeyboardKey.arrowLeft ? -1 : 1);
         return KeyEventResult.handled;
       }
-      if (k == LogicalKeyboardKey.arrowDown) {
-        if (isDown) _switchChannel(1);
+      if (_isOk(k)) {
+        if (isDown) _tv ? _openGuide() : _showControls(focusPlay: true);
         return KeyEventResult.handled;
       }
-      if (k == LogicalKeyboardKey.arrowLeft) {
-        if (isDown) setState(() => _showChannelGuide = true);
-        return KeyEventResult.handled;
-      }
-      if (k == LogicalKeyboardKey.arrowRight || _isOk(k)) {
+      if (k == LogicalKeyboardKey.arrowUp ||
+          k == LogicalKeyboardKey.arrowDown) {
         if (isDown) _showControls(focusPlay: true);
         return KeyEventResult.handled;
       }
       return KeyEventResult.ignored;
     }
 
-    // OSD visible: keep it alive while the user is navigating.
+    // Focus is on a visible control: keep the overlay alive while navigating.
     _resetHideTimer();
-    // Focus is parked on the root (e.g. OSD was shown by a tap) → jump into
-    // the controls instead of letting geometric traversal guess.
-    if (node.hasPrimaryFocus && (_isArrow(k) || _isOk(k))) {
-      if (isDown) _maxPlayFocus.requestFocus();
+    if (_tv &&
+        (k == LogicalKeyboardKey.arrowLeft ||
+            k == LogicalKeyboardKey.arrowRight)) {
+      // Info bar has exactly two buttons: Minimize (left) ↔ Favourite.
+      if (isDown) {
+        final target = k == LogicalKeyboardKey.arrowLeft
+            ? _maxMinimizeFocus
+            : _maxFavFocus;
+        if (target.context != null) target.requestFocus();
+      }
+      return KeyEventResult.handled;
+    }
+    if (_tv &&
+        (k == LogicalKeyboardKey.arrowUp ||
+            k == LogicalKeyboardKey.arrowDown)) {
+      // Leave the info bar → back to the player.
+      if (isDown) {
+        _maxRootFocus.requestFocus();
+        _hideTimer?.cancel();
+        _hideControls();
+      }
       return KeyEventResult.handled;
     }
     // Contain D-pad traversal inside the full-screen player: an unhandled
@@ -296,9 +342,27 @@ class _LiveInlinePlayerState extends ConsumerState<LiveInlinePlayer> {
         _switchCurrentIndex = newIdx;
         _switchTotalChannels = streams.length;
       });
-      _channelSwitchTimer = Timer(const Duration(seconds: 2), () {
-        if (mounted) setState(() => _switchingChannel = null);
-      });
+      // Keep the banner until the new stream is actually playing (the
+      // picture is black while it connects) — min 2 s, max 8 s.
+      final shownAt = DateTime.now();
+      _channelSwitchTimer = Timer.periodic(
+        const Duration(milliseconds: 400),
+        (t) {
+          if (!mounted) {
+            t.cancel();
+            return;
+          }
+          final elapsed = DateTime.now().difference(shownAt);
+          final ps = ref.read(livePlayerProvider);
+          final started = ps.isPlaying && !ps.isBuffering;
+          if ((elapsed >= const Duration(seconds: 2) && started) ||
+              elapsed >= const Duration(seconds: 8) ||
+              ps.error.isNotEmpty) {
+            t.cancel();
+            setState(() => _switchingChannel = null);
+          }
+        },
+      );
     }
   }
 
@@ -364,8 +428,9 @@ class _LiveInlinePlayerState extends ConsumerState<LiveInlinePlayer> {
     final epg = channel != null
         ? (epgCache[channel.streamId] ?? [])
         : <EpgListing>[];
-    final current = epg.isNotEmpty ? epg.first : null;
-    final next = epg.length > 1 ? epg[1] : null;
+    // By the clock — never "the first listing" (which was days old).
+    final current = epg.currentAt();
+    final next = epg.nextAt();
 
     return widget.isMaximized
         ? _buildMaximized(context, ps, channel, current, next, ctrl)
@@ -481,6 +546,8 @@ class _LiveInlinePlayerState extends ConsumerState<LiveInlinePlayer> {
                 onLeft: () => widget.categoryEntryFocus?.call()?.requestFocus(),
                 onRight: () => widget.watchNowFocusNode?.requestFocus(),
               ),
+              // TV: volume belongs to the remote's volume keys.
+              if (!_tv) ...[
               const SizedBox(width: 4),
               Icon(
                 ps.volume > 0.5
@@ -518,6 +585,7 @@ class _LiveInlinePlayerState extends ConsumerState<LiveInlinePlayer> {
                 ),
                 ),
               ),
+              ],
               const Spacer(),
               _LiveBadge(),
             ],
@@ -553,12 +621,7 @@ class _LiveInlinePlayerState extends ConsumerState<LiveInlinePlayer> {
                       ps: ps,
                       videoFill: _videoFill,
                       ctrlVisible: _ctrlVisible,
-                      onTap: _showChannelGuide
-                          ? () {
-                              setState(() => _showChannelGuide = false);
-                              _maxRootFocus.requestFocus();
-                            }
-                          : _toggleControls,
+                      onTap: _showChannelGuide ? _closeGuide : _toggleControls,
                       onDoubleTap: _showChannelGuide ? null : _onDoubleTap,
                       onDragStart: _onDragStart,
                       onDragUpdate: _onDragUpdate,
@@ -593,7 +656,27 @@ class _LiveInlinePlayerState extends ConsumerState<LiveInlinePlayer> {
                   excluding: !_ctrlVisible,
                   child: IgnorePointer(
                   ignoring: !_ctrlVisible,
-                  child: _MaximizedControls(
+                  child: _tv
+                      ? _TvInfoBar(
+                          channel: channel,
+                          ps: ps,
+                          current: current,
+                          next: next,
+                          isFavorite: ref
+                              .watch(liveFavoritesNotifierProvider)
+                              .contains(channel?.streamId ?? ''),
+                          minimizeFocus: _maxMinimizeFocus,
+                          favoriteFocus: _maxFavFocus,
+                          onMinimize: widget.onMinimize,
+                          onToggleFav: channel != null
+                              ? () => ref
+                                    .read(
+                                      liveFavoritesNotifierProvider.notifier,
+                                    )
+                                    .toggle(channel.streamId)
+                              : null,
+                        )
+                      : _MaximizedControls(
                     playFocusNode: _maxPlayFocus,
                     channel: channel,
                     ps: ps,
@@ -607,7 +690,6 @@ class _LiveInlinePlayerState extends ConsumerState<LiveInlinePlayer> {
                         ref.read(livePlayerProvider.notifier).togglePlayPause(),
                     onVolumeChange: (v) =>
                         ref.read(livePlayerProvider.notifier).setVolume(v),
-                    onToggleFit: () => setState(() => _videoFill = !_videoFill),
                     onToggleFav: channel != null
                         ? () => ref
                               .read(liveFavoritesNotifierProvider.notifier)
@@ -685,10 +767,7 @@ class _LiveInlinePlayerState extends ConsumerState<LiveInlinePlayer> {
                     setState(() => _showChannelGuide = false);
                     widget.onMinimize();
                   },
-                  onClose: () {
-                    setState(() => _showChannelGuide = false);
-                    _maxRootFocus.requestFocus();
-                  },
+                  onClose: _closeGuide,
                 ),
               ),
           ],
@@ -841,7 +920,6 @@ class _MaximizedControls extends StatelessWidget {
   final VoidCallback onLock;
   final VoidCallback onTogglePlay;
   final ValueChanged<double> onVolumeChange;
-  final VoidCallback onToggleFit;
   final VoidCallback? onToggleFav;
   final VoidCallback onPrevChannel;
   final VoidCallback onNextChannel;
@@ -857,7 +935,6 @@ class _MaximizedControls extends StatelessWidget {
     required this.onLock,
     required this.onTogglePlay,
     required this.onVolumeChange,
-    required this.onToggleFit,
     required this.onToggleFav,
     required this.onPrevChannel,
     required this.onNextChannel,
@@ -1045,17 +1122,7 @@ class _MaximizedControls extends StatelessWidget {
                       ),
                     ),
                   ),
-                  const SizedBox(width: 8),
-                  TvIconButton(
-                    icon: isVideoFill
-                        ? Icons.fullscreen_exit_rounded
-                        : Icons.fullscreen_rounded,
-                    color: Colors.white,
-                    size: 24,
-                    circle: true,
-                    tooltip: isVideoFill ? 'Fit video' : 'Fill screen',
-                    onTap: onToggleFit,
-                  ),
+
                 ],
               ),
             ),
@@ -1828,6 +1895,7 @@ class _ChannelSwitchOverlay extends StatelessWidget {
                   borderRadius: BorderRadius.circular(8),
                   child: CachedNetworkImage(
                     imageUrl: channel.streamIcon!,
+                    cacheManager: AppCacheManager.instance,
                     width: 80,
                     height: 54,
                     memCacheWidth: 160,
@@ -1891,6 +1959,173 @@ class _ChannelSwitchOverlay extends StatelessWidget {
           ),
         ),
       ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// TV INFO BAR — the only overlay on Android TV in full screen.
+// Top-left: Minimize · title / LIVE / now & next · top-right: Favourite.
+// No play/pause, prev/next, guide, volume or fit buttons: the remote has
+// dedicated keys (◀ ▶ channels, OK guide, volume keys).
+// ─────────────────────────────────────────────────────────────────────────────
+class _TvInfoBar extends StatelessWidget {
+  final LiveStream? channel;
+  final LivePlayerState ps;
+  final EpgListing? current;
+  final EpgListing? next;
+  final bool isFavorite;
+  final FocusNode minimizeFocus;
+  final FocusNode favoriteFocus;
+  final VoidCallback onMinimize;
+  final VoidCallback? onToggleFav;
+
+  const _TvInfoBar({
+    required this.channel,
+    required this.ps,
+    required this.current,
+    required this.next,
+    required this.isFavorite,
+    required this.minimizeFocus,
+    required this.favoriteFocus,
+    required this.onMinimize,
+    required this.onToggleFav,
+  });
+
+  static String _hm(DateTime t) => DateFormat('HH:mm').format(t);
+
+  @override
+  Widget build(BuildContext context) {
+    final cur = current;
+    final nxt = next;
+    return Stack(
+      children: [
+        // Top gradient + bar
+        Positioned(
+          top: 0,
+          left: 0,
+          right: 0,
+          child: DecoratedBox(
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topCenter,
+                end: Alignment.bottomCenter,
+                colors: [
+                  Colors.black.withValues(alpha: 0.85),
+                  Colors.transparent,
+                ],
+              ),
+            ),
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(16, 14, 16, 36),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  TvIconButton(
+                    focusNode: minimizeFocus,
+                    icon: Icons.fullscreen_exit_rounded,
+                    color: Colors.white,
+                    size: 26,
+                    circle: true,
+                    tooltip: 'Minimize',
+                    onTap: onMinimize,
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Row(
+                          children: [
+                            Flexible(
+                              child: Text(
+                                channel?.name ?? '',
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 17,
+                                  fontWeight: FontWeight.w700,
+                                ),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            _LiveBadge(),
+                            if (ps.quality.isNotEmpty) ...[
+                              const SizedBox(width: 6),
+                              _QualityBadge(ps.quality),
+                            ],
+                          ],
+                        ),
+                        const SizedBox(height: 4),
+                        if (cur != null)
+                          Text(
+                            'Now  ${_hm(cur.startTime)}–${_hm(cur.endTime)}  '
+                            '${cur.decodedTitle}',
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 13,
+                            ),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          )
+                        else
+                          const Text(
+                            'No programme information',
+                            style: TextStyle(
+                              color: Colors.white60,
+                              fontSize: 13,
+                            ),
+                          ),
+                        if (nxt != null)
+                          Text(
+                            'Next  ${_hm(nxt.startTime)}  ${nxt.decodedTitle}',
+                            style: const TextStyle(
+                              color: Colors.white60,
+                              fontSize: 12,
+                            ),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  if (onToggleFav != null)
+                    TvIconButton(
+                      focusNode: favoriteFocus,
+                      icon: isFavorite ? Icons.favorite : Icons.favorite_border,
+                      color: isFavorite ? AppTheme.error : Colors.white,
+                      size: 24,
+                      circle: true,
+                      tooltip: isFavorite
+                          ? 'Remove from Favorites'
+                          : 'Add to Favorites',
+                      onTap: onToggleFav,
+                    ),
+                ],
+              ),
+            ),
+          ),
+        ),
+        // Remote hint
+        Positioned(
+          left: 20,
+          bottom: 18,
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+            decoration: BoxDecoration(
+              color: Colors.black.withValues(alpha: 0.55),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: const Text(
+              '◀ ▶  Change channel     OK  TV Guide     BACK  Minimize',
+              style: TextStyle(color: Colors.white70, fontSize: 11),
+            ),
+          ),
+        ),
+      ],
     );
   }
 }

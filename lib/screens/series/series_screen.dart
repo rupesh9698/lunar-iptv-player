@@ -277,6 +277,14 @@ class _SeriesSearchButtonState extends ConsumerState<_SeriesSearchButton> {
           style: const TextStyle(color: AppTheme.textPrimary, fontSize: 13),
           decoration: InputDecoration(
             hintText: 'Search series...',
+            prefixIconConstraints: const BoxConstraints(
+              minWidth: 32,
+              minHeight: 32,
+            ),
+            suffixIconConstraints: const BoxConstraints(
+              minWidth: 32,
+              minHeight: 32,
+            ),
             prefixIcon: const Icon(
               Icons.search,
               size: 16,
@@ -416,6 +424,14 @@ class _SeriesCategorySidebarState
             style: const TextStyle(color: AppTheme.textPrimary, fontSize: 13),
             decoration: const InputDecoration(
               hintText: 'Search genres...',
+              prefixIconConstraints: BoxConstraints(
+                minWidth: 32,
+                minHeight: 32,
+              ),
+              suffixIconConstraints: BoxConstraints(
+                minWidth: 32,
+                minHeight: 32,
+              ),
               prefixIcon: Icon(
                 Icons.search,
                 size: 14,

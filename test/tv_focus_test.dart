@@ -243,6 +243,44 @@ void main() {
     expect(below.hasPrimaryFocus, isTrue, reason: 'slider must not trap D-pad');
   });
 
+  // Escape is treated exactly like Android Back by the guard (the test
+  // simulator has no Android Back key mapping).
+  group('TvBackKeyGuard', () {
+    Widget app({required bool screenHandlesBack}) => MaterialApp(
+      builder: (context, child) => TvBackKeyGuard(child: child!),
+      home: Focus(
+        autofocus: true,
+        onKeyEvent: (_, e) =>
+            screenHandlesBack &&
+                e is KeyDownEvent &&
+                e.logicalKey == LogicalKeyboardKey.escape
+            ? KeyEventResult.handled
+            : KeyEventResult.ignored,
+        child: const SizedBox.expand(),
+      ),
+    );
+
+    testWidgets('Back handled by a screen: its key-up is swallowed too', (
+      tester,
+    ) async {
+      TvKeyTracker.install();
+      await tester.pumpWidget(app(screenHandlesBack: true));
+      await tester.pump();
+      expect(await tester.sendKeyDownEvent(LogicalKeyboardKey.escape), isTrue);
+      // Without the guard this key-up reached Android and fired a SECOND
+      // (system) back — e.g. minimise the player AND leave Live TV.
+      expect(await tester.sendKeyUpEvent(LogicalKeyboardKey.escape), isTrue);
+    });
+
+    testWidgets('unhandled Back passes through to the system', (tester) async {
+      TvKeyTracker.install();
+      await tester.pumpWidget(app(screenHandlesBack: false));
+      await tester.pump();
+      expect(await tester.sendKeyDownEvent(LogicalKeyboardKey.escape), isFalse);
+      expect(await tester.sendKeyUpEvent(LogicalKeyboardKey.escape), isFalse);
+    });
+  });
+
   testWidgets('AdaptiveViewport lays tiny windows out at the minimum canvas', (
     tester,
   ) async {

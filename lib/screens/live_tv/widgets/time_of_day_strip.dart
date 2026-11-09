@@ -1,5 +1,6 @@
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
+import '../../../services/app_cache_manager.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
@@ -174,6 +175,7 @@ class _TimeOfDayChipState extends ConsumerState<_TimeOfDayChip>
                       child: widget.channel.streamIcon?.isNotEmpty == true
                           ? CachedNetworkImage(
                               imageUrl: widget.channel.streamIcon!,
+                              cacheManager: AppCacheManager.instance,
                               fit: BoxFit.contain,
                               memCacheWidth: 80,
                               placeholder: (_, _) => const Icon(

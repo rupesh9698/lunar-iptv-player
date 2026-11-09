@@ -32,6 +32,15 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _triggerBackgroundRefreshIfStale();
+      // Decode the movie / series libraries in the background while the
+      // user is on Home, so those screens open instantly.
+      Future.delayed(const Duration(milliseconds: 1500), () {
+        if (!mounted) return;
+        final flags = CacheService.instance.getContentFlags();
+        CacheService.instance
+            .prewarm(vod: flags.hasVod, series: flags.hasSeries)
+            .ignore();
+      });
     });
   }
 
