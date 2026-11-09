@@ -244,6 +244,8 @@ class _SidebarItemState extends State<_SidebarItem> with TvFocusMixin {
   @override
   Widget build(BuildContext context) {
     return TvFocusable(
+      // Give remote users a visible starting point on the selected section.
+      autofocus: widget.isSelected,
       onActivate: widget.onTap,
       onFocusChange: setTvFocused,
       onArrowKey: (key) {
@@ -1148,7 +1150,9 @@ class _ParentalSectionState extends ConsumerState<_ParentalSection> {
                 style: TextStyle(color: AppTheme.textSecondary, fontSize: 13),
               ),
               const SizedBox(height: 16),
-              TextField(
+              TvTextFieldNav(
+                controller: ctrl,
+                child: TextField(
                 controller: ctrl,
                 keyboardType: TextInputType.number,
                 maxLength: 4,
@@ -1165,6 +1169,7 @@ class _ParentalSectionState extends ConsumerState<_ParentalSection> {
                   hintText: '••••',
                 ),
                 onSubmitted: (_) => Navigator.pop(ctx, ctrl.text == pin),
+              ),
               ),
             ],
           ),
@@ -1220,6 +1225,7 @@ class _ParentalSectionState extends ConsumerState<_ParentalSection> {
         content: const Text('This will disable parental control.'),
         actions: [
           TextButton(
+            autofocus: true,
             onPressed: () => Navigator.pop(ctx, false),
             child: const Text('Cancel'),
           ),
@@ -1271,12 +1277,17 @@ class _PinDialogState extends State<_PinDialog> {
             style: TextStyle(color: AppTheme.textSecondary, fontSize: 13),
           ),
           const SizedBox(height: 16),
-          TextField(
+          TvTextFieldNav(
+            controller: _ctrl,
+            child: TextField(
             controller: _ctrl,
             keyboardType: TextInputType.number,
             maxLength: 4,
             obscureText: true,
             autofocus: true,
+            onSubmitted: (_) {
+              if (_ctrl.text.length == 4) Navigator.pop(context, _ctrl.text);
+            },
             textAlign: TextAlign.center,
             style: const TextStyle(
               fontSize: 24,
@@ -1287,6 +1298,7 @@ class _PinDialogState extends State<_PinDialog> {
               counterText: '',
               hintText: '••••',
             ),
+          ),
           ),
         ],
       ),
@@ -1604,6 +1616,7 @@ class _CacheSection extends ConsumerWidget {
         ),
         actions: [
           TextButton(
+            autofocus: true,
             onPressed: () => Navigator.pop(d, false),
             child: const Text('Cancel'),
           ),
@@ -1802,11 +1815,23 @@ class _FocusableSettTile extends StatefulWidget {
 }
 
 class _FocusableSettTileState extends State<_FocusableSettTile> {
+  /// Rows whose only control is a trailing Switch: OK/Select on the row
+  /// toggles the switch (the Switch itself isn't a separate D-pad stop).
+  VoidCallback? get _activate {
+    if (widget.onTap != null) return widget.onTap;
+    final t = widget.trailing;
+    if (t is Switch && t.onChanged != null) {
+      return () => t.onChanged!(!t.value);
+    }
+    return null;
+  }
+
   @override
   Widget build(BuildContext context) {
     return TvFocusable(
-      onActivate: widget.onTap,
-      autoScroll: false, // settings uses its own scroll view
+      onActivate: _activate,
+      // Bring rows below the fold into view when reached by remote.
+      scrollAlignment: 0.4,
       builder: (focused, _) => Column(
         children: [
           AnimatedContainer(

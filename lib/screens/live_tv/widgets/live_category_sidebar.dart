@@ -59,6 +59,29 @@ class _LiveCategorySidebarState extends ConsumerState<LiveCategorySidebar> {
     return _itemFocusNodes[index];
   }
 
+  /// Focuses list item [index]. When the item hasn't been built yet (it is
+  /// outside the ListView's cache extent — e.g. the D-pad is held down),
+  /// nudges the list in the direction of travel and retries next frame
+  /// instead of silently dropping the key press.
+  void _focusItem(int index, [int attempt = 0]) {
+    if (!mounted) return;
+    final node = _nodeFor(index);
+    if (node.context != null) {
+      node.requestFocus();
+      return;
+    }
+    if (attempt > 10 || !_scrollCtrl.hasClients) return;
+    final current = _itemFocusNodes.indexWhere((n) => n.hasFocus);
+    final down = current < 0 || index > current;
+    final pos = _scrollCtrl.position;
+    _scrollCtrl.jumpTo(
+      (pos.pixels + (down ? 120.0 : -120.0)).clamp(0.0, pos.maxScrollExtent),
+    );
+    WidgetsBinding.instance.addPostFrameCallback(
+      (_) => _focusItem(index, attempt + 1),
+    );
+  }
+
   @override
   void dispose() {
     _scrollCtrl.dispose();
@@ -158,9 +181,15 @@ class _LiveCategorySidebarState extends ConsumerState<LiveCategorySidebar> {
                       // ── All Channels ──────────────────────────────────
                       _SidebarTile(
                         focusNode: _nodeFor(0),
-                        onUpAtTop: () =>
-                            widget.searchFocusNode?.requestFocus(),
-                        onDownNext: () => _nodeFor(1).requestFocus(),
+                        // Up → "time of day" chips above (if any), else the
+                        // category search button.
+                        onUpAtTop: () {
+                          final moved = FocusManager.instance.primaryFocus
+                                  ?.focusInDirection(TraversalDirection.up) ??
+                              false;
+                          if (!moved) widget.searchFocusNode?.requestFocus();
+                        },
+                        onDownNext: () => _focusItem(1),
                         onRightToChannels: () =>
                             widget.channelListEntryFocus?.call()
                                 ?.requestFocus(),
@@ -183,8 +212,8 @@ class _LiveCategorySidebarState extends ConsumerState<LiveCategorySidebar> {
                       // ── Favorites ─────────────────────────────────────
                       _SidebarTile(
                         focusNode: _nodeFor(1),
-                        onUpAtTop: () => _nodeFor(0).requestFocus(),
-                        onDownNext: () => _nodeFor(2).requestFocus(),
+                        onUpAtTop: () => _focusItem(0),
+                        onDownNext: () => _focusItem(2),
                         onRightToChannels: () =>
                             widget.channelListEntryFocus?.call()
                                 ?.requestFocus(),
@@ -206,14 +235,17 @@ class _LiveCategorySidebarState extends ConsumerState<LiveCategorySidebar> {
                       // ── Recently Viewed ───────────────────────────────
                       _SidebarTile(
                         focusNode: _nodeFor(2),
-                        onUpAtTop: () => _nodeFor(1).requestFocus(),
-                        onDownNext: () => _nodeFor(3).requestFocus(),
+                        onUpAtTop: () => _focusItem(1),
+                        onDownNext: () => _focusItem(3),
                         onRightToChannels: () =>
                             widget.channelListEntryFocus?.call()
                                 ?.requestFocus(),
                         icon: Icons.history,
                         iconColor: AppTheme.primary,
                         label: 'Recently Viewed',
+                        onLongPress: recentIds.isEmpty
+                            ? null
+                            : () => _confirmClearRecent(context),
                         count: recentIds.length,
                         isSelected: filter == LiveFilter.recent,
                         onTap: () {
@@ -334,13 +366,9 @@ class _LiveCategorySidebarState extends ConsumerState<LiveCategorySidebar> {
                           child:
                           _CategoryTile(
                             focusNode: _nodeFor(globalIdx),
-                            onUpAtTop: () => (i == 0
-                                ? _nodeFor(2) // Recently Viewed
-                                : _nodeFor(globalIdx - 1))
-                                .requestFocus(),
+                            onUpAtTop: () => _focusItem(i == 0 ? 2 : globalIdx - 1),
                             onDownNext: i < filtered.length - 1
-                                ? () => _nodeFor(globalIdx + 1)
-                                .requestFocus()
+                                ? () => _focusItem(globalIdx + 1)
                                 : null, // last item: Down = no action
                             onRightToChannels: () => widget
                                 .channelListEntryFocus
@@ -422,7 +450,13 @@ class _LiveCategorySidebarState extends ConsumerState<LiveCategorySidebar> {
             }),
             onArrowKey: (key) {
               if (key == LogicalKeyboardKey.arrowDown) {
-                _nodeFor(0).requestFocus(); // first item = All Channels
+                if (_showSearch &&
+                    FocusManager.instance.primaryFocus
+                            ?.focusInDirection(TraversalDirection.down) ==
+                        true) {
+                  return KeyEventResult.handled;
+                }
+                _focusItem(0); // first item = All Channels
                 return KeyEventResult.handled;
               }
               if (key == LogicalKeyboardKey.arrowRight) {
@@ -463,7 +497,11 @@ class _LiveCategorySidebarState extends ConsumerState<LiveCategorySidebar> {
       padding: const EdgeInsets.fromLTRB(8, 8, 8, 4),
       child: SizedBox(
         height: 36,
-        child: TextField(
+        child: TvTextFieldNav(
+          controller: _searchCtrl,
+          onUp: () => widget.searchFocusNode?.requestFocus(),
+          onDown: () => _focusItem(0),
+          child: TextField(
           controller: _searchCtrl,
           autofocus: true,
           onChanged: (v) => setState(() => _query = v),
@@ -476,8 +514,35 @@ class _LiveCategorySidebarState extends ConsumerState<LiveCategorySidebar> {
             isDense: true,
           ),
         ),
+        ),
       ),
     );
+  }
+
+  Future<void> _confirmClearRecent(BuildContext context) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Clear Recently Viewed?'),
+        content: const Text('This removes all channels from the list.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            autofocus: true,
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Clear'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
+    ref.read(recentlyViewedLiveProvider.notifier).clear();
+    if (ref.read(liveFilterProvider) == LiveFilter.recent) {
+      ref.read(liveFilterProvider.notifier).state = LiveFilter.all;
+    }
   }
 
   void _scrollToCategory(String categoryId) {
@@ -512,6 +577,7 @@ class _LiveCategorySidebarState extends ConsumerState<LiveCategorySidebar> {
         ),
         actions: [
           TextButton(
+            autofocus: true,
             onPressed: () => Navigator.pop(context, false),
             child: const Text('Cancel'),
           ),
@@ -594,7 +660,9 @@ class _LiveCategorySidebarState extends ConsumerState<LiveCategorySidebar> {
                 style: TextStyle(color: AppTheme.textSecondary, fontSize: 13),
               ),
               const SizedBox(height: 16),
-              TextField(
+              TvTextFieldNav(
+                controller: controller,
+                child: TextField(
                 controller: controller,
                 keyboardType: TextInputType.number,
                 maxLength: 4,
@@ -611,6 +679,7 @@ class _LiveCategorySidebarState extends ConsumerState<LiveCategorySidebar> {
                   hintText: '••••',
                 ),
                 onSubmitted: (_) => Navigator.pop(ctx, controller.text == pin),
+              ),
               ),
             ],
           ),
@@ -672,7 +741,10 @@ class _SidebarTile extends StatefulWidget {
     this.onUpAtTop,
     this.onDownNext,
     this.onRightToChannels,
+    this.onLongPress,
   });
+
+  final VoidCallback? onLongPress;
 
   @override
   State<_SidebarTile> createState() => _SidebarTileState();
@@ -684,6 +756,7 @@ class _SidebarTileState extends State<_SidebarTile> with TvFocusMixin {
     return TvFocusable(
       focusNode: widget.focusNode,
       onActivate: widget.onTap,
+      onLongPress: widget.onLongPress,
       onFocusChange: setTvFocused,
       onArrowKey: (key) {
         if (key == LogicalKeyboardKey.arrowUp) {

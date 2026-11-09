@@ -1,6 +1,5 @@
 import 'dart:isolate';
 
-import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:lunar_iptv_player/services/behavior_service.dart';
 import 'package:lunar_iptv_player/services/cache_service.dart';
@@ -142,13 +141,13 @@ final sortedSeriesListProvider = FutureProvider<List<Series>>((ref) async {
     }
   }
 
-  final sortInput = (filter == SeriesFilter.all && query.isEmpty &&
-      allList.length > 20000)
+  final sortInput =
+      (filter == SeriesFilter.all && query.isEmpty && allList.length > 20000)
       ? allList.sublist(0, 20000)
       : allList;
 
   return Isolate.run(
-        () => _seriesSortIsolate(
+    () => _seriesSortIsolate(
       _SeriesSortMsg(
         list: sortInput,
         filterIndex: filter.index,

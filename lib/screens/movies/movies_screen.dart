@@ -11,6 +11,7 @@ import 'package:lunar_iptv_player/services/storage_service.dart';
 import 'package:lunar_iptv_player/widgets/for_you_section.dart';
 
 import '../../core/theme/app_theme.dart';
+import '../../core/utils/responsive.dart';
 import '../../core/utils/focus_utils.dart';
 import '../../models/xtream_models.dart';
 import '../../providers/app_providers.dart';
@@ -103,6 +104,12 @@ class _MoviesScreenState extends ConsumerState<MoviesScreen> {
       canPop: false,
       onPopInvokedWithResult: (didPop, _) {
         if (didPop) return;
+        // Back closes the detail panel first (focus returns to the poster
+        // via the focus scope's history), then leaves the screen.
+        if (ref.read(selectedVodStreamProvider) != null) {
+          ref.read(selectedVodStreamProvider.notifier).state = null;
+          return;
+        }
         context.go('/home');
       },
       child: Scaffold(
@@ -114,7 +121,15 @@ class _MoviesScreenState extends ConsumerState<MoviesScreen> {
               Expanded(
                 child: Row(
                   children: [
-                    _VodCategorySidebar(width: _sidebarWidth),
+                    _VodCategorySidebar(
+                      width: _sidebarWidth.clamp(
+                        150.0,
+                        (Responsive.of(context).width * 0.26).clamp(
+                          150.0,
+                          _sidebarMax,
+                        ),
+                      ),
+                    ),
                     _ResizableDivider(
                       onDrag: (dx) => setState(() {
                         _sidebarWidth = (_sidebarWidth + dx).clamp(
@@ -291,31 +306,38 @@ class _SearchButtonState extends ConsumerState<_SearchButton> {
       );
     }
     return SizedBox(
-      width: 220,
+      width: Responsive.of(context).widthFrac(0.22, 150, 240),
       height: 36,
-      child: TextField(
+      child: TvTextFieldNav(
         controller: _ctrl,
-        autofocus: true,
-        onChanged: (v) => ref.read(vodSearchQueryProvider.notifier).state = v,
-        onSubmitted: (_) => setState(() => _open = false),
-        style: const TextStyle(color: AppTheme.textPrimary, fontSize: 13),
-        decoration: InputDecoration(
-          hintText: 'Search movies...',
-          prefixIcon: const Icon(
-            Icons.search,
-            size: 16,
-            color: AppTheme.textMuted,
+        child: TextField(
+          controller: _ctrl,
+          autofocus: true,
+          onChanged: (v) => ref.read(vodSearchQueryProvider.notifier).state = v,
+          onSubmitted: (_) => setState(() => _open = false),
+          style: const TextStyle(color: AppTheme.textPrimary, fontSize: 13),
+          decoration: InputDecoration(
+            hintText: 'Search movies...',
+            prefixIcon: const Icon(
+              Icons.search,
+              size: 16,
+              color: AppTheme.textMuted,
+            ),
+            suffixIcon: IconButton(
+              onPressed: () {
+                _ctrl.clear();
+                ref.read(vodSearchQueryProvider.notifier).state = '';
+                setState(() => _open = false);
+              },
+              icon: const Icon(
+                Icons.close,
+                size: 16,
+                color: AppTheme.textMuted,
+              ),
+            ),
+            contentPadding: const EdgeInsets.symmetric(vertical: 8),
+            isDense: true,
           ),
-          suffixIcon: IconButton(
-            onPressed: () {
-              _ctrl.clear();
-              ref.read(vodSearchQueryProvider.notifier).state = '';
-              setState(() => _open = false);
-            },
-            icon: const Icon(Icons.close, size: 16, color: AppTheme.textMuted),
-          ),
-          contentPadding: const EdgeInsets.symmetric(vertical: 8),
-          isDense: true,
         ),
       ),
     );
@@ -396,16 +418,23 @@ class _VodCategorySidebarState extends ConsumerState<_VodCategorySidebar> {
       padding: const EdgeInsets.fromLTRB(8, 8, 8, 0),
       child: SizedBox(
         height: 36,
-        child: TextField(
+        child: TvTextFieldNav(
           controller: _searchCtrl,
-          autofocus: true,
-          onChanged: (v) => setState(() => _query = v.toLowerCase().trim()),
-          style: const TextStyle(color: AppTheme.textPrimary, fontSize: 13),
-          decoration: const InputDecoration(
-            hintText: 'Search genres...',
-            prefixIcon: Icon(Icons.search, size: 14, color: AppTheme.textMuted),
-            contentPadding: EdgeInsets.symmetric(vertical: 8),
-            isDense: true,
+          child: TextField(
+            controller: _searchCtrl,
+            autofocus: true,
+            onChanged: (v) => setState(() => _query = v.toLowerCase().trim()),
+            style: const TextStyle(color: AppTheme.textPrimary, fontSize: 13),
+            decoration: const InputDecoration(
+              hintText: 'Search genres...',
+              prefixIcon: Icon(
+                Icons.search,
+                size: 14,
+                color: AppTheme.textMuted,
+              ),
+              contentPadding: EdgeInsets.symmetric(vertical: 8),
+              isDense: true,
+            ),
           ),
         ),
       ),
@@ -616,6 +645,12 @@ class _MoviesContentState extends ConsumerState<_MoviesContent> {
 
   @override
   Widget build(BuildContext context) {
+    // Detail panel never takes more than half the content area
+    // (phones / small windows / TV).
+    final maxDetail = (Responsive.of(context).width * 0.40).clamp(
+      220.0,
+      _detailMax,
+    );
     final selected = ref.watch(selectedVodStreamProvider);
 
     return Row(
@@ -631,7 +666,10 @@ class _MoviesContentState extends ConsumerState<_MoviesContent> {
             }),
           ),
           SizedBox(
-            width: _detailWidth,
+            width: _detailWidth.clamp(
+              _detailMin < maxDetail ? _detailMin : maxDetail,
+              maxDetail,
+            ),
             child: MovieDetailPanel(movie: selected),
           ),
         ],
@@ -796,6 +834,10 @@ class _MoviePosterCardState extends ConsumerState<_MoviePosterCard>
     }
     BehaviorService.instance.recordOpen(widget.movie.streamId);
     ref.read(selectedVodStreamProvider.notifier).state = widget.movie;
+    // Remote / keyboard: move focus to the detail panel's Play button.
+    if (FocusManager.instance.highlightMode == FocusHighlightMode.traditional) {
+      TvNav.focusSoon(movieDetailPlayFocus);
+    }
   }
 
   @override
@@ -924,6 +966,7 @@ class _SidebarTileState extends State<_SidebarTile> with TvFocusMixin {
   @override
   Widget build(BuildContext context) {
     return TvFocusable(
+      autofocus: widget.isSelected,
       onActivate: widget.onTap,
       onFocusChange: setTvFocused,
       onArrowKey: (key) {
@@ -1011,6 +1054,7 @@ class _SidebarCategoryItemState extends State<_SidebarCategoryItem>
   @override
   Widget build(BuildContext context) {
     return TvFocusable(
+      autofocus: widget.isSelected,
       onActivate: widget.onTap,
       onFocusChange: setTvFocused,
       onArrowKey: (key) {

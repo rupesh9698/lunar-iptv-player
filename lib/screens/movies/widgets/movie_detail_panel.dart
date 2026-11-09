@@ -15,6 +15,10 @@ import '../../../providers/app_providers.dart';
 import '../../../providers/movies_provider.dart';
 import '../../../widgets/app_network_image.dart';
 
+/// Focus node of the panel's primary "Play" button. The movies grid moves
+/// remote focus here after a poster is selected with OK/Enter.
+final FocusNode movieDetailPlayFocus = FocusNode(debugLabel: 'movieDetailPlay');
+
 class MovieDetailPanel extends ConsumerWidget {
   final VodStream movie;
 
@@ -301,11 +305,12 @@ class MovieDetailPanel extends ConsumerWidget {
                         ),
                       ),
                     ),
-                    GestureDetector(
-                      onTap: () => ref
+                    TvFocusable(
+                      autoScroll: false,
+                      onActivate: () => ref
                           .read(vodFavoritesProvider.notifier)
                           .toggle(movie.streamId),
-                      child: Container(
+                      builder: (focused, _) => Container(
                         padding: const EdgeInsets.symmetric(
                           horizontal: 8,
                           vertical: 4,
@@ -313,6 +318,10 @@ class MovieDetailPanel extends ConsumerWidget {
                         decoration: BoxDecoration(
                           color: const Color(0xFF7B61FF),
                           borderRadius: BorderRadius.circular(6),
+                          border: Border.all(
+                            color: focused ? Colors.white : Colors.transparent,
+                            width: 1.5,
+                          ),
                         ),
                         child: const Text(
                           'Add',
@@ -453,86 +462,98 @@ class MovieDetailPanel extends ConsumerWidget {
           children: [
             Expanded(
               child: TvFocusable(
+                focusNode: movieDetailPlayFocus,
                 autoScroll: false,
                 onActivate: service == null
                     ? null
                     : () {
-                  if (vodInfo?.info?.genre != null) {
-                    for (final g
-                    in vodInfo!.info!.genre!.split(',')) {
-                      final trimmed = g.trim();
-                      if (trimmed.isNotEmpty) {
-                        BehaviorService.instance
-                            .recordGenreAccess(trimmed);
-                      }
-                    }
-                  }
-                  BehaviorService.instance
-                      .startWatchTimer(movie.streamId);
-                  ref
-                      .read(recentlyViewedVodProvider.notifier)
-                      .add(movie.streamId);
-                  final url =
-                  service!.getVodUrl(movie.streamId, ext);
-                  context.push('/player', extra: {
-                    'title': movie.name,
-                    'url': url,
-                    'imageUrl': movie.streamIcon,
-                    'type': 'movie',
-                    'id': movie.streamId,
-                  });
-                },
+                        if (vodInfo?.info?.genre != null) {
+                          for (final g in vodInfo!.info!.genre!.split(',')) {
+                            final trimmed = g.trim();
+                            if (trimmed.isNotEmpty) {
+                              BehaviorService.instance.recordGenreAccess(
+                                trimmed,
+                              );
+                            }
+                          }
+                        }
+                        BehaviorService.instance.startWatchTimer(
+                          movie.streamId,
+                        );
+                        ref
+                            .read(recentlyViewedVodProvider.notifier)
+                            .add(movie.streamId);
+                        final url = service.getVodUrl(movie.streamId, ext);
+                        context.push(
+                          '/player',
+                          extra: {
+                            'title': movie.name,
+                            'url': url,
+                            'imageUrl': movie.streamIcon,
+                            'type': 'movie',
+                            'id': movie.streamId,
+                          },
+                        );
+                      },
                 builder: (focused, _) => AnimatedContainer(
                   duration: const Duration(milliseconds: 150),
                   decoration: BoxDecoration(
                     borderRadius: BorderRadius.circular(12),
                     border: focused
                         ? Border.all(
-                        color: Colors.white.withValues(alpha: 0.7),
-                        width: 2)
+                            color: Colors.white.withValues(alpha: 0.7),
+                            width: 2,
+                          )
                         : null,
                   ),
                   child: ElevatedButton.icon(
                     onPressed: service == null
                         ? null
                         : () {
-                      if (vodInfo?.info?.genre != null) {
-                        for (final g in
-                        vodInfo!.info!.genre!.split(',')) {
-                          final trimmed = g.trim();
-                          if (trimmed.isNotEmpty) {
-                            BehaviorService.instance
-                                .recordGenreAccess(trimmed);
-                          }
-                        }
-                      }
-                      BehaviorService.instance
-                          .startWatchTimer(movie.streamId);
-                      ref
-                          .read(recentlyViewedVodProvider.notifier)
-                          .add(movie.streamId);
-                      final url =
-                      service!.getVodUrl(movie.streamId, ext);
-                      context.push('/player', extra: {
-                        'title': movie.name,
-                        'url': url,
-                        'imageUrl': movie.streamIcon,
-                        'type': 'movie',
-                        'id': movie.streamId,
-                      });
-                    },
+                            if (vodInfo?.info?.genre != null) {
+                              for (final g in vodInfo!.info!.genre!.split(
+                                ',',
+                              )) {
+                                final trimmed = g.trim();
+                                if (trimmed.isNotEmpty) {
+                                  BehaviorService.instance.recordGenreAccess(
+                                    trimmed,
+                                  );
+                                }
+                              }
+                            }
+                            BehaviorService.instance.startWatchTimer(
+                              movie.streamId,
+                            );
+                            ref
+                                .read(recentlyViewedVodProvider.notifier)
+                                .add(movie.streamId);
+                            final url = service.getVodUrl(movie.streamId, ext);
+                            context.push(
+                              '/player',
+                              extra: {
+                                'title': movie.name,
+                                'url': url,
+                                'imageUrl': movie.streamIcon,
+                                'type': 'movie',
+                                'id': movie.streamId,
+                              },
+                            );
+                          },
                     icon: const Icon(Icons.play_arrow_rounded, size: 22),
-                    label: const Text('Watch Now',
-                        style: TextStyle(
-                            fontSize: 14,
-                            fontWeight: FontWeight.w700)),
+                    label: const Text(
+                      'Watch Now',
+                      style: TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
                     style: ElevatedButton.styleFrom(
                       backgroundColor: focused
                           ? AppTheme.primary.withValues(alpha: 0.85)
                           : AppTheme.primary,
                       foregroundColor: Colors.white,
-                      padding:
-                      const EdgeInsets.symmetric(vertical: 12),
+                      padding: const EdgeInsets.symmetric(vertical: 12),
                       shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(12),
                       ),
@@ -589,8 +610,7 @@ class MovieDetailPanel extends ConsumerWidget {
             autoScroll: false,
             onActivate: () {
               final url = service.getVodUrl(movie.streamId, ext);
-              launchUrl(
-                  Uri.parse(url), mode: LaunchMode.externalApplication);
+              launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
             },
             builder: (focused, _) => AnimatedContainer(
               duration: const Duration(milliseconds: 150),
@@ -599,25 +619,28 @@ class MovieDetailPanel extends ConsumerWidget {
                 borderRadius: BorderRadius.circular(12),
                 border: focused
                     ? Border.all(
-                    color: Colors.white.withValues(alpha: 0.55),
-                    width: 2)
+                        color: Colors.white.withValues(alpha: 0.55),
+                        width: 2,
+                      )
                     : null,
               ),
               child: OutlinedButton.icon(
                 onPressed: () {
                   final url = service.getVodUrl(movie.streamId, ext);
-                  launchUrl(Uri.parse(url),
-                      mode: LaunchMode.externalApplication);
+                  launchUrl(
+                    Uri.parse(url),
+                    mode: LaunchMode.externalApplication,
+                  );
                 },
                 icon: const Icon(Icons.download_outlined, size: 18),
                 label: const Text('Download'),
                 style: OutlinedButton.styleFrom(
-                  foregroundColor:
-                  focused ? AppTheme.success : AppTheme.success,
+                  foregroundColor: focused
+                      ? AppTheme.success
+                      : AppTheme.success,
                   side: BorderSide(
-                      color: focused
-                          ? AppTheme.success
-                          : AppTheme.success),
+                    color: focused ? AppTheme.success : AppTheme.success,
+                  ),
                   padding: const EdgeInsets.symmetric(vertical: 11),
                   shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(12),
@@ -631,31 +654,33 @@ class MovieDetailPanel extends ConsumerWidget {
             vodInfo!.info!.youtubeTrailer!.isNotEmpty)
           TvFocusable(
             autoScroll: false,
-            onActivate: () => launchYouTubeTrailer(
-                context, vodInfo!.info!.youtubeTrailer!),
+            onActivate: () =>
+                launchYouTubeTrailer(context, vodInfo.info!.youtubeTrailer!),
             builder: (focused, _) => AnimatedContainer(
               duration: const Duration(milliseconds: 150),
               decoration: BoxDecoration(
                 borderRadius: BorderRadius.circular(12),
                 border: focused
                     ? Border.all(
-                    color: Colors.white.withValues(alpha: 0.55),
-                    width: 2)
+                        color: Colors.white.withValues(alpha: 0.55),
+                        width: 2,
+                      )
                     : null,
               ),
               child: OutlinedButton.icon(
                 onPressed: () => launchYouTubeTrailer(
-                    context, vodInfo!.info!.youtubeTrailer!),
-                icon:
-                const Icon(Icons.play_circle_outline, size: 18),
+                  context,
+                  vodInfo.info!.youtubeTrailer!,
+                ),
+                icon: const Icon(Icons.play_circle_outline, size: 18),
                 label: const Text('Trailer'),
                 style: OutlinedButton.styleFrom(
-                  foregroundColor:
-                  focused ? AppTheme.primary : AppTheme.textSecondary,
+                  foregroundColor: focused
+                      ? AppTheme.primary
+                      : AppTheme.textSecondary,
                   side: BorderSide(
-                      color: focused
-                          ? AppTheme.primary
-                          : AppTheme.divider),
+                    color: focused ? AppTheme.primary : AppTheme.divider,
+                  ),
                   shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(12),
                   ),
@@ -871,8 +896,9 @@ class _FocusableCloseButtonState extends State<_FocusableCloseButton> {
               : Colors.transparent,
           border: focused
               ? Border.all(
-              color: AppTheme.primary.withValues(alpha: 0.6),
-              width: 2)
+                  color: AppTheme.primary.withValues(alpha: 0.6),
+                  width: 2,
+                )
               : null,
         ),
         child: Icon(

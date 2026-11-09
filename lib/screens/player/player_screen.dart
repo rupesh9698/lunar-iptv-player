@@ -67,6 +67,12 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
   bool _locked = false;
   Timer? _hideTimer;
 
+  // ── TV remote focus ─────────────────────────────────────────────────
+  // While the OSD is hidden, focus is parked on the root so D-pad keys
+  // drive the player (seek / zap / show OSD) instead of invisible buttons.
+  final FocusNode _rootFocus = FocusNode(debugLabel: 'playerRoot');
+  final FocusNode _playFocus = FocusNode(debugLabel: 'playerPlay');
+
   // ── Seek ────────────────────────────────────────────────────────────
   bool _isSeeking = false;
   double _seekVal = 0.0;
@@ -103,6 +109,8 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
   void dispose() {
     _playerDisposed = true;
     _hideTimer?.cancel();
+    _rootFocus.dispose();
+    _playFocus.dispose();
     _reconnectTimer?.cancel();
     // ── Save final position + stop behavior timer ─────────────────────────────
     _positionTimer?.cancel();
@@ -281,10 +289,10 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
     // Open media — VOD: seek to saved position after open completes
     if (!_isLive && widget.startPosition > 3.0) {
       // Listen for first duration event which confirms media is loaded
-      late StreamSubscription<Duration> _durSub;
-      _durSub = _player.stream.duration.listen((dur) async {
+      late StreamSubscription<Duration> durSub;
+      durSub = _player.stream.duration.listen((dur) async {
         if (dur.inSeconds > 0) {
-          _durSub.cancel();
+          durSub.cancel();
           await Future.delayed(const Duration(milliseconds: 300));
           if (mounted && !_playerDisposed) {
             final seekTo = Duration(seconds: widget.startPosition.round());
@@ -292,7 +300,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
           }
         }
       });
-      _subs.add(_durSub);
+      _subs.add(durSub);
     }
 
     await _player.open(Media(widget.url));
@@ -386,16 +394,54 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
     _hideTimer?.cancel();
     if (!_ctrlVisible) setState(() => _ctrlVisible = true);
     _hideTimer = Timer(const Duration(seconds: 4), () {
-      if (mounted && _playing && !_isSeeking) {
-        setState(() => _ctrlVisible = false);
-      }
+      if (mounted && _playing && !_isSeeking) _hideControls();
     });
+  }
+
+  void _hideControls() {
+    setState(() => _ctrlVisible = false);
+    // Only reclaim focus if it is inside the player (never steal it from a
+    // dialog / bottom sheet opened on top, e.g. the audio & subtitle sheet).
+    if (_rootFocus.hasFocus || FocusManager.instance.primaryFocus == null) {
+      _rootFocus.requestFocus();
+    }
+  }
+
+  void _showControls({bool focusPlay = false}) {
+    _resetHideTimer();
+    if (focusPlay) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted && _playFocus.context != null) _playFocus.requestFocus();
+      });
+    }
   }
 
   void _toggleControls() {
     if (_locked) return;
-    setState(() => _ctrlVisible = !_ctrlVisible);
-    if (_ctrlVisible) _resetHideTimer();
+    if (_ctrlVisible) {
+      _hideTimer?.cancel();
+      _hideControls();
+    } else {
+      _resetHideTimer();
+    }
+  }
+
+  void _flashSkip(bool forward) {
+    setState(() {
+      if (forward) {
+        _showSkipRight = true;
+      } else {
+        _showSkipLeft = true;
+      }
+    });
+    Future.delayed(const Duration(milliseconds: 700), () {
+      if (mounted) {
+        setState(() {
+          _showSkipLeft = false;
+          _showSkipRight = false;
+        });
+      }
+    });
   }
 
   void _togglePlay() {
@@ -555,8 +601,61 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
   /// specific focusable widget: media transport keys, channel up/down
   /// (live only), and Escape/Back to exit the player.
   KeyEventResult _handleGlobalKey(FocusNode node, KeyEvent event) {
-    if (event is! KeyDownEvent) return KeyEventResult.ignored;
+    if (event is KeyUpEvent) return KeyEventResult.ignored;
     final key = event.logicalKey;
+    final isDown = event is KeyDownEvent;
+
+    // ── D-pad while the OSD is hidden ──────────────────────────────────
+    //  VOD : Left/Right = seek ∓/±10s, Up/Down/OK = show controls
+    //  Live: Up/Down = channel −/+,     Left/Right/OK = show controls
+    final isOk =
+        key == LogicalKeyboardKey.select ||
+        key == LogicalKeyboardKey.enter ||
+        key == LogicalKeyboardKey.numpadEnter ||
+        key == LogicalKeyboardKey.space ||
+        key == LogicalKeyboardKey.gameButtonA;
+    final isArrow =
+        key == LogicalKeyboardKey.arrowUp ||
+        key == LogicalKeyboardKey.arrowDown ||
+        key == LogicalKeyboardKey.arrowLeft ||
+        key == LogicalKeyboardKey.arrowRight;
+    // VOD: Left/Right seek whenever focus is parked on the player itself
+    // (OSD hidden, or just revealed by a previous seek) — hold to scrub.
+    if (!_locked &&
+        _error.isEmpty &&
+        !_isLive &&
+        node.hasPrimaryFocus &&
+        (key == LogicalKeyboardKey.arrowLeft ||
+            key == LogicalKeyboardKey.arrowRight)) {
+      final fwd = key == LogicalKeyboardKey.arrowRight;
+      _seekRelative(fwd ? _skipSecs : -_skipSecs);
+      _flashSkip(fwd);
+      return KeyEventResult.handled;
+    }
+    if (!_locked && !_ctrlVisible && _error.isEmpty) {
+      if (_isLive &&
+          (key == LogicalKeyboardKey.arrowUp ||
+              key == LogicalKeyboardKey.arrowDown)) {
+        if (isDown) _switchChannel(key == LogicalKeyboardKey.arrowUp ? -1 : 1);
+        return KeyEventResult.handled;
+      }
+      if (isOk || isArrow) {
+        if (isDown) _showControls(focusPlay: true);
+        return KeyEventResult.handled;
+      }
+    }
+    // OSD shown but focus parked on the root (e.g. after seeking) → jump
+    // into the controls.
+    if (!_locked &&
+        _ctrlVisible &&
+        node.hasPrimaryFocus &&
+        _playFocus.context != null &&
+        (isArrow || isOk)) {
+      if (isDown) _showControls(focusPlay: true);
+      return KeyEventResult.handled;
+    }
+
+    if (!isDown) return KeyEventResult.ignored;
 
     if (key == LogicalKeyboardKey.escape ||
         key == LogicalKeyboardKey.goBack ||
@@ -598,11 +697,8 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
         return KeyEventResult.handled;
       }
     }
-    // Any other key press should reveal controls and reset the auto-hide
-    // timer, matching remote UX where any button wakes the overlay.
-    if (!_ctrlVisible) {
-      _resetHideTimer();
-    }
+    // Any other key press keeps the overlay alive / wakes it.
+    _resetHideTimer();
     return KeyEventResult.ignored;
   }
 
@@ -641,6 +737,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
         _exitPlayer();
       },
       child: Focus(
+        focusNode: _rootFocus,
         autofocus: true,
         onKeyEvent: _handleGlobalKey,
         child: Scaffold(
@@ -708,49 +805,59 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
                 AnimatedOpacity(
                   opacity: _ctrlVisible ? 1.0 : 0.0,
                   duration: const Duration(milliseconds: 250),
-                  child: IgnorePointer(
-                    ignoring: !_ctrlVisible,
-                    child: _ControlsOverlay(
-                      title: widget.title,
-                      isLive: _isLive,
-                      playing: _playing,
-                      quality: _quality,
-                      isFavorite: _isLive ? _isFavorite : false,
-                      pos: _pos,
-                      dur: _dur,
-                      isSeeking: _isSeeking,
-                      seekVal: _seekVal,
-                      volume: _volume,
-                      onBack: _exitPlayer,
-                      onTogglePlay: _togglePlay,
-                      onToggleLock: () => setState(() => _locked = true),
-                      onToggleFav: _isLive ? _toggleFavorite : null,
-                      onShowTracks: _showTracks,
-                      onSeekStart: (v) => setState(() {
-                        _isSeeking = true;
-                        _seekVal = v;
-                      }),
-                      onSeekChange: (v) => setState(() => _seekVal = v),
-                      onSeekEnd: (v) {
-                        setState(() => _isSeeking = false);
-                        _seekTo(v);
-                      },
-                      onVolumeChange: (v) {
-                        setState(() => _volume = v);
-                        _player.setVolume(v * 100);
-                      },
-                      isVideoFill: _videoFill,
-                      onToggleFit: () =>
-                          setState(() => _videoFill = !_videoFill),
-                      onSeekBack: () => _seekRelative(-10),
-                      onSeekFwd: () => _seekRelative(10),
+                  // Hidden controls must not keep remote focus.
+                  child: ExcludeFocus(
+                    excluding: !_ctrlVisible,
+                    child: IgnorePointer(
+                      ignoring: !_ctrlVisible,
+                      child: _ControlsOverlay(
+                        playFocusNode: _playFocus,
+                        title: widget.title,
+                        isLive: _isLive,
+                        playing: _playing,
+                        quality: _quality,
+                        isFavorite: _isLive ? _isFavorite : false,
+                        pos: _pos,
+                        dur: _dur,
+                        isSeeking: _isSeeking,
+                        seekVal: _seekVal,
+                        volume: _volume,
+                        onBack: _exitPlayer,
+                        onTogglePlay: _togglePlay,
+                        onToggleLock: () => setState(() => _locked = true),
+                        onToggleFav: _isLive ? _toggleFavorite : null,
+                        onShowTracks: _showTracks,
+                        onSeekStart: (v) => setState(() {
+                          _isSeeking = true;
+                          _seekVal = v;
+                        }),
+                        onSeekChange: (v) => setState(() => _seekVal = v),
+                        onSeekEnd: (v) {
+                          setState(() => _isSeeking = false);
+                          _seekTo(v);
+                        },
+                        onVolumeChange: (v) {
+                          setState(() => _volume = v);
+                          _player.setVolume(v * 100);
+                        },
+                        isVideoFill: _videoFill,
+                        onToggleFit: () =>
+                            setState(() => _videoFill = !_videoFill),
+                        onSeekBack: () => _seekRelative(-10),
+                        onSeekFwd: () => _seekRelative(10),
+                      ),
                     ),
                   ),
                 ),
 
               // ── Lock overlay ──────────────────────────────────────────
               if (_locked)
-                _LockOverlay(onUnlock: () => setState(() => _locked = false)),
+                _LockOverlay(
+                  onUnlock: () {
+                    setState(() => _locked = false);
+                    _showControls(focusPlay: true);
+                  },
+                ),
 
               // ── Skip indicators ───────────────────────────────────────
               if (_showSkipLeft)
@@ -906,6 +1013,7 @@ class _ReconnectOverlay extends StatelessWidget {
 // CONTROLS OVERLAY
 // ─────────────────────────────────────────────────────────────────────────────
 class _ControlsOverlay extends StatelessWidget {
+  final FocusNode? playFocusNode;
   final String title;
   final bool isLive;
   final bool playing;
@@ -931,6 +1039,7 @@ class _ControlsOverlay extends StatelessWidget {
   final VoidCallback onSeekFwd;
 
   const _ControlsOverlay({
+    this.playFocusNode,
     required this.title,
     required this.isLive,
     required this.playing,
@@ -986,7 +1095,11 @@ class _ControlsOverlay extends StatelessWidget {
               onTracks: onShowTracks,
             ),
             const Spacer(),
-            _CenterPlay(playing: playing, onTap: onTogglePlay),
+            _CenterPlay(
+              playing: playing,
+              onTap: onTogglePlay,
+              focusNode: playFocusNode,
+            ),
             const Spacer(),
             _BottomBar(
               isLive: isLive,
@@ -1153,7 +1266,12 @@ class _PlayerIconBtn extends StatelessWidget {
 class _CenterPlay extends StatefulWidget {
   final bool playing;
   final VoidCallback onTap;
-  const _CenterPlay({required this.playing, required this.onTap});
+  final FocusNode? focusNode;
+  const _CenterPlay({
+    required this.playing,
+    required this.onTap,
+    this.focusNode,
+  });
 
   @override
   State<_CenterPlay> createState() => _CenterPlayState();
@@ -1163,7 +1281,9 @@ class _CenterPlayState extends State<_CenterPlay> {
   @override
   Widget build(BuildContext context) {
     return TvFocusable(
+      focusNode: widget.focusNode,
       autofocus: true,
+      autoScroll: false,
       onActivate: widget.onTap,
       builder: (focused, _) => AnimatedContainer(
         duration: const Duration(milliseconds: 200),
@@ -1256,11 +1376,13 @@ class _BottomBar extends StatelessWidget {
                 thumbColor: Colors.white,
                 overlayColor: AppTheme.primary.withValues(alpha: 0.3),
               ),
-              child: Slider(
+              child: TvSlider(
                 value: isSeeking ? seekVal : progress.clamp(0.0, 1.0),
                 onChangeStart: onSeekStart,
                 onChanged: onSeekChange,
                 onChangeEnd: onSeekEnd,
+                onStepDown: onSeekBack,
+                onStepUp: onSeekFwd,
               ),
             ),
             Padding(
@@ -1326,7 +1448,7 @@ class _BottomBar extends StatelessWidget {
                       inactiveTrackColor: Colors.white30,
                       thumbColor: Colors.white,
                     ),
-                    child: Slider(value: volume, onChanged: onVolumeChange),
+                    child: TvSlider(value: volume, onChanged: onVolumeChange),
                   ),
                 ),
                 const SizedBox(width: 8),
@@ -1665,20 +1787,22 @@ class _ErrorView extends StatelessWidget {
                       )
                     : null,
               ),
-              child: ElevatedButton.icon(
-                onPressed: onRetry,
-                icon: const Icon(Icons.refresh_rounded),
-                label: const Text('Retry'),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: focused
-                      ? AppTheme.primary.withValues(alpha: 0.85)
-                      : AppTheme.primary,
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 32,
-                    vertical: 12,
-                  ),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(30),
+              child: ExcludeFocus(
+                child: ElevatedButton.icon(
+                  onPressed: onRetry,
+                  icon: const Icon(Icons.refresh_rounded),
+                  label: const Text('Retry'),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: focused
+                        ? AppTheme.primary.withValues(alpha: 0.85)
+                        : AppTheme.primary,
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 32,
+                      vertical: 12,
+                    ),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(30),
+                    ),
                   ),
                 ),
               ),

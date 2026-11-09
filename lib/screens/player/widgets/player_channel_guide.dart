@@ -34,6 +34,7 @@ class PlayerChannelGuide extends ConsumerStatefulWidget {
 class _PlayerChannelGuideState extends ConsumerState<PlayerChannelGuide>
     with SingleTickerProviderStateMixin {
   final _scrollCtrl = ScrollController();
+  final _focusNode = FocusNode(debugLabel: 'channelGuide');
   int _focusedIndex = -1;
   late final AnimationController _animCtrl;
   late final Animation<Offset> _slideAnim;
@@ -54,13 +55,19 @@ class _PlayerChannelGuideState extends ConsumerState<PlayerChannelGuide>
     ).animate(CurvedAnimation(parent: _animCtrl, curve: Curves.easeOutCubic));
     _animCtrl.forward();
 
-    WidgetsBinding.instance.addPostFrameCallback((_) => _initFocus());
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      // Take remote focus explicitly — autofocus alone is ignored when the
+      // surrounding scope already has a focused child.
+      if (mounted) _focusNode.requestFocus();
+      _initFocus();
+    });
   }
 
   @override
   void dispose() {
     _animCtrl.dispose();
     _scrollCtrl.dispose();
+    _focusNode.dispose();
     super.dispose();
   }
 
@@ -79,7 +86,7 @@ class _PlayerChannelGuideState extends ConsumerState<PlayerChannelGuide>
       if (!_scrollCtrl.hasClients) return;
       final target = (idx * (_itemW + _itemGap))
           .clamp(0.0, _scrollCtrl.position.maxScrollExtent);
-      if (animated) {
+      if (animated && !TvKeyTracker.isRepeating) {
         _scrollCtrl.animateTo(target,
             duration: const Duration(milliseconds: 220),
             curve: Curves.easeOut);
@@ -122,13 +129,21 @@ class _PlayerChannelGuideState extends ConsumerState<PlayerChannelGuide>
     return SlideTransition(
       position: _slideAnim,
       child: Focus(
+        focusNode: _focusNode,
         autofocus: true,
         onKeyEvent: (_, event) {
-          if (event is! KeyDownEvent) return KeyEventResult.ignored;
+          if (event is KeyUpEvent) return KeyEventResult.ignored;
+          final isDown = event is KeyDownEvent;
 
           if (event.logicalKey == LogicalKeyboardKey.escape ||
               event.logicalKey == LogicalKeyboardKey.goBack) {
-            widget.onClose();
+            if (isDown) widget.onClose();
+            return KeyEventResult.handled;
+          }
+          // Up / Down close the strip (back to the full-screen player).
+          if (event.logicalKey == LogicalKeyboardKey.arrowUp ||
+              event.logicalKey == LogicalKeyboardKey.arrowDown) {
+            if (isDown) widget.onClose();
             return KeyEventResult.handled;
           }
           if (event.logicalKey == LogicalKeyboardKey.arrowLeft &&
@@ -148,7 +163,9 @@ class _PlayerChannelGuideState extends ConsumerState<PlayerChannelGuide>
           if (event.logicalKey == LogicalKeyboardKey.select ||
               event.logicalKey == LogicalKeyboardKey.enter  ||
               event.logicalKey == LogicalKeyboardKey.space) {
-            if (_focusedIndex >= 0 && _focusedIndex < channels.length) {
+            if (isDown &&
+                _focusedIndex >= 0 &&
+                _focusedIndex < channels.length) {
               _selectChannel(_focusedIndex, channels[_focusedIndex]);
             }
             return KeyEventResult.handled;

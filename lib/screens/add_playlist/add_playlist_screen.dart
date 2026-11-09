@@ -5,6 +5,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:uuid/uuid.dart';
 
+import '../../core/utils/focus_utils.dart';
+import '../../core/utils/responsive.dart';
 import '../../core/theme/app_theme.dart';
 import '../../models/xtream_models.dart';
 import '../../providers/app_providers.dart';
@@ -347,12 +349,17 @@ class _AddPlaylistScreenState extends ConsumerState<AddPlaylistScreen> {
               Expanded(
                 child: SingleChildScrollView(
                   controller: _scrollCtrl,
-                  padding: const EdgeInsets.fromLTRB(60, 0, 60, 24),
+                  // Responsive side padding; the form itself is capped at a
+                  // comfortable reading width on desktop / TV / tablets.
+                  padding: EdgeInsets.fromLTRB(
+                    Responsive.of(context).pagePadding * 2,
+                    0,
+                    Responsive.of(context).pagePadding * 2,
+                    24,
+                  ),
                   child: Center(
                     child: ConstrainedBox(
-                      constraints: const BoxConstraints(
-                        maxWidth: double.infinity,
-                      ),
+                      constraints: const BoxConstraints(maxWidth: 560),
                       child: Form(
                         key: _formKey,
                         child: Column(
@@ -667,48 +674,55 @@ class _AddPlaylistScreenState extends ConsumerState<AddPlaylistScreen> {
   }
 
   Widget _buildPasswordField() {
-    return TextFormField(
+    // TvTextFieldNav: D-pad Right at the end of the text reaches the
+    // show/hide-password toggle.
+    return TvTextFieldNav(
       controller: _passwordCtrl,
-      focusNode: _passwordFocus,
-      obscureText: !_showPassword,
-      textInputAction: TextInputAction.done,
-      onFieldSubmitted: (_) => _addBtnFocus.requestFocus(),
-      style: const TextStyle(color: AppTheme.textPrimary, fontSize: 16),
-      validator: (v) =>
-          (v == null || v.trim().isEmpty) ? 'Password is required' : null,
-      decoration: InputDecoration(
-        labelText: 'Password',
-        hintText: 'Enter password',
-        prefixIcon: const Icon(
-          Icons.lock_outline,
-          color: AppTheme.textMuted,
-          size: 22,
-        ),
-        suffixIcon: IconButton(
-          focusNode: _passwordVisibilityFocus,
-          icon: Icon(
-            _showPassword ? Icons.visibility_off : Icons.visibility,
+      onUp: () => _usernameFocus.requestFocus(),
+      onDown: () => _addBtnFocus.requestFocus(),
+      child: TextFormField(
+        controller: _passwordCtrl,
+        focusNode: _passwordFocus,
+        obscureText: !_showPassword,
+        textInputAction: TextInputAction.done,
+        onFieldSubmitted: (_) => _addBtnFocus.requestFocus(),
+        style: const TextStyle(color: AppTheme.textPrimary, fontSize: 16),
+        validator: (v) =>
+            (v == null || v.trim().isEmpty) ? 'Password is required' : null,
+        decoration: InputDecoration(
+          labelText: 'Password',
+          hintText: 'Enter password',
+          prefixIcon: const Icon(
+            Icons.lock_outline,
             color: AppTheme.textMuted,
             size: 22,
           ),
-          onPressed: () => setState(() => _showPassword = !_showPassword),
-        ),
-        labelStyle: const TextStyle(color: AppTheme.primary, fontSize: 14),
-        contentPadding: const EdgeInsets.symmetric(
-          vertical: 18,
-          horizontal: 16,
-        ),
-        border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(14),
-          borderSide: const BorderSide(color: AppTheme.divider),
-        ),
-        enabledBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(14),
-          borderSide: const BorderSide(color: AppTheme.divider),
-        ),
-        focusedBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(14),
-          borderSide: const BorderSide(color: AppTheme.primary, width: 2),
+          suffixIcon: IconButton(
+            focusNode: _passwordVisibilityFocus,
+            icon: Icon(
+              _showPassword ? Icons.visibility_off : Icons.visibility,
+              color: AppTheme.textMuted,
+              size: 22,
+            ),
+            onPressed: () => setState(() => _showPassword = !_showPassword),
+          ),
+          labelStyle: const TextStyle(color: AppTheme.primary, fontSize: 14),
+          contentPadding: const EdgeInsets.symmetric(
+            vertical: 18,
+            horizontal: 16,
+          ),
+          border: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(14),
+            borderSide: const BorderSide(color: AppTheme.divider),
+          ),
+          enabledBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(14),
+            borderSide: const BorderSide(color: AppTheme.divider),
+          ),
+          focusedBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(14),
+            borderSide: const BorderSide(color: AppTheme.primary, width: 2),
+          ),
         ),
       ),
     );

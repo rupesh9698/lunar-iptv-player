@@ -61,8 +61,9 @@ class BehaviorService {
     String? episode,
   }) async {
     if (_box == null || durationSeconds <= 0) return;
-    if (url.isEmpty)
+    if (url.isEmpty) {
       return; // Never save without a URL — would cause black screen
+    }
 
     final progress = positionSeconds / durationSeconds;
 

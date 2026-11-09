@@ -1,3 +1,4 @@
+import 'package:device_info_plus/device_info_plus.dart';
 import 'package:flutter/foundation.dart';
 import 'package:screen_brightness/screen_brightness.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
@@ -80,7 +81,9 @@ class PlatformUtils {
     // Brightness control only available on mobile
     if (kIsWeb || isDesktop) return;
     try {
-      await ScreenBrightness().setScreenBrightness(value.clamp(0.0, 1.0));
+      await ScreenBrightness().setApplicationScreenBrightness(
+        value.clamp(0.0, 1.0),
+      );
     } catch (_) {}
   }
 
@@ -102,15 +105,26 @@ class PlatformUtils {
   // ── Android TV Detection ──────────────────────────────────────────
   static bool _isAndroidTV = false;
 
+  /// Detects Android TV / Google TV / Fire TV via the package-manager
+  /// system features. Must be awaited once at startup (see main.dart)
+  /// before [isTV] is read.
   static Future<void> detectAndroidTV() async {
     if (!isAndroid) {
       _isAndroidTV = false;
       return;
     }
     try {
-      // Uses device_info_plus — implemented in a later step
-      _isAndroidTV = false; // placeholder
-    } catch (_) {
+      final info = await DeviceInfoPlugin().androidInfo;
+      final features = info.systemFeatures;
+      _isAndroidTV =
+          features.contains('android.software.leanback') ||
+          features.contains('android.software.leanback_only') ||
+          features.contains('android.hardware.type.television') ||
+          // Amazon Fire TV devices
+          features.contains('amazon.hardware.fire_tv') ||
+          info.model.toUpperCase().startsWith('AFT');
+    } catch (e) {
+      debugPrint('Android TV detection failed: $e');
       _isAndroidTV = false;
     }
   }
@@ -136,6 +150,10 @@ class PlatformUtils {
   // ── Layout Helpers ────────────────────────────────────────────────
   static bool isWideScreen(double width) => width >= 900;
   static bool isTablet(double width) => width >= 600;
+
+  /// True when the primary input is a D-pad / keyboard rather than touch
+  /// (Android TV, or any desktop/web where focus rings are expected).
+  static bool get prefersDpad => isTV;
 
   static int gridColumns(double width) {
     if (width > 1400) return 7;

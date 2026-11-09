@@ -12,6 +12,12 @@ import '../../../models/xtream_models.dart';
 import '../../../providers/app_providers.dart';
 import '../../../providers/series_provider.dart';
 
+/// Focus node of the panel's primary "Watch" button. The series grid moves
+/// remote focus here after a poster is selected with OK/Enter.
+final FocusNode seriesDetailPlayFocus = FocusNode(
+  debugLabel: 'seriesDetailPlay',
+);
+
 class SeriesDetailPanel extends ConsumerStatefulWidget {
   final double? width;
   final bool isMobile;
@@ -698,6 +704,7 @@ class _SeriesDetailPanelState extends ConsumerState<SeriesDetailPanel> {
             children: [
               Expanded(
                 child: TvFocusable(
+                  focusNode: seriesDetailPlayFocus,
                   autoScroll: false,
                   onActivate: () => _playEpisode(context, ref, info, first),
                   builder: (focused, _) => AnimatedContainer(
@@ -936,6 +943,8 @@ class _EpisodeTileState extends State<_EpisodeTile> with TvFocusMixin {
 
     return TvFocusable(
       onActivate: widget.onPlay,
+      // Remote: hold OK (or Menu) to download — the icon is pointer-only.
+      onLongPress: widget.onDownload,
       onFocusChange: setTvFocused,
       builder: (focused, _) {
         final lit = isTvHovered || focused;

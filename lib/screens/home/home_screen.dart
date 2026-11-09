@@ -7,6 +7,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 import 'package:lunar_iptv_player/core/utils/focus_utils.dart';
+import 'package:lunar_iptv_player/core/utils/responsive.dart';
 import 'package:lunar_iptv_player/providers/behavior_providers.dart';
 import 'package:lunar_iptv_player/services/behavior_service.dart';
 import 'package:lunar_iptv_player/widgets/continue_watching_row.dart';
@@ -70,7 +71,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                 color: AppTheme.background,
                 child: Row(
                   children: [
-                    SizedBox(width: 280, child: const _LeftPanel()),
+                    SizedBox(
+                      width: Responsive.of(context).widthFrac(0.26, 200, 300),
+                      child: const _LeftPanel(),
+                    ),
                     const VerticalDivider(color: AppTheme.divider, width: 1),
                     Expanded(child: _RightPanel(cache: CacheService.instance)),
                   ],
@@ -133,6 +137,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
         content: const Text('Are you sure you want to exit?'),
         actions: [
           TextButton(
+            autofocus: true,
             onPressed: () => Navigator.pop(ctx, false),
             child: const Text('Cancel'),
           ),
@@ -168,7 +173,9 @@ class _LeftPanel extends ConsumerWidget {
         children: [
           // ── Logo + Clock ──────────────────────────────────────────────
           Padding(
-            padding: const EdgeInsets.fromLTRB(20, 20, 20, 16),
+            padding: Responsive.of(context).isShort
+                ? const EdgeInsets.fromLTRB(16, 12, 16, 10)
+                : const EdgeInsets.fromLTRB(20, 20, 20, 16),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
@@ -198,7 +205,7 @@ class _LeftPanel extends ConsumerWidget {
                     ),
                   ],
                 ).animate().fadeIn(duration: 500.ms).slideX(begin: -0.15),
-                const SizedBox(height: 16),
+                SizedBox(height: Responsive.of(context).isShort ? 8 : 16),
                 const _LiveClock()
                     .animate()
                     .fadeIn(delay: 150.ms, duration: 500.ms)
@@ -257,7 +264,7 @@ class _LeftPanel extends ConsumerWidget {
 
           // ── Add Playlist button ───────────────────────────────────────
           Padding(
-            padding: const EdgeInsets.all(16),
+            padding: EdgeInsets.all(Responsive.of(context).isShort ? 10 : 16),
             child: SizedBox(
               width: double.infinity,
               child:
@@ -344,6 +351,7 @@ class _LeftPanel extends ConsumerWidget {
         ),
         actions: [
           TextButton(
+            autofocus: true,
             onPressed: () => Navigator.pop(ctx, false),
             child: const Text('Cancel'),
           ),
@@ -404,6 +412,9 @@ class _PlaylistItemState extends State<_PlaylistItem> with TvFocusMixin {
     final pl = widget.playlist;
     return TvFocusable(
       onActivate: widget.onTap,
+      // Remote: hold OK (or press Menu) to delete — the trash icon only
+      // appears on hover/focus and can't be reached with a D-pad.
+      onLongPress: widget.onDelete,
       onFocusChange: setTvFocused,
       builder: (focused, pressed) {
         final lit = isTvHovered || focused;
@@ -562,12 +573,16 @@ class _LiveClockState extends State<_LiveClock> {
           DateFormat('EEE, dd MMM yyyy').format(_now),
           style: const TextStyle(color: AppTheme.textMuted, fontSize: 12),
         ),
-        Text(
-          DateFormat('hh:mm:ss a').format(_now),
-          style: const TextStyle(
-            color: AppTheme.textPrimary,
-            fontSize: 26,
-            fontWeight: FontWeight.w700,
+        FittedBox(
+          fit: BoxFit.scaleDown,
+          alignment: Alignment.centerLeft,
+          child: Text(
+            DateFormat('hh:mm:ss a').format(_now),
+            style: TextStyle(
+              color: AppTheme.textPrimary,
+              fontSize: Responsive.of(context).isShort ? 20 : 26,
+              fontWeight: FontWeight.w700,
+            ),
           ),
         ),
       ],
@@ -592,8 +607,9 @@ class _RightPanel extends ConsumerWidget {
       flags = (hasLive: true, hasVod: true, hasSeries: true);
     }
 
+    final r = Responsive.of(context);
     return SingleChildScrollView(
-      padding: const EdgeInsets.all(24),
+      padding: EdgeInsets.all(r.isShort ? 14 : r.pagePadding + 4),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -615,106 +631,119 @@ class _RightPanel extends ConsumerWidget {
           const SizedBox(height: 16),
 
           // ── Nav Cards Grid ─────────────────────────────────────────────────
-          GridView.count(
-            crossAxisCount: 2,
-            crossAxisSpacing: 20,
-            mainAxisSpacing: 20,
-            childAspectRatio: 1.65,
-            shrinkWrap: true,
-            physics: const NeverScrollableScrollPhysics(),
-            children: [
-              // Live TV — always show, autofocus for TV remote
-              _NavCard(
-                    autofocus: true,
-                    label: 'Live TV',
-                    sublabel: _buildSublabel(
-                      cache.lastUpdatedLive(),
-                      'channels',
-                    ),
-                    icon: Icons.tv_rounded,
-                    gradient: const LinearGradient(
-                      colors: [Color(0xFF1565C0), Color(0xFF42A5F5)],
-                      begin: Alignment.topLeft,
-                      end: Alignment.bottomRight,
-                    ),
-                    onTap: () => context.push('/live-tv'),
-                  )
-                  .animate()
-                  .fadeIn(delay: 0.ms, duration: 450.ms)
-                  .slideY(begin: 0.18, curve: Curves.easeOutCubic),
+          // Columns / card proportions adapt to the available width & height
+          // (phones in landscape get wider, shorter cards; big screens 3-up).
+          LayoutBuilder(
+            builder: (ctx, c) {
+              final cols = c.maxWidth >= 860 ? 3 : 2;
+              final gap = r.isShort ? 12.0 : 20.0;
+              final aspect = r.isShort
+                  ? 2.4
+                  : cols == 3
+                  ? 1.6
+                  : 1.75;
+              return GridView.count(
+                crossAxisCount: cols,
+                crossAxisSpacing: gap,
+                mainAxisSpacing: gap,
+                childAspectRatio: aspect,
+                shrinkWrap: true,
+                physics: const NeverScrollableScrollPhysics(),
+                children: [
+                  // Live TV — always show, autofocus for TV remote
+                  _NavCard(
+                        autofocus: true,
+                        label: 'Live TV',
+                        sublabel: _buildSublabel(
+                          cache.lastUpdatedLive(),
+                          'channels',
+                        ),
+                        icon: Icons.tv_rounded,
+                        gradient: const LinearGradient(
+                          colors: [Color(0xFF1565C0), Color(0xFF42A5F5)],
+                          begin: Alignment.topLeft,
+                          end: Alignment.bottomRight,
+                        ),
+                        onTap: () => context.push('/live-tv'),
+                      )
+                      .animate()
+                      .fadeIn(delay: 0.ms, duration: 450.ms)
+                      .slideY(begin: 0.18, curve: Curves.easeOutCubic),
 
-              // Movies
-              if (flags.hasVod)
-                _NavCard(
-                      label: 'Movies',
-                      sublabel: _buildSublabel(
-                        cache.lastUpdatedVod(),
-                        'movies',
-                      ),
-                      icon: Icons.movie_rounded,
-                      gradient: const LinearGradient(
-                        colors: [Color(0xFF6A1B9A), Color(0xFFAB47BC)],
-                        begin: Alignment.topLeft,
-                        end: Alignment.bottomRight,
-                      ),
-                      onTap: () => context.push('/movies'),
-                    )
-                    .animate()
-                    .fadeIn(delay: 100.ms, duration: 450.ms)
-                    .slideY(begin: 0.18, curve: Curves.easeOutCubic),
+                  // Movies
+                  if (flags.hasVod)
+                    _NavCard(
+                          label: 'Movies',
+                          sublabel: _buildSublabel(
+                            cache.lastUpdatedVod(),
+                            'movies',
+                          ),
+                          icon: Icons.movie_rounded,
+                          gradient: const LinearGradient(
+                            colors: [Color(0xFF6A1B9A), Color(0xFFAB47BC)],
+                            begin: Alignment.topLeft,
+                            end: Alignment.bottomRight,
+                          ),
+                          onTap: () => context.push('/movies'),
+                        )
+                        .animate()
+                        .fadeIn(delay: 100.ms, duration: 450.ms)
+                        .slideY(begin: 0.18, curve: Curves.easeOutCubic),
 
-              // Series
-              if (flags.hasSeries)
-                _NavCard(
-                      label: 'Series',
-                      sublabel: _buildSublabel(
-                        cache.lastUpdatedSeries(),
-                        'series',
-                      ),
-                      icon: Icons.video_library_rounded,
-                      gradient: const LinearGradient(
-                        colors: [Color(0xFF1B5E20), Color(0xFF66BB6A)],
-                        begin: Alignment.topLeft,
-                        end: Alignment.bottomRight,
-                      ),
-                      onTap: () => context.push('/series'),
-                    )
-                    .animate()
-                    .fadeIn(delay: 200.ms, duration: 450.ms)
-                    .slideY(begin: 0.18, curve: Curves.easeOutCubic),
+                  // Series
+                  if (flags.hasSeries)
+                    _NavCard(
+                          label: 'Series',
+                          sublabel: _buildSublabel(
+                            cache.lastUpdatedSeries(),
+                            'series',
+                          ),
+                          icon: Icons.video_library_rounded,
+                          gradient: const LinearGradient(
+                            colors: [Color(0xFF1B5E20), Color(0xFF66BB6A)],
+                            begin: Alignment.topLeft,
+                            end: Alignment.bottomRight,
+                          ),
+                          onTap: () => context.push('/series'),
+                        )
+                        .animate()
+                        .fadeIn(delay: 200.ms, duration: 450.ms)
+                        .slideY(begin: 0.18, curve: Curves.easeOutCubic),
 
-              // Settings — always show
-              _NavCard(
-                    label: 'Settings',
-                    sublabel: 'Preferences & Account',
-                    icon: Icons.settings_rounded,
-                    gradient: const LinearGradient(
-                      colors: [Color(0xFF37474F), Color(0xFF78909C)],
-                      begin: Alignment.topLeft,
-                      end: Alignment.bottomRight,
-                    ),
-                    onTap: () => context.push('/settings'),
-                  )
-                  .animate()
-                  .fadeIn(delay: 300.ms, duration: 450.ms)
-                  .slideY(begin: 0.18, curve: Curves.easeOutCubic),
+                  // Settings — always show
+                  _NavCard(
+                        label: 'Settings',
+                        sublabel: 'Preferences & Account',
+                        icon: Icons.settings_rounded,
+                        gradient: const LinearGradient(
+                          colors: [Color(0xFF37474F), Color(0xFF78909C)],
+                          begin: Alignment.topLeft,
+                          end: Alignment.bottomRight,
+                        ),
+                        onTap: () => context.push('/settings'),
+                      )
+                      .animate()
+                      .fadeIn(delay: 300.ms, duration: 450.ms)
+                      .slideY(begin: 0.18, curve: Curves.easeOutCubic),
 
-              // Stats / Dashboard
-              _NavCard(
-                    label: 'My Stats',
-                    sublabel: 'Watch history & insights',
-                    icon: Icons.bar_chart_rounded,
-                    gradient: const LinearGradient(
-                      colors: [Color(0xFF7B61FF), Color(0xFF4F8EF7)],
-                      begin: Alignment.topLeft,
-                      end: Alignment.bottomRight,
-                    ),
-                    onTap: () => context.push('/stats'),
-                  )
-                  .animate()
-                  .fadeIn(delay: 350.ms, duration: 450.ms)
-                  .slideY(begin: 0.18, curve: Curves.easeOutCubic),
-            ],
+                  // Stats / Dashboard
+                  _NavCard(
+                        label: 'My Stats',
+                        sublabel: 'Watch history & insights',
+                        icon: Icons.bar_chart_rounded,
+                        gradient: const LinearGradient(
+                          colors: [Color(0xFF7B61FF), Color(0xFF4F8EF7)],
+                          begin: Alignment.topLeft,
+                          end: Alignment.bottomRight,
+                        ),
+                        onTap: () => context.push('/stats'),
+                      )
+                      .animate()
+                      .fadeIn(delay: 350.ms, duration: 450.ms)
+                      .slideY(begin: 0.18, curve: Curves.easeOutCubic),
+                ],
+              );
+            },
           ),
         ],
       ),
@@ -791,11 +820,15 @@ class _NavCardState extends State<_NavCard> {
                 ),
               ],
             ),
-            padding: const EdgeInsets.all(24),
+            padding: EdgeInsets.all(Responsive.of(context).isShort ? 14 : 22),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Icon(widget.icon, color: Colors.white, size: 32)
+                Icon(
+                      widget.icon,
+                      color: Colors.white,
+                      size: Responsive.of(context).isShort ? 24 : 32,
+                    )
                     .animate(target: focused ? 1 : 0)
                     .scaleXY(
                       end: 1.15,
@@ -810,6 +843,8 @@ class _NavCardState extends State<_NavCard> {
                     fontSize: 18,
                     fontWeight: FontWeight.w700,
                   ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
                 ),
                 const SizedBox(height: 4),
                 Text(
@@ -818,6 +853,8 @@ class _NavCardState extends State<_NavCard> {
                     color: Colors.white.withValues(alpha: 0.85),
                     fontSize: 12.5,
                   ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
                 ),
               ],
             ),

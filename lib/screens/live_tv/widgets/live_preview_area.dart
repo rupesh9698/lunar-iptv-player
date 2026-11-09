@@ -59,7 +59,7 @@ class _LiveInlinePlayerState extends ConsumerState<LiveInlinePlayer> {
   bool _showVol = false;
   bool _showBright = false;
   double _brightness = 0.5;
-  Offset _lastTap = Offset.zero;
+  final Offset _lastTap = Offset.zero;
   bool _showSkipLeft = false;
   bool _showSkipRight = false;
 
@@ -69,43 +69,209 @@ class _LiveInlinePlayerState extends ConsumerState<LiveInlinePlayer> {
   int _switchTotalChannels = 0;
   Timer? _channelSwitchTimer;
 
+  // ── TV remote focus (maximized mode) ─────────────────────────────────────
+  // Root node holds focus while the OSD is hidden so that D-pad keys reach
+  // the player (channel up/down, guide) instead of invisible buttons.
+  final FocusNode _maxRootFocus = FocusNode(debugLabel: 'liveMaxRoot');
+  final FocusNode _maxPlayFocus = FocusNode(debugLabel: 'liveMaxPlay');
+
   @override
   void initState() {
     super.initState();
+    widget.playPauseFocusNode?.addListener(_onMiniPlayFocus);
     _resetHideTimer();
+    if (widget.isMaximized) _focusAfterFrame(_maxPlayFocus);
   }
 
   @override
   void didUpdateWidget(LiveInlinePlayer old) {
     super.didUpdateWidget(old);
+    if (old.playPauseFocusNode != widget.playPauseFocusNode) {
+      old.playPauseFocusNode?.removeListener(_onMiniPlayFocus);
+      widget.playPauseFocusNode?.addListener(_onMiniPlayFocus);
+    }
     if (old.isMaximized != widget.isMaximized) {
       setState(() {
         _ctrlVisible = true;
         _showChannelGuide = false;
       });
       _resetHideTimer();
+      // Move remote focus into the new layout — the previously focused
+      // button no longer exists.
+      _focusAfterFrame(
+        widget.isMaximized ? _maxPlayFocus : widget.watchNowFocusNode,
+      );
     }
   }
 
   @override
   void dispose() {
+    widget.playPauseFocusNode?.removeListener(_onMiniPlayFocus);
     _hideTimer?.cancel();
     _channelSwitchTimer?.cancel();
+    _maxRootFocus.dispose();
+    _maxPlayFocus.dispose();
     super.dispose();
+  }
+
+  void _focusAfterFrame(FocusNode? node) {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted && node != null && node.context != null) {
+        node.requestFocus();
+      }
+    });
+  }
+
+  /// Keep the compact overlay visible while its play/pause has remote focus
+  /// (otherwise the focused button fades out and the user loses track).
+  void _onMiniPlayFocus() {
+    if (widget.playPauseFocusNode?.hasFocus ?? false) _resetHideTimer();
   }
 
   void _resetHideTimer() {
     _hideTimer?.cancel();
     if (!_ctrlVisible && mounted) setState(() => _ctrlVisible = true);
     _hideTimer = Timer(const Duration(seconds: 4), () {
-      if (mounted && !_locked) setState(() => _ctrlVisible = false);
+      if (!mounted || _locked) return;
+      if (!widget.isMaximized &&
+          (widget.playPauseFocusNode?.hasFocus ?? false)) {
+        _resetHideTimer();
+        return;
+      }
+      _hideControls();
     });
+  }
+
+  void _hideControls() {
+    setState(() => _ctrlVisible = false);
+    // Park focus on the player root so keys aren't sent to hidden buttons.
+    // Only when focus is inside the player — never steal it from a dialog.
+    if (widget.isMaximized && !_showChannelGuide && _maxRootFocus.hasFocus) {
+      _maxRootFocus.requestFocus();
+    }
+  }
+
+  void _showControls({bool focusPlay = false}) {
+    _resetHideTimer();
+    if (focusPlay) _focusAfterFrame(_maxPlayFocus);
   }
 
   void _toggleControls() {
     if (_locked) return;
-    setState(() => _ctrlVisible = !_ctrlVisible);
-    if (_ctrlVisible) _resetHideTimer();
+    if (_ctrlVisible) {
+      _hideTimer?.cancel();
+      _hideControls();
+    } else {
+      _resetHideTimer();
+    }
+  }
+
+  static bool _isOk(LogicalKeyboardKey k) =>
+      k == LogicalKeyboardKey.select ||
+      k == LogicalKeyboardKey.enter ||
+      k == LogicalKeyboardKey.numpadEnter ||
+      k == LogicalKeyboardKey.space ||
+      k == LogicalKeyboardKey.gameButtonA;
+
+  static bool _isArrow(LogicalKeyboardKey k) =>
+      k == LogicalKeyboardKey.arrowUp ||
+      k == LogicalKeyboardKey.arrowDown ||
+      k == LogicalKeyboardKey.arrowLeft ||
+      k == LogicalKeyboardKey.arrowRight;
+
+  /// Maximized-player key handling (TV remote / keyboard).
+  ///  OSD hidden : Up/Down = channel −/+, Left = channel guide,
+  ///               Right/OK = show controls.
+  ///  OSD shown  : D-pad moves between buttons, OK activates.
+  ///  Always     : CH+/CH−/PgUp/PgDn zap, Play/Pause media key, G = guide,
+  ///               Back/Esc = minimize.
+  KeyEventResult _onMaxKey(FocusNode node, KeyEvent event) {
+    if (event is KeyUpEvent) return KeyEventResult.ignored;
+    final k = event.logicalKey;
+    final isDown = event is KeyDownEvent;
+
+    if (k == LogicalKeyboardKey.keyG) {
+      if (isDown) {
+        setState(() => _showChannelGuide = !_showChannelGuide);
+        if (!_showChannelGuide) _maxRootFocus.requestFocus();
+      }
+      return KeyEventResult.handled;
+    }
+    if (_showChannelGuide) return KeyEventResult.ignored;
+
+    if (k == LogicalKeyboardKey.escape || k == LogicalKeyboardKey.goBack) {
+      if (isDown) widget.onMinimize();
+      return KeyEventResult.handled;
+    }
+    if (k == LogicalKeyboardKey.pageUp || k == LogicalKeyboardKey.channelUp) {
+      if (isDown) _switchChannel(-1);
+      return KeyEventResult.handled;
+    }
+    if (k == LogicalKeyboardKey.pageDown ||
+        k == LogicalKeyboardKey.channelDown) {
+      if (isDown) _switchChannel(1);
+      return KeyEventResult.handled;
+    }
+    if (k == LogicalKeyboardKey.mediaPlayPause ||
+        k == LogicalKeyboardKey.mediaPlay ||
+        k == LogicalKeyboardKey.mediaPause) {
+      if (isDown) ref.read(livePlayerProvider.notifier).togglePlayPause();
+      return KeyEventResult.handled;
+    }
+
+    if (_locked) {
+      // Lock is a touch feature — OK on the remote unlocks.
+      if (_isOk(k)) {
+        if (isDown) {
+          setState(() => _locked = false);
+          _showControls(focusPlay: true);
+        }
+        return KeyEventResult.handled;
+      }
+      return KeyEventResult.ignored;
+    }
+
+    if (!_ctrlVisible) {
+      if (k == LogicalKeyboardKey.arrowUp) {
+        if (isDown) _switchChannel(-1);
+        return KeyEventResult.handled;
+      }
+      if (k == LogicalKeyboardKey.arrowDown) {
+        if (isDown) _switchChannel(1);
+        return KeyEventResult.handled;
+      }
+      if (k == LogicalKeyboardKey.arrowLeft) {
+        if (isDown) setState(() => _showChannelGuide = true);
+        return KeyEventResult.handled;
+      }
+      if (k == LogicalKeyboardKey.arrowRight || _isOk(k)) {
+        if (isDown) _showControls(focusPlay: true);
+        return KeyEventResult.handled;
+      }
+      return KeyEventResult.ignored;
+    }
+
+    // OSD visible: keep it alive while the user is navigating.
+    _resetHideTimer();
+    // Focus is parked on the root (e.g. OSD was shown by a tap) → jump into
+    // the controls instead of letting geometric traversal guess.
+    if (node.hasPrimaryFocus && (_isArrow(k) || _isOk(k))) {
+      if (isDown) _maxPlayFocus.requestFocus();
+      return KeyEventResult.handled;
+    }
+    // Contain D-pad traversal inside the full-screen player: an unhandled
+    // arrow must never escape to the (covered) sidebar / EPG panels.
+    if (_isArrow(k)) {
+      final dir = switch (k) {
+        LogicalKeyboardKey.arrowUp => TraversalDirection.up,
+        LogicalKeyboardKey.arrowDown => TraversalDirection.down,
+        LogicalKeyboardKey.arrowLeft => TraversalDirection.left,
+        _ => TraversalDirection.right,
+      };
+      FocusManager.instance.primaryFocus?.focusInDirection(dir);
+      return KeyEventResult.handled;
+    }
+    return KeyEventResult.ignored;
   }
 
   void _switchChannel(int delta) {
@@ -312,8 +478,7 @@ class _LiveInlinePlayerState extends ConsumerState<LiveInlinePlayer> {
                     ref.read(livePlayerProvider.notifier).togglePlayPause(),
                 onUp: () => widget.backFocusNode?.requestFocus(),
                 onDown: () => widget.channelSearchFocus?.requestFocus(),
-                onLeft: () =>
-                    widget.categoryEntryFocus?.call()?.requestFocus(),
+                onLeft: () => widget.categoryEntryFocus?.call()?.requestFocus(),
                 onRight: () => widget.watchNowFocusNode?.requestFocus(),
               ),
               const SizedBox(width: 4),
@@ -328,6 +493,9 @@ class _LiveInlinePlayerState extends ConsumerState<LiveInlinePlayer> {
               ),
               SizedBox(
                 width: 52,
+                // Not reachable by D-pad (would trap focus) — remote users
+                // have hardware volume keys.
+                child: ExcludeFocus(
                 child: SliderTheme(
                   data: SliderThemeData(
                     trackHeight: 1.5,
@@ -347,6 +515,7 @@ class _LiveInlinePlayerState extends ConsumerState<LiveInlinePlayer> {
                     onChanged: (v) =>
                         ref.read(livePlayerProvider.notifier).setVolume(v),
                   ),
+                ),
                 ),
               ),
               const Spacer(),
@@ -368,43 +537,9 @@ class _LiveInlinePlayerState extends ConsumerState<LiveInlinePlayer> {
     VideoController? ctrl,
   ) {
     return Focus(
+      focusNode: _maxRootFocus,
       autofocus: !_showChannelGuide,
-      onKeyEvent: (_, event) {
-        if (event is! KeyDownEvent) return KeyEventResult.ignored;
-
-        if (event.logicalKey == LogicalKeyboardKey.keyG ||
-            (!_ctrlVisible &&
-                event.logicalKey == LogicalKeyboardKey.arrowDown)) {
-          setState(() => _showChannelGuide = !_showChannelGuide);
-          return KeyEventResult.handled;
-        }
-        if (_showChannelGuide) return KeyEventResult.ignored;
-
-        if (event.logicalKey == LogicalKeyboardKey.pageUp ||
-            event.logicalKey == LogicalKeyboardKey.channelUp ||
-            event.logicalKey == LogicalKeyboardKey.arrowUp) {
-          _switchChannel(-1);
-          return KeyEventResult.handled;
-        }
-        if (event.logicalKey == LogicalKeyboardKey.pageDown ||
-            event.logicalKey == LogicalKeyboardKey.channelDown ||
-            event.logicalKey == LogicalKeyboardKey.arrowDown) {
-          _switchChannel(1);
-          return KeyEventResult.handled;
-        }
-        if (event.logicalKey == LogicalKeyboardKey.select ||
-            event.logicalKey == LogicalKeyboardKey.enter ||
-            event.logicalKey == LogicalKeyboardKey.space) {
-          _toggleControls();
-          return KeyEventResult.handled;
-        }
-        if (event.logicalKey == LogicalKeyboardKey.escape ||
-            event.logicalKey == LogicalKeyboardKey.goBack) {
-          widget.onMinimize();
-          return KeyEventResult.handled;
-        }
-        return KeyEventResult.ignored;
-      },
+      onKeyEvent: _onMaxKey,
       child: Material(
         color: Colors.black,
         child: Stack(
@@ -419,7 +554,10 @@ class _LiveInlinePlayerState extends ConsumerState<LiveInlinePlayer> {
                       videoFill: _videoFill,
                       ctrlVisible: _ctrlVisible,
                       onTap: _showChannelGuide
-                          ? () => setState(() => _showChannelGuide = false)
+                          ? () {
+                              setState(() => _showChannelGuide = false);
+                              _maxRootFocus.requestFocus();
+                            }
                           : _toggleControls,
                       onDoubleTap: _showChannelGuide ? null : _onDoubleTap,
                       onDragStart: _onDragStart,
@@ -450,9 +588,13 @@ class _LiveInlinePlayerState extends ConsumerState<LiveInlinePlayer> {
               AnimatedOpacity(
                 opacity: _ctrlVisible ? 1.0 : 0.0,
                 duration: const Duration(milliseconds: 250),
-                child: IgnorePointer(
+                // Hidden controls must not hold remote focus.
+                child: ExcludeFocus(
+                  excluding: !_ctrlVisible,
+                  child: IgnorePointer(
                   ignoring: !_ctrlVisible,
                   child: _MaximizedControls(
+                    playFocusNode: _maxPlayFocus,
                     channel: channel,
                     ps: ps,
                     isVideoFill: _videoFill,
@@ -476,6 +618,7 @@ class _LiveInlinePlayerState extends ConsumerState<LiveInlinePlayer> {
                     onToggleGuide: () =>
                         setState(() => _showChannelGuide = true),
                   ),
+                ),
                 ),
               ),
 
@@ -542,7 +685,10 @@ class _LiveInlinePlayerState extends ConsumerState<LiveInlinePlayer> {
                     setState(() => _showChannelGuide = false);
                     widget.onMinimize();
                   },
-                  onClose: () => setState(() => _showChannelGuide = false),
+                  onClose: () {
+                    setState(() => _showChannelGuide = false);
+                    _maxRootFocus.requestFocus();
+                  },
                 ),
               ),
           ],
@@ -686,6 +832,7 @@ class _VideoArea extends StatelessWidget {
 // MAXIMIZED CONTROLS
 // ─────────────────────────────────────────────────────────────────────────────
 class _MaximizedControls extends StatelessWidget {
+  final FocusNode? playFocusNode;
   final LiveStream? channel;
   final LivePlayerState ps;
   final bool isVideoFill;
@@ -701,6 +848,7 @@ class _MaximizedControls extends StatelessWidget {
   final VoidCallback onToggleGuide;
 
   const _MaximizedControls({
+    this.playFocusNode,
     required this.channel,
     required this.ps,
     required this.isVideoFill,
@@ -812,19 +960,23 @@ class _MaximizedControls extends StatelessWidget {
 
             const Spacer(),
 
-            // Center play
-            GestureDetector(
-              onTap: onTogglePlay,
-              child: AnimatedContainer(
+            // Center play — focusable so the remote has an anchor
+            TvFocusable(
+              focusNode: playFocusNode,
+              autoScroll: false,
+              onActivate: onTogglePlay,
+              builder: (focused, _) => AnimatedContainer(
                 duration: const Duration(milliseconds: 200),
                 width: 60,
                 height: 60,
                 decoration: BoxDecoration(
-                  color: Colors.white.withValues(alpha: 0.18),
+                  color: Colors.white.withValues(alpha: focused ? 0.28 : 0.18),
                   shape: BoxShape.circle,
                   border: Border.all(
-                    color: Colors.white.withValues(alpha: 0.35),
-                    width: 1.5,
+                    color: focused
+                        ? AppTheme.primary
+                        : Colors.white.withValues(alpha: 0.35),
+                    width: focused ? 3 : 1.5,
                   ),
                 ),
                 child: Icon(
@@ -875,36 +1027,34 @@ class _MaximizedControls extends StatelessWidget {
                     size: 20,
                   ),
                   SizedBox(
-                    width: 80,
-                    child: SliderTheme(
-                      data: SliderThemeData(
+                    width: 96,
+                    child: TvSlider(
+                      value: ps.volume,
+                      onChanged: onVolumeChange,
+                      theme: const SliderThemeData(
                         trackHeight: 2,
-                        thumbShape: const RoundSliderThumbShape(
+                        thumbShape: RoundSliderThumbShape(
                           enabledThumbRadius: 5,
                         ),
-                        overlayShape: const RoundSliderOverlayShape(
+                        overlayShape: RoundSliderOverlayShape(
                           overlayRadius: 10,
                         ),
                         activeTrackColor: Colors.white,
                         inactiveTrackColor: Colors.white30,
                         thumbColor: Colors.white,
                       ),
-                      child: Slider(
-                        value: ps.volume,
-                        onChanged: onVolumeChange,
-                      ),
                     ),
                   ),
                   const SizedBox(width: 8),
-                  GestureDetector(
+                  TvIconButton(
+                    icon: isVideoFill
+                        ? Icons.fullscreen_exit_rounded
+                        : Icons.fullscreen_rounded,
+                    color: Colors.white,
+                    size: 24,
+                    circle: true,
+                    tooltip: isVideoFill ? 'Fit video' : 'Fill screen',
                     onTap: onToggleFit,
-                    child: Icon(
-                      isVideoFill
-                          ? Icons.fullscreen_exit_rounded
-                          : Icons.fullscreen_rounded,
-                      color: Colors.white,
-                      size: 24,
-                    ),
                   ),
                 ],
               ),
@@ -1152,8 +1302,7 @@ class _FocusableElevatedButton extends StatefulWidget {
       _FocusableElevatedButtonState();
 }
 
-class _FocusableElevatedButtonState
-    extends State<_FocusableElevatedButton> {
+class _FocusableElevatedButtonState extends State<_FocusableElevatedButton> {
   @override
   Widget build(BuildContext context) {
     return TvFocusable(
@@ -1171,7 +1320,10 @@ class _FocusableElevatedButtonState
                 )
               : null,
         ),
-        child: ElevatedButton.icon(
+        // ExcludeFocus: the outer TvFocusable is the one D-pad stop (the
+        // inner Material button was a second, un-wired focus target).
+        child: ExcludeFocus(
+          child: ElevatedButton.icon(
           onPressed: widget.onTap,
           icon: Icon(widget.icon, size: 18),
           label: Text(widget.label),
@@ -1185,6 +1337,7 @@ class _FocusableElevatedButtonState
               borderRadius: BorderRadius.circular(10),
             ),
           ),
+        ),
         ),
       ),
     );
@@ -1408,7 +1561,9 @@ class _PlayPauseFocusBtn extends StatelessWidget {
           borderRadius: BorderRadius.circular(6),
           border: focused
               ? Border.all(
-              color: Colors.white.withValues(alpha: 0.7), width: 1.5)
+                  color: Colors.white.withValues(alpha: 0.7),
+                  width: 1.5,
+                )
               : null,
         ),
         child: Icon(
@@ -1524,15 +1679,20 @@ class _LockOverlay extends StatelessWidget {
   Widget build(BuildContext context) => SafeArea(
     child: Align(
       alignment: Alignment.centerRight,
-      child: GestureDetector(
-        onTap: onUnlock,
-        child: Container(
+      child: TvFocusable(
+        autofocus: true,
+        autoScroll: false,
+        onActivate: onUnlock,
+        builder: (focused, _) => Container(
           margin: const EdgeInsets.only(right: 16),
           padding: const EdgeInsets.all(12),
           decoration: BoxDecoration(
             color: Colors.black.withValues(alpha: 0.55),
             shape: BoxShape.circle,
-            border: Border.all(color: Colors.white30, width: 1.5),
+            border: Border.all(
+              color: focused ? Colors.white : Colors.white30,
+              width: focused ? 2.5 : 1.5,
+            ),
           ),
           child: const Icon(Icons.lock_rounded, color: Colors.white, size: 22),
         ),

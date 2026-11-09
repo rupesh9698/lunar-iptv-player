@@ -2,7 +2,6 @@ import 'dart:math' as math;
 
 import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -40,8 +39,11 @@ class _StatsScreenState extends ConsumerState<StatsScreen> {
             children: [
               _buildTopBar(context, playlist?.name ?? ''),
               Expanded(
-                child: SingleChildScrollView(
-                  padding: const EdgeInsets.all(24),
+                // D-pad scrollable (the dashboard has no focusable content).
+                child: TvScrollView(
+                  padding: EdgeInsets.all(
+                    MediaQuery.sizeOf(context).width < 840 ? 14 : 24,
+                  ),
                   child: _DashboardBody(flags: flags),
                 ),
               ),
@@ -60,6 +62,7 @@ class _StatsScreenState extends ConsumerState<StatsScreen> {
       child: Row(
         children: [
           _FocusableIconBtn(
+            autofocus: true,
             icon: Icons.arrow_back_ios_new,
             tooltip: 'Back',
             color: AppTheme.textSecondary,
@@ -101,15 +104,22 @@ class _StatsScreenState extends ConsumerState<StatsScreen> {
           ),
           if (playlistName.isNotEmpty) ...[
             const SizedBox(width: 10),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
-              decoration: BoxDecoration(
-                color: AppTheme.surfaceVariant,
-                borderRadius: BorderRadius.circular(6),
-              ),
-              child: Text(
-                playlistName,
-                style: const TextStyle(color: AppTheme.textMuted, fontSize: 11),
+            Flexible(
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+                decoration: BoxDecoration(
+                  color: AppTheme.surfaceVariant,
+                  borderRadius: BorderRadius.circular(6),
+                ),
+                child: Text(
+                  playlistName,
+                  style: const TextStyle(
+                    color: AppTheme.textMuted,
+                    fontSize: 11,
+                  ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
               ),
             ),
           ],
@@ -707,11 +717,13 @@ class _FocusableIconBtn extends StatefulWidget {
   final String tooltip;
   final Color color;
   final VoidCallback onTap;
+  final bool autofocus;
   const _FocusableIconBtn({
     required this.icon,
     required this.tooltip,
     required this.color,
     required this.onTap,
+    this.autofocus = false,
   });
 
   @override
@@ -722,6 +734,8 @@ class _FocusableIconBtnState extends State<_FocusableIconBtn> {
   @override
   Widget build(BuildContext context) {
     return TvFocusable(
+      autofocus: widget.autofocus,
+      autoScroll: false,
       onActivate: widget.onTap,
       builder: (focused, _) => Tooltip(
         message: widget.tooltip,
