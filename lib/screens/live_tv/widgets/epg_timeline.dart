@@ -62,7 +62,31 @@ class _EpgTimelineState extends ConsumerState<EpgTimeline> {
     return _channelFocusNodes[index];
   }
 
-  static const double _chColW = 240.0;
+  /// Moves remote focus to row [index]. If that row isn't built yet (it is
+  /// beyond the ListView's cache extent — common when the D-pad is held
+  /// down), first jump the list so the row gets built, then focus it on the
+  /// next frame. Without this, focus silently stopped at the last built row.
+  void _focusChannel(int index) {
+    final node = _channelNode(index);
+    if (node.context != null) {
+      node.requestFocus();
+      return;
+    }
+    if (_leftCtrl.hasClients) {
+      final pos = _leftCtrl.position;
+      final target = (index * _rowH - pos.viewportDimension * 0.3).clamp(
+        0.0,
+        pos.maxScrollExtent,
+      );
+      _leftCtrl.jumpTo(target);
+    }
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted && node.context != null) node.requestFocus();
+    });
+  }
+
+  // Channel column narrows on small screens so the timeline stays usable.
+  double _chColW = 240.0;
   static const double _rowH = 58.0;
   static const double _headerH = 40.0;
   static const double _pxPerHour = 240.0;
@@ -231,6 +255,7 @@ class _EpgTimelineState extends ConsumerState<EpgTimeline> {
     return LayoutBuilder(
       builder: (ctx, constraints) {
         final rightH = constraints.maxHeight - _headerH - 1;
+        _chColW = (constraints.maxWidth * 0.42).clamp(150.0, 240.0);
 
         return Row(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -288,9 +313,9 @@ class _EpgTimelineState extends ConsumerState<EpgTimeline> {
                               .toggle(ch.streamId),
                           onUpAtTop: i == 0
                               ? () => widget.searchFocusNode?.requestFocus()
-                              : () => _channelNode(i - 1).requestFocus(),
+                              : () => _focusChannel(i - 1),
                           onDownNext: i < streams.length - 1
-                              ? () => _channelNode(i + 1).requestFocus()
+                              ? () => _focusChannel(i + 1)
                               : null,
                           onLeftToCategory: () =>
                               widget.categoryEntryFocus?.call()?.requestFocus(),
@@ -497,6 +522,7 @@ class _EpgControlBarState extends ConsumerState<_EpgControlBar> {
     return TvFocusable(
       focusNode: widget.searchFocusNode,
       autoScroll: false,
+      excludeChildFocus: false, // hosts the search TextField
       onActivate: () {
         setState(() => _searchOpen = !_searchOpen);
         if (!_searchOpen) {
@@ -526,7 +552,9 @@ class _EpgControlBarState extends ConsumerState<_EpgControlBar> {
       builder: (focused, _) => AnimatedContainer(
         duration: const Duration(milliseconds: 250),
         curve: Curves.easeInOut,
-        width: _searchOpen ? 220 : 32,
+        width: _searchOpen
+            ? (MediaQuery.sizeOf(context).width * 0.22).clamp(140.0, 220.0)
+            : 32,
         height: 30,
         decoration: BoxDecoration(
           color: _searchOpen ? AppTheme.surfaceVariant : Colors.transparent,
@@ -560,26 +588,31 @@ class _EpgControlBarState extends ConsumerState<_EpgControlBar> {
             ),
             if (_searchOpen)
               Expanded(
-                child: TextField(
+                child: TvTextFieldNav(
                   controller: _searchCtrl,
-                  autofocus: true,
-                  onChanged: (v) =>
-                      ref.read(liveSearchQueryProvider.notifier).state = v,
-                  style: const TextStyle(
-                    color: AppTheme.textPrimary,
-                    fontSize: 12,
-                  ),
-                  decoration: const InputDecoration(
-                    hintText: 'Search channels...',
-                    hintStyle: TextStyle(
-                      color: AppTheme.textMuted,
+                  onUp: () => widget.watchNowFocus?.requestFocus(),
+                  onDown: () => _goFirstChannelOrSelf(widget.searchFocusNode!),
+                  child: TextField(
+                    controller: _searchCtrl,
+                    autofocus: true,
+                    onChanged: (v) =>
+                        ref.read(liveSearchQueryProvider.notifier).state = v,
+                    style: const TextStyle(
+                      color: AppTheme.textPrimary,
                       fontSize: 12,
                     ),
-                    border: InputBorder.none,
-                    focusedBorder: InputBorder.none,
-                    enabledBorder: InputBorder.none,
-                    contentPadding: EdgeInsets.zero,
-                    isDense: true,
+                    decoration: const InputDecoration(
+                      hintText: 'Search channels...',
+                      hintStyle: TextStyle(
+                        color: AppTheme.textMuted,
+                        fontSize: 12,
+                      ),
+                      border: InputBorder.none,
+                      focusedBorder: InputBorder.none,
+                      enabledBorder: InputBorder.none,
+                      contentPadding: EdgeInsets.zero,
+                      isDense: true,
+                    ),
                   ),
                 ),
               ),
@@ -711,6 +744,24 @@ class _ChannelCellState extends State<_ChannelCell> with TvFocusMixin {
       autoScroll: true,
       scrollAlignment: 0.3,
       onActivate: widget.onTap,
+      // TV remote: hold OK (or press Menu) to add/remove favourite —
+      // the heart icon is mouse/touch-only.
+      onLongPress: () {
+        widget.onFavorite();
+        final nowFav = !widget.isFavorite;
+        ScaffoldMessenger.maybeOf(context)
+          ?..hideCurrentSnackBar()
+          ..showSnackBar(
+            SnackBar(
+              content: Text(
+                nowFav
+                    ? 'Added "${widget.channel.name}" to Favorites'
+                    : 'Removed "${widget.channel.name}" from Favorites',
+              ),
+              duration: const Duration(seconds: 2),
+            ),
+          );
+      },
       onFocusChange: setTvFocused,
       onArrowKey: (key) {
         if (key == LogicalKeyboardKey.arrowUp) {

@@ -11,6 +11,7 @@ import 'package:lunar_iptv_player/services/storage_service.dart';
 import 'package:lunar_iptv_player/widgets/for_you_section.dart';
 
 import '../../core/theme/app_theme.dart';
+import '../../core/utils/responsive.dart';
 import '../../core/utils/focus_utils.dart';
 import '../../models/xtream_models.dart';
 import '../../providers/app_providers.dart';
@@ -100,6 +101,12 @@ class _SeriesScreenState extends ConsumerState<SeriesScreen> {
       canPop: false,
       onPopInvokedWithResult: (didPop, _) {
         if (didPop) return;
+        // Back closes the detail panel first (focus returns to the poster
+        // via the focus scope's history), then leaves the screen.
+        if (ref.read(selectedSeriesStreamProvider) != null) {
+          ref.read(selectedSeriesStreamProvider.notifier).state = null;
+          return;
+        }
         context.go('/home');
       },
       child: Scaffold(
@@ -111,7 +118,15 @@ class _SeriesScreenState extends ConsumerState<SeriesScreen> {
               Expanded(
                 child: Row(
                   children: [
-                    _SeriesCategorySidebar(width: _sidebarWidth),
+                    _SeriesCategorySidebar(
+                      width: _sidebarWidth.clamp(
+                        150.0,
+                        (Responsive.of(context).width * 0.26).clamp(
+                          150.0,
+                          _sidebarMax,
+                        ),
+                      ),
+                    ),
                     _ResizableDivider(
                       onDrag: (dx) => setState(() {
                         _sidebarWidth = (_sidebarWidth + dx).clamp(
@@ -250,31 +265,38 @@ class _SeriesSearchButtonState extends ConsumerState<_SeriesSearchButton> {
       );
     }
     return SizedBox(
-      width: 220,
+      width: Responsive.of(context).widthFrac(0.22, 150, 240),
       height: 36,
-      child: TextField(
+      child: TvTextFieldNav(
         controller: _ctrl,
-        autofocus: true,
-        onChanged: (v) =>
-            ref.read(seriesSearchQueryProvider.notifier).state = v,
-        style: const TextStyle(color: AppTheme.textPrimary, fontSize: 13),
-        decoration: InputDecoration(
-          hintText: 'Search series...',
-          prefixIcon: const Icon(
-            Icons.search,
-            size: 16,
-            color: AppTheme.textMuted,
+        child: TextField(
+          controller: _ctrl,
+          autofocus: true,
+          onChanged: (v) =>
+              ref.read(seriesSearchQueryProvider.notifier).state = v,
+          style: const TextStyle(color: AppTheme.textPrimary, fontSize: 13),
+          decoration: InputDecoration(
+            hintText: 'Search series...',
+            prefixIcon: const Icon(
+              Icons.search,
+              size: 16,
+              color: AppTheme.textMuted,
+            ),
+            suffixIcon: IconButton(
+              onPressed: () {
+                _ctrl.clear();
+                ref.read(seriesSearchQueryProvider.notifier).state = '';
+                setState(() => _open = false);
+              },
+              icon: const Icon(
+                Icons.close,
+                size: 16,
+                color: AppTheme.textMuted,
+              ),
+            ),
+            contentPadding: const EdgeInsets.symmetric(vertical: 8),
+            isDense: true,
           ),
-          suffixIcon: IconButton(
-            onPressed: () {
-              _ctrl.clear();
-              ref.read(seriesSearchQueryProvider.notifier).state = '';
-              setState(() => _open = false);
-            },
-            icon: const Icon(Icons.close, size: 16, color: AppTheme.textMuted),
-          ),
-          contentPadding: const EdgeInsets.symmetric(vertical: 8),
-          isDense: true,
         ),
       ),
     );
@@ -385,16 +407,23 @@ class _SeriesCategorySidebarState
       padding: const EdgeInsets.fromLTRB(8, 8, 8, 0),
       child: SizedBox(
         height: 36,
-        child: TextField(
+        child: TvTextFieldNav(
           controller: _searchCtrl,
-          autofocus: true,
-          onChanged: (v) => setState(() => _query = v.toLowerCase().trim()),
-          style: const TextStyle(color: AppTheme.textPrimary, fontSize: 13),
-          decoration: const InputDecoration(
-            hintText: 'Search genres...',
-            prefixIcon: Icon(Icons.search, size: 14, color: AppTheme.textMuted),
-            contentPadding: EdgeInsets.symmetric(vertical: 8),
-            isDense: true,
+          child: TextField(
+            controller: _searchCtrl,
+            autofocus: true,
+            onChanged: (v) => setState(() => _query = v.toLowerCase().trim()),
+            style: const TextStyle(color: AppTheme.textPrimary, fontSize: 13),
+            decoration: const InputDecoration(
+              hintText: 'Search genres...',
+              prefixIcon: Icon(
+                Icons.search,
+                size: 14,
+                color: AppTheme.textMuted,
+              ),
+              contentPadding: EdgeInsets.symmetric(vertical: 8),
+              isDense: true,
+            ),
           ),
         ),
       ),
@@ -616,6 +645,7 @@ class _SeriesSidebarTileState extends State<_SeriesSidebarTile>
   @override
   Widget build(BuildContext context) {
     return TvFocusable(
+      autofocus: widget.isSelected,
       onActivate: widget.onTap,
       onFocusChange: setTvFocused,
       onArrowKey: (key) {
@@ -702,6 +732,7 @@ class _SeriesCatItemState extends State<_SeriesCatItem> with TvFocusMixin {
   @override
   Widget build(BuildContext context) {
     return TvFocusable(
+      autofocus: widget.isSelected,
       onActivate: widget.onTap,
       onFocusChange: setTvFocused,
       onArrowKey: (key) {
@@ -794,6 +825,12 @@ class _SeriesContentState extends ConsumerState<_SeriesContent> {
 
   @override
   Widget build(BuildContext context) {
+    // Detail panel never takes more than half the content area
+    // (phones / small windows / TV).
+    final maxDetail = (Responsive.of(context).width * 0.40).clamp(
+      220.0,
+      _detailMax,
+    );
     final selected = ref.watch(selectedSeriesStreamProvider);
 
     return Row(
@@ -805,7 +842,13 @@ class _SeriesContentState extends ConsumerState<_SeriesContent> {
               _detailWidth = (_detailWidth - dx).clamp(_detailMin, _detailMax);
             }),
           ),
-          SizedBox(width: _detailWidth, child: const SeriesDetailPanel()),
+          SizedBox(
+            width: _detailWidth.clamp(
+              _detailMin < maxDetail ? _detailMin : maxDetail,
+              maxDetail,
+            ),
+            child: const SeriesDetailPanel(),
+          ),
         ],
       ],
     );
@@ -959,6 +1002,10 @@ class _SeriesPosterCardState extends ConsumerState<_SeriesPosterCard>
     }
     BehaviorService.instance.recordOpen(widget.series.seriesId);
     ref.read(selectedSeriesStreamProvider.notifier).state = widget.series;
+    // Remote / keyboard: move focus to the detail panel's Play button.
+    if (FocusManager.instance.highlightMode == FocusHighlightMode.traditional) {
+      TvNav.focusSoon(seriesDetailPlayFocus);
+    }
   }
 
   @override

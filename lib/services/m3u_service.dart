@@ -9,9 +9,9 @@ class M3uService {
 
   /// Fetches an M3U playlist from [url] and parses it.
   static Future<(List<XtreamCategory>, List<LiveStream>)> fetchAndParse(
-      String url, {
-        Duration timeout = const Duration(seconds: 60),
-      }) async {
+    String url, {
+    Duration timeout = const Duration(seconds: 60),
+  }) async {
     final uri = Uri.parse(url.trim());
     final response = await _client
         .get(uri, headers: {'User-Agent': 'LunarIPTV/1.0'})
@@ -32,9 +32,9 @@ class M3uService {
       throw Exception('Not a valid M3U file (missing #EXTM3U header)');
     }
 
-    final groupsMap   = <String, XtreamCategory>{};
-    final streams     = <LiveStream>[];
-    int channelIndex  = 0;
+    final groupsMap = <String, XtreamCategory>{};
+    final streams = <LiveStream>[];
+    int channelIndex = 0;
 
     String? pendingName;
     Map<String, String>? pendingAttrs;
@@ -44,9 +44,9 @@ class M3uService {
       if (line.isEmpty) continue;
 
       if (line.startsWith('#EXTINF')) {
-        final parsed  = _parseExtinf(line);
-        pendingName   = parsed.$1;
-        pendingAttrs  = parsed.$2;
+        final parsed = _parseExtinf(line);
+        pendingName = parsed.$1;
+        pendingAttrs = parsed.$2;
         continue;
       }
 
@@ -58,50 +58,51 @@ class M3uService {
           !line.startsWith('https://') &&
           !line.startsWith('rtmp://') &&
           !line.startsWith('rtsp://')) {
-        pendingName  = null;
+        pendingName = null;
         pendingAttrs = null;
         continue;
       }
 
       channelIndex++;
-      final attrs       = pendingAttrs ?? {};
-      final displayName = (pendingName?.isNotEmpty == true
-          ? pendingName
-          : attrs['tvg-name']) ??
+      final attrs = pendingAttrs ?? {};
+      final displayName =
+          (pendingName?.isNotEmpty == true ? pendingName : attrs['tvg-name']) ??
           'Channel $channelIndex';
-      pendingName  = null;
+      pendingName = null;
       pendingAttrs = null;
 
       final groupTitle = attrs['group-title']?.isNotEmpty == true
           ? attrs['group-title']!
           : 'Uncategorized';
-      final tvgId  = attrs['tvg-id'] ?? '';
-      final logo   = attrs['tvg-logo'] ?? '';
-      final chno   = attrs['tvg-chno'] ?? '$channelIndex';
+      final tvgId = attrs['tvg-id'] ?? '';
+      final logo = attrs['tvg-logo'] ?? '';
+      final chno = attrs['tvg-chno'] ?? '$channelIndex';
 
       // Create category if not already seen
       if (!groupsMap.containsKey(groupTitle)) {
         groupsMap[groupTitle] = XtreamCategory(
-          categoryId:   _stableId(groupTitle),
+          categoryId: _stableId(groupTitle),
           categoryName: groupTitle,
-          parentId:     0,
+          parentId: 0,
         );
       }
 
-      final catId    = groupsMap[groupTitle]!.categoryId;
+      final catId = groupsMap[groupTitle]!.categoryId;
       // Stable ID: tvg-id + name + group ensures same channel → same ID across re-syncs
       final streamId = _stableId('${tvgId}_${displayName}_$groupTitle');
 
-      streams.add(LiveStream(
-        num:          chno,
-        name:         displayName!,
-        streamType:   'live',
-        streamId:     streamId,
-        streamIcon:   logo.isNotEmpty ? logo : null,
-        epgChannelId: tvgId.isNotEmpty ? tvgId : null,
-        categoryId:   catId,
-        directSource: line, // actual stream URL stored here
-      ));
+      streams.add(
+        LiveStream(
+          num: chno,
+          name: displayName,
+          streamType: 'live',
+          streamId: streamId,
+          streamIcon: logo.isNotEmpty ? logo : null,
+          epgChannelId: tvgId.isNotEmpty ? tvgId : null,
+          categoryId: catId,
+          directSource: line, // actual stream URL stored here
+        ),
+      );
     }
 
     return (groupsMap.values.toList(), streams);
@@ -111,7 +112,7 @@ class M3uService {
 
   static (String, Map<String, String>) _parseExtinf(String line) {
     final commaIdx = line.lastIndexOf(',');
-    final name     = commaIdx >= 0 ? line.substring(commaIdx + 1).trim() : '';
+    final name = commaIdx >= 0 ? line.substring(commaIdx + 1).trim() : '';
     final attrsPart = commaIdx >= 0 ? line.substring(0, commaIdx) : line;
 
     final attrs = <String, String>{};

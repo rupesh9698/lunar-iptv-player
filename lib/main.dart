@@ -6,10 +6,13 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/date_symbol_data_local.dart';
 import 'package:lunar_iptv_player/services/behavior_service.dart';
 import 'package:media_kit/media_kit.dart';
+import 'package:window_manager/window_manager.dart';
 
 import 'core/router/app_router.dart';
 import 'core/theme/app_theme.dart';
+import 'core/utils/focus_utils.dart';
 import 'core/utils/platform_utils.dart';
+import 'core/utils/responsive.dart';
 import 'services/cache_service.dart';
 import 'services/storage_service.dart';
 
@@ -56,7 +59,20 @@ void main() async {
     CacheService.instance.init(),
     BehaviorService.instance.init(),
     initializeDateFormatting(),
+    PlatformUtils.detectAndroidTV(),
+    _initDesktopWindow(),
   ]);
+
+  // ── TV remote / keyboard focus ──────────────────────────────────────────
+  // Track D-pad auto-repeat so focused list items jump-scroll into view.
+  TvKeyTracker.install();
+  // On Android TV there is no touch input: always draw focus rings so the
+  // user can see where the remote's focus is from the very first frame
+  // (the automatic strategy starts in "touch" mode on Android and hides them).
+  if (PlatformUtils.isTV) {
+    FocusManager.instance.highlightStrategy =
+        FocusHighlightStrategy.alwaysTraditional;
+  }
 
   // Wire active playlist context after parallel init completes
   if (activeId != null) {
@@ -73,6 +89,18 @@ void main() async {
   runApp(const ProviderScope(child: LunarIPTVPlayerApp()));
 }
 
+/// Desktop: enforce a sensible minimum window size so the multi-pane layout
+/// never gets squeezed into an unusable state.
+Future<void> _initDesktopWindow() async {
+  if (!PlatformUtils.isDesktop) return;
+  try {
+    await windowManager.ensureInitialized().timeout(const Duration(seconds: 2));
+    await windowManager.setMinimumSize(const Size(800, 480));
+  } catch (e) {
+    debugPrint('Window manager init skipped: $e');
+  }
+}
+
 class LunarIPTVPlayerApp extends ConsumerWidget {
   const LunarIPTVPlayerApp({super.key});
 
@@ -84,8 +112,9 @@ class LunarIPTVPlayerApp extends ConsumerWidget {
       debugShowCheckedModeBanner: false,
       theme: AppTheme.darkTheme,
       routerConfig: router,
-      builder: (context, child) =>
-          LandscapeEnforcer(child: child ?? const SizedBox.shrink()),
+      builder: (context, child) => AdaptiveViewport(
+        child: LandscapeEnforcer(child: child ?? const SizedBox.shrink()),
+      ),
     );
   }
 }
@@ -97,20 +126,22 @@ class LandscapeEnforcer extends StatelessWidget {
 
   static bool get _isMobile =>
       !kIsWeb &&
+      !PlatformUtils.isTV &&
       (defaultTargetPlatform == TargetPlatform.android ||
           defaultTargetPlatform == TargetPlatform.iOS);
 
   @override
   Widget build(BuildContext context) {
     if (!_isMobile) return child;
-    return OrientationBuilder(
-      builder: (ctx, orientation) {
-        if (orientation == Orientation.portrait) {
-          return const _RotateDeviceScreen();
-        }
-        return child;
-      },
-    );
+    final size = MediaQuery.sizeOf(context);
+    // Only phones are asked to rotate. Tablets, foldables, Chromebooks and
+    // free-form windows can't always rotate, so they get the (auto-scaled)
+    // landscape layout instead of being blocked forever.
+    final isPhone = size.shortestSide < 600;
+    if (isPhone && size.height > size.width) {
+      return const _RotateDeviceScreen();
+    }
+    return child;
   }
 }
 

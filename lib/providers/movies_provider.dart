@@ -1,6 +1,5 @@
 import 'dart:isolate';
 
-import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:lunar_iptv_player/services/behavior_service.dart';
 import 'package:lunar_iptv_player/services/cache_service.dart';
@@ -157,13 +156,13 @@ final sortedVodStreamsProvider = FutureProvider<List<VodStream>>((ref) async {
   // Run heavy sort in background isolate to prevent ANR.
   // Cap input to 20k for non-search views to prevent OOM on 60k+ libraries.
   // For search/favorites/recent the list is already small.
-  final sortInput = (filter == VodFilter.all && query.isEmpty &&
-      allStreams.length > 20000)
+  final sortInput =
+      (filter == VodFilter.all && query.isEmpty && allStreams.length > 20000)
       ? allStreams.sublist(0, 20000)
       : allStreams;
 
   return Isolate.run(
-        () => _vodSortIsolate(
+    () => _vodSortIsolate(
       _VodSortMsg(
         streams: sortInput,
         filterIndex: filter.index,

@@ -39,7 +39,7 @@ final routerProvider = Provider<GoRouter>((ref) {
       GoRoute(path: '/movies', builder: (_, _) => const MoviesScreen()),
       GoRoute(path: '/series', builder: (_, _) => const SeriesScreen()),
       GoRoute(path: '/settings', builder: (_, _) => const SettingsScreen()),
-      GoRoute(path: '/stats', builder: (_, __) => const StatsScreen()),
+      GoRoute(path: '/stats', builder: (_, _) => const StatsScreen()),
       GoRoute(
         path: '/player',
         builder: (_, state) {

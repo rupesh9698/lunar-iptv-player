@@ -94,12 +94,55 @@ class AppTheme {
     ),
   ];
 
+  // ── Focus visuals for Material widgets (TV remote / keyboard) ─────
+  // Material 3's default focus overlay is ~10% opacity — invisible from a
+  // sofa. Every button gets a clear white outline + lighter overlay when
+  // focused via D-pad/keyboard.
+  static final WidgetStateProperty<BorderSide?> _focusSide =
+      WidgetStateProperty.resolveWith(
+        (s) => s.contains(WidgetState.focused)
+            ? const BorderSide(color: Colors.white, width: 2)
+            : null,
+      );
+
+  static final WidgetStateProperty<Color?> _focusOverlay =
+      WidgetStateProperty.resolveWith((s) {
+        if (s.contains(WidgetState.focused)) {
+          return Colors.white.withValues(alpha: 0.16);
+        }
+        if (s.contains(WidgetState.pressed)) {
+          return Colors.white.withValues(alpha: 0.12);
+        }
+        if (s.contains(WidgetState.hovered)) {
+          return Colors.white.withValues(alpha: 0.06);
+        }
+        return null;
+      });
+
+  static const Color focusFill = Color(0x26FFFFFF);
+
   // ── Theme ─────────────────────────────────────────────────────────
   static ThemeData get darkTheme {
     final base = ThemeData.dark(useMaterial3: true);
 
     return base.copyWith(
       scaffoldBackgroundColor: background,
+      focusColor: focusFill,
+      hoverColor: Colors.white.withValues(alpha: 0.05),
+
+      iconButtonTheme: IconButtonThemeData(
+        style: ButtonStyle(side: _focusSide, overlayColor: _focusOverlay),
+      ),
+
+      textButtonTheme: TextButtonThemeData(
+        style: ButtonStyle(
+          side: _focusSide,
+          overlayColor: _focusOverlay,
+          shape: WidgetStatePropertyAll(
+            RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+          ),
+        ),
+      ),
       textTheme: _buildTextTheme(base.textTheme),
 
       colorScheme: const ColorScheme.dark(
@@ -173,22 +216,29 @@ class AppTheme {
             fontSize: 15,
             fontWeight: FontWeight.w600,
           ),
-        ),
+        ).copyWith(side: _focusSide, overlayColor: _focusOverlay),
       ),
 
       outlinedButtonTheme: OutlinedButtonThemeData(
-        style: OutlinedButton.styleFrom(
-          foregroundColor: primary,
-          side: const BorderSide(color: primary),
-          padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 24),
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(12),
-          ),
-          textStyle: GoogleFonts.inter(
-            fontSize: 15,
-            fontWeight: FontWeight.w600,
-          ),
-        ),
+        style:
+            OutlinedButton.styleFrom(
+              foregroundColor: primary,
+              padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 24),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
+              ),
+              textStyle: GoogleFonts.inter(
+                fontSize: 15,
+                fontWeight: FontWeight.w600,
+              ),
+            ).copyWith(
+              overlayColor: _focusOverlay,
+              side: WidgetStateProperty.resolveWith(
+                (s) => s.contains(WidgetState.focused)
+                    ? const BorderSide(color: Colors.white, width: 2)
+                    : const BorderSide(color: primary),
+              ),
+            ),
       ),
 
       // ── FIXED: CardTheme → CardThemeData ──────────────────────────
@@ -259,6 +309,11 @@ class AppTheme {
           return Colors.transparent;
         }),
         checkColor: WidgetStateProperty.all(Colors.white),
+        overlayColor: WidgetStateProperty.resolveWith(
+          (s) => s.contains(WidgetState.focused)
+              ? Colors.white.withValues(alpha: 0.24)
+              : null,
+        ),
         side: const BorderSide(color: textMuted, width: 1.5),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
       ),
@@ -271,6 +326,14 @@ class AppTheme {
         trackColor: WidgetStateProperty.resolveWith(
           (states) =>
               states.contains(WidgetState.selected) ? primary : surfaceVariant,
+        ),
+        overlayColor: WidgetStateProperty.resolveWith(
+          (s) => s.contains(WidgetState.focused)
+              ? Colors.white.withValues(alpha: 0.24)
+              : null,
+        ),
+        trackOutlineColor: WidgetStateProperty.resolveWith(
+          (s) => s.contains(WidgetState.focused) ? Colors.white : null,
         ),
       ),
 

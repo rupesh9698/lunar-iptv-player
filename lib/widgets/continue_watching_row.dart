@@ -188,6 +188,9 @@ class _ContinueCardState extends State<_ContinueCard> {
 
     return TvFocusable(
       onActivate: () => _navigate(context),
+      // Remote: hold OK (or press Menu) to remove from Continue Watching —
+      // the ✕ button is pointer-only.
+      onLongPress: widget.onRemove,
       onArrowKey: (key) {
         if (key == LogicalKeyboardKey.arrowLeft ||
             key == LogicalKeyboardKey.arrowRight) {
