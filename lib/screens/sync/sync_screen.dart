@@ -110,7 +110,7 @@ class _SyncScreenState extends ConsumerState<SyncScreen> {
     // This prevents the double-sync-on-restart bug.
     if (!widget.isManualRefresh) {
       final hasData =
-          cache.loadLiveStreams(ignoreExpiry: true)?.isNotEmpty ?? false;
+          cache.liveStreamsNonEmpty() ?? false;
       final isFresh = playlist.isM3u
           ? hasData // M3U: any cached data = fresh (no daily expiry)
           : hasData && !cache.isLiveStale(); // Xtream: check 24h expiry
@@ -147,7 +147,7 @@ class _SyncScreenState extends ConsumerState<SyncScreen> {
       }
 
       ref.invalidate(liveCategoriesProvider);
-      ref.invalidate(liveStreamsProvider);
+      ref.invalidate(liveAllStreamsProvider);
     } else {
       // ── Xtream sync ─────────────────────────────────────────────────────
       setState(() {
@@ -184,7 +184,7 @@ class _SyncScreenState extends ConsumerState<SyncScreen> {
         });
       } else {
         _markDone(0);
-        hasLive = cache.loadLiveStreams(ignoreExpiry: true)?.isNotEmpty ?? true;
+        hasLive = cache.liveStreamsNonEmpty() ?? true;
       }
 
       // Movies
@@ -205,7 +205,7 @@ class _SyncScreenState extends ConsumerState<SyncScreen> {
         });
       } else {
         _markDone(1);
-        hasVod = cache.loadVodStreams(ignoreExpiry: true)?.isNotEmpty ?? true;
+        hasVod = cache.vodStreamsNonEmpty() ?? true;
       }
 
       // Series
@@ -227,7 +227,7 @@ class _SyncScreenState extends ConsumerState<SyncScreen> {
       } else {
         _markDone(2);
         hasSeries =
-            cache.loadSeriesList(ignoreExpiry: true)?.isNotEmpty ?? true;
+            cache.seriesListNonEmpty() ?? true;
       }
 
       await cache.saveContentFlags(
@@ -237,11 +237,11 @@ class _SyncScreenState extends ConsumerState<SyncScreen> {
       );
 
       ref.invalidate(liveCategoriesProvider);
-      ref.invalidate(liveStreamsProvider);
+      ref.invalidate(liveAllStreamsProvider);
       ref.invalidate(vodCategoriesProvider);
-      ref.invalidate(vodStreamsProvider);
+      ref.invalidate(vodAllStreamsProvider);
       ref.invalidate(seriesCategoriesProvider);
-      ref.invalidate(seriesListProvider);
+      ref.invalidate(seriesAllListProvider);
     }
 
     ref.read(cacheLastSyncProvider.notifier).state = DateTime.now();

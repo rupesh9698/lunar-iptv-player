@@ -77,7 +77,9 @@ final accountInfoProvider = FutureProvider<AccountInfo?>((ref) async {
 // ── Live TV ──────────────────────────────────────────────────────────────────
 final liveCategoriesProvider = FutureProvider<List<XtreamCategory>>((ref) async {
   // Always try cache first — populated for both M3U and Xtream during sync
-  final cached = CacheService.instance.loadLiveCategories(ignoreExpiry: true);
+  final cached = await CacheService.instance.loadLiveCategories(
+    ignoreExpiry: true,
+  );
   if (cached != null) return cached;
 
   // No cache → fetch via Xtream API
@@ -93,21 +95,36 @@ final selectedLiveCategoryProvider = StateProvider<XtreamCategory?>(
   (ref) => null,
 );
 
-final liveStreamsProvider = FutureProvider<List<LiveStream>>((ref) async {
-  final category = ref.watch(selectedLiveCategoryProvider);
+// ── PERFORMANCE: one shared library per content type ───────────────────────
+// Each *library* provider loads the full list exactly once (decoded in a
+// background isolate by CacheService, or fetched + cached on first run) and
+// every category / filter / sort view derives from it in memory. Previously
+// every category change re-decoded the entire 60k-item JSON on the UI
+// thread, which froze and crashed low-spec TVs.
+//
+// To force a reload (after a sync or the Refresh button) invalidate the
+// library provider (liveAllStreamsProvider / vodAllStreamsProvider /
+// seriesAllListProvider) — the filtered views follow automatically.
 
-  final allCached = CacheService.instance.loadLiveStreams(ignoreExpiry: true);
-  if (allCached != null) {
-    if (category == null) return allCached;
-    return allCached
-        .where((s) => s.categoryId == category.categoryId)
-        .toList();
-  }
-
+/// Every live channel of the active playlist.
+final liveAllStreamsProvider = FutureProvider<List<LiveStream>>((ref) async {
+  ref.watch(activePlaylistProvider);
+  final cached = await CacheService.instance.loadLiveStreams(
+    ignoreExpiry: true,
+  );
+  if (cached != null) return cached;
   final service = ref.watch(xtreamServiceProvider);
   if (service == null) return []; // M3U without cache → needs sync
+  final streams = await service.getLiveStreams();
+  await CacheService.instance.saveLiveStreams(streams);
+  return streams;
+});
 
-  return service.getLiveStreams(categoryId: category?.categoryId);
+final liveStreamsProvider = FutureProvider<List<LiveStream>>((ref) async {
+  final category = ref.watch(selectedLiveCategoryProvider);
+  final all = await ref.watch(liveAllStreamsProvider.future);
+  if (category == null) return all;
+  return all.where((s) => s.categoryId == category.categoryId).toList();
 });
 
 // ── Movies (VOD) ─────────────────────────────────────────────────────────────
@@ -115,7 +132,9 @@ final vodCategoriesProvider = FutureProvider<List<XtreamCategory>>((ref) async {
   final service = ref.watch(xtreamServiceProvider);
   if (service == null) return [];
 
-  final cached = CacheService.instance.loadVodCategories(ignoreExpiry: true);
+  final cached = await CacheService.instance.loadVodCategories(
+    ignoreExpiry: true,
+  );
   if (cached != null) return cached;
 
   final cats = await service.getVodCategories();
@@ -127,19 +146,36 @@ final selectedVodCategoryProvider = StateProvider<XtreamCategory?>(
   (ref) => null,
 );
 
-final vodStreamsProvider = FutureProvider<List<VodStream>>((ref) async {
+/// Every movie of the active playlist (no cap — 60k+ is fine now).
+final vodAllStreamsProvider = FutureProvider<List<VodStream>>((ref) async {
   final service = ref.watch(xtreamServiceProvider);
-  final category = ref.watch(selectedVodCategoryProvider);
   if (service == null) return [];
-
-  final allCached = CacheService.instance.loadVodStreams(ignoreExpiry: true);
-  if (allCached != null) {
-    if (category == null) return allCached;
-    return allCached.where((s) => s.categoryId == category.categoryId).toList();
-  }
-
-  final streams = await service.getVodStreams(categoryId: category?.categoryId);
+  final cached = await CacheService.instance.loadVodStreams(
+    ignoreExpiry: true,
+  );
+  if (cached != null) return cached;
+  final streams = await service.getVodStreams();
+  await CacheService.instance.saveVodStreams(streams);
   return streams;
+});
+
+final vodStreamsProvider = FutureProvider<List<VodStream>>((ref) async {
+  final category = ref.watch(selectedVodCategoryProvider);
+  final all = await ref.watch(vodAllStreamsProvider.future);
+  if (category == null) return all;
+  return all.where((s) => s.categoryId == category.categoryId).toList();
+});
+
+/// Movie count per category id, computed once per library load (the
+/// sidebar used to loop over the whole library on every rebuild).
+final vodCategoryCountsProvider = Provider<Map<String, int>>((ref) {
+  final all = ref.watch(vodAllStreamsProvider).valueOrNull ?? const [];
+  final counts = <String, int>{};
+  for (final s in all) {
+    final id = s.categoryId ?? '';
+    counts[id] = (counts[id] ?? 0) + 1;
+  }
+  return counts;
 });
 
 // ── Series ───────────────────────────────────────────────────────────────────
@@ -149,7 +185,9 @@ final seriesCategoriesProvider = FutureProvider<List<XtreamCategory>>((
   final service = ref.watch(xtreamServiceProvider);
   if (service == null) return [];
 
-  final cached = CacheService.instance.loadSeriesCategories(ignoreExpiry: true);
+  final cached = await CacheService.instance.loadSeriesCategories(
+    ignoreExpiry: true,
+  );
   if (cached != null) return cached;
 
   final cats = await service.getSeriesCategories();
@@ -161,19 +199,35 @@ final selectedSeriesCategoryProvider = StateProvider<XtreamCategory?>(
   (ref) => null,
 );
 
-final seriesListProvider = FutureProvider<List<Series>>((ref) async {
+/// Every series of the active playlist (no cap).
+final seriesAllListProvider = FutureProvider<List<Series>>((ref) async {
   final service = ref.watch(xtreamServiceProvider);
-  final category = ref.watch(selectedSeriesCategoryProvider);
   if (service == null) return [];
+  final cached = await CacheService.instance.loadSeriesList(
+    ignoreExpiry: true,
+  );
+  if (cached != null) return cached;
+  final list = await service.getSeries();
+  await CacheService.instance.saveSeriesList(list);
+  return list;
+});
 
-  final allCached = CacheService.instance.loadSeriesList(ignoreExpiry: true);
-  if (allCached != null) {
-    if (category == null) return allCached;
-    return allCached.where((s) => s.categoryId == category.categoryId).toList();
+final seriesListProvider = FutureProvider<List<Series>>((ref) async {
+  final category = ref.watch(selectedSeriesCategoryProvider);
+  final all = await ref.watch(seriesAllListProvider.future);
+  if (category == null) return all;
+  return all.where((s) => s.categoryId == category.categoryId).toList();
+});
+
+/// Series count per category id, computed once per library load.
+final seriesCategoryCountsProvider = Provider<Map<String, int>>((ref) {
+  final all = ref.watch(seriesAllListProvider).valueOrNull ?? const [];
+  final counts = <String, int>{};
+  for (final s in all) {
+    final id = s.categoryId ?? '';
+    counts[id] = (counts[id] ?? 0) + 1;
   }
-
-  final series = await service.getSeries(categoryId: category?.categoryId);
-  return series;
+  return counts;
 });
 
 // ── Search ───────────────────────────────────────────────────────────────────
@@ -257,7 +311,7 @@ final backgroundRefreshProvider = FutureProvider<void>((ref) async {
       await cache.saveLiveCategories(cats);
       await cache.saveLiveStreams(ch);
       ref.invalidate(liveCategoriesProvider);
-      ref.invalidate(liveStreamsProvider);
+      ref.invalidate(liveAllStreamsProvider);
     } catch (_) {}
   }
 
@@ -268,7 +322,7 @@ final backgroundRefreshProvider = FutureProvider<void>((ref) async {
       await cache.saveVodCategories(cats);
       await cache.saveVodStreams(streams);
       ref.invalidate(vodCategoriesProvider);
-      ref.invalidate(vodStreamsProvider);
+      ref.invalidate(vodAllStreamsProvider);
     } catch (_) {}
   }
 
@@ -279,7 +333,7 @@ final backgroundRefreshProvider = FutureProvider<void>((ref) async {
       await cache.saveSeriesCategories(cats);
       await cache.saveSeriesList(series);
       ref.invalidate(seriesCategoriesProvider);
-      ref.invalidate(seriesListProvider);
+      ref.invalidate(seriesAllListProvider);
     } catch (_) {}
   }
 });

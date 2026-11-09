@@ -112,7 +112,7 @@ class EpgCacheNotifier extends StateNotifier<Map<String, List<EpgListing>>> {
 
     try {
       // 1. Check disk cache (30-min TTL)
-      final diskCached = CacheService.instance.loadEpg(
+      final diskCached = await CacheService.instance.loadEpg(
         streamId,
         maxAge: const Duration(minutes: 30),
       );
@@ -190,13 +190,7 @@ final epgPanelVisibleProvider = StateProvider<bool>((ref) => true);
 final liveSearchQueryProvider = StateProvider<String>((ref) => '');
 
 // ── Filtered Live Streams ────────────────────────────────────────────────────
-final liveAllStreamsProvider = FutureProvider<List<LiveStream>>((ref) async {
-  final cached = CacheService.instance.loadLiveStreams(ignoreExpiry: true);
-  if (cached != null) return cached;
-  final service = ref.watch(xtreamServiceProvider);
-  if (service == null) return [];
-  return service.getLiveStreams();
-});
+// liveAllStreamsProvider now lives in app_providers.dart (shared library).
 
 // ── Live UI Filter ────────────────────────────────────────────────────────────
 enum LiveFilter { all, favorites, recent }

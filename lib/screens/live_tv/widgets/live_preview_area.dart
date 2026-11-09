@@ -1830,6 +1830,7 @@ class _ChannelSwitchOverlay extends StatelessWidget {
                     imageUrl: channel.streamIcon!,
                     width: 80,
                     height: 54,
+                    memCacheWidth: 160,
                     fit: BoxFit.contain,
                     placeholder: (_, _) =>
                         const Icon(Icons.tv, color: Colors.white54, size: 32),

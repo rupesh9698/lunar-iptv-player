@@ -96,7 +96,7 @@ class SeriesGrid extends ConsumerWidget {
               const SizedBox(height: 12),
               TextButton.icon(
                 onPressed: () =>
-                    ref.invalidate(seriesListProvider),
+                    ref.invalidate(seriesAllListProvider),
                 icon: const Icon(Icons.refresh),
                 label: const Text('Retry'),
               ),

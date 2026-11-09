@@ -183,7 +183,7 @@ class _ChannelListPanelState extends ConsumerState<ChannelListPanel> {
               ),
               const SizedBox(height: 8),
               TextButton(
-                onPressed: () => ref.invalidate(liveStreamsProvider),
+                onPressed: () => ref.invalidate(liveAllStreamsProvider),
                 child: const Text('Retry'),
               ),
             ],

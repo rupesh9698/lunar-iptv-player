@@ -14,6 +14,7 @@ import 'package:url_launcher/url_launcher.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/utils/focus_utils.dart';
 import '../../core/utils/platform_utils.dart';
+import '../../core/utils/player_tuning.dart';
 import '../../providers/app_providers.dart';
 import '../../providers/live_tv_provider.dart';
 import '../../services/web_proxy_client.dart';
@@ -146,101 +147,11 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
       return;
     }
 
-    _player = Player(
-      configuration: const PlayerConfiguration(
-        // Disable libass on low-spec devices — saves ~15MB RAM
-        libass: false,
-      ),
-    );
-    _ctrl = VideoController(
-      _player,
-      configuration: const VideoControllerConfiguration(
-        enableHardwareAcceleration: true,
-        // No fixed width/height — forcing every stream through a 1280x720
-        // scaler was causing an extra GPU pass on every frame, which is
-        // *more* expensive than rendering at native resolution on most
-        // Android TV SoCs. Let the decoder output its native size and let
-        // the compositor scale to the view bounds (cheap, hardware-composited).
-      ),
-    );
-
-    // ── MPV properties ────────────────────────────────────────────────────────
-    // Fast profile first — mpv's own low-end preset, disables a cluster of
-    // expensive default post-processing filters in one call. Every
-    // override below still wins since profile is applied first.
-    await _setMpvProp('profile', 'fast');
-
-    // Leaner render path than gpu-next on Android's GLES surface.
-    await _setMpvProp('vo', 'gpu');
-    await _setMpvProp('gpu-context', 'android');
-    await _setMpvProp('swapchain-depth', '3');
-
-    // hwdec='auto' engages MediaCodec hardware decode reliably; falls back
-    // to software automatically per-codec if unsupported.
-    await _setMpvProp('hwdec', 'auto');
-    await _setMpvProp('hwdec-codecs', 'h264,hevc,mpeg2video,vp8,vp9,av1');
-
-    if (_isLive) {
-      // Live: 8s forward buffer absorbs HLS segment boundaries and network
-      // jitter without ever seeking backward (demuxer-max-back-bytes stays
-      // tiny).
-      await _setMpvProp('cache', 'yes');
-      await _setMpvProp('cache-secs', '8');
-      await _setMpvProp('cache-initial', '0');
-      await _setMpvProp('cache-pause', 'no');
-      await _setMpvProp('cache-pause-initial', 'no');
-      await _setMpvProp('cache-pause-wait', '0');
-      await _setMpvProp('demuxer-max-bytes', '16MiB');
-      await _setMpvProp('demuxer-max-back-bytes', '1MiB');
-      await _setMpvProp('demuxer-seekable-cache', 'no');
-      await _setMpvProp('hls-bitrate', 'max');
-      await _setMpvProp(
-        'stream-lavf-o',
-        'reconnect=1,reconnect_at_eof=1,reconnect_streamed=1,'
-            'reconnect_delay_max=2,timeout=12000000,'
-            'live_start_index=-1,fflags=nobuffer,analyzeduration=1000000',
-      );
-    } else {
-      // VOD: 10s cache is plenty for smooth seek/playback without holding
-      // minutes of data in RAM.
-      await _setMpvProp('cache', 'yes');
-      await _setMpvProp('cache-secs', '10');
-      await _setMpvProp('cache-initial', '512');
-      await _setMpvProp('cache-pause', 'yes');
-      await _setMpvProp('cache-pause-wait', '1');
-      await _setMpvProp('demuxer-max-bytes', '20MiB');
-      await _setMpvProp('demuxer-max-back-bytes', '5MiB');
-      await _setMpvProp('demuxer-readahead-secs', '10');
-    }
-
-    // ── Universal optimisations ───────────────────────────────────────────
-    await _setMpvProp('network-timeout', '15');
-    await _setMpvProp('video-sync', 'audio');
-    // Drop at the video-output stage only — decoder-side dropping on an
-    // already-slow decoder just adds bookkeeping overhead without helping.
-    await _setMpvProp('framedrop', 'vo');
-    await _setMpvProp('vd-lavc-threads', '0');
-    await _setMpvProp('vd-lavc-fast', 'yes');
-    // 'all' (not just nonkey) skips the deblocking filter on every frame —
-    // measurable win on weak CPUs, minor visible softness only on very
-    // low-bitrate streams.
-    await _setMpvProp('vd-lavc-skiploopfilter', 'all');
-    await _setMpvProp('vd-lavc-skipidct', 'nonkey');
-    await _setMpvProp('vd-lavc-skipframe', 'nonref');
-    await _setMpvProp('hr-seek', 'no');
-    await _setMpvProp('audio-buffer', '0.2');
-    await _setMpvProp('audio-latency-hack', 'yes');
-    await _setMpvProp('scale', 'bilinear');
-    await _setMpvProp('dscale', 'bilinear');
-    await _setMpvProp('cscale', 'bilinear');
-    await _setMpvProp('correct-downscaling', 'no');
-    await _setMpvProp('sigmoid-upscaling', 'no');
-    await _setMpvProp('video-latency-hacks', 'yes');
-    await _setMpvProp('deband', 'no');
-    await _setMpvProp('blend-subtitles', 'no');
-    await _setMpvProp('interpolation', 'no');
-    await _setMpvProp('dither-depth', 'no');
-    await _setMpvProp('osd-scale-by-window', 'no');
+    // Shared, device-aware tuning (see PlayerTuning for the rationale —
+    // the previous hand-rolled mpv option list never actually applied).
+    _player = Player(configuration: PlayerTuning.playerConfig());
+    _ctrl = VideoController(_player, configuration: PlayerTuning.videoConfig());
+    await PlayerTuning.apply(_player, live: _isLive);
 
     // ── Subscriptions ─────────────────────────────────────────────────────────
     _subs.addAll([
@@ -256,13 +167,20 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
         if (mounted) setState(() => _buffering = v);
       }),
       _player.stream.position.listen((v) {
-        if (!_isSeeking && mounted) setState(() => _pos = v);
+        if (_isSeeking || !mounted) return;
+        final secondChanged = v.inSeconds != _pos.inSeconds;
+        _pos = v; // always keep the latest value (used for saving)
+        // Rebuild only when the on-screen time changes and the OSD shows it.
+        if (secondChanged && _ctrlVisible && !_isLive) setState(() {});
       }),
       _player.stream.duration.listen((v) {
         if (mounted) setState(() => _dur = v);
       }),
       _player.stream.buffer.listen((v) {
-        if (mounted) setState(() => _buf = v);
+        final changed = v.inSeconds != _buf.inSeconds;
+        _buf = v;
+        // Only the buffering badge shows this value.
+        if (changed && _buffering && mounted) setState(() {});
       }),
       _player.stream.videoParams.listen((v) {
         if (!mounted) return;
@@ -544,13 +462,6 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
         ),
       ),
     );
-  }
-
-  Future<void> _setMpvProp(String key, String value) async {
-    try {
-      // ignore: avoid_dynamic_calls
-      await (_player as dynamic).setProperty(key, value);
-    } catch (_) {}
   }
 
   /// Saves position for Continue Watching. Skips very short content

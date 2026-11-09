@@ -11,6 +11,7 @@ import 'package:window_manager/window_manager.dart';
 import 'core/router/app_router.dart';
 import 'core/theme/app_theme.dart';
 import 'core/utils/focus_utils.dart';
+import 'core/utils/performance.dart';
 import 'core/utils/platform_utils.dart';
 import 'core/utils/responsive.dart';
 import 'services/cache_service.dart';
@@ -66,6 +67,9 @@ void main() async {
   // ── TV remote / keyboard focus ──────────────────────────────────────────
   // Track D-pad auto-repeat so focused list items jump-scroll into view.
   TvKeyTracker.install();
+
+  // ── Low-spec device profile (needs TV detection above) ─────────────────
+  await Perf.init();
   // On Android TV there is no touch input: always draw focus rings so the
   // user can see where the remote's focus is from the very first frame
   // (the automatic strategy starts in "touch" mode on Android and hides them).

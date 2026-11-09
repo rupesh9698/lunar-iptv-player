@@ -1,8 +1,6 @@
-import 'dart:isolate';
-
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:lunar_iptv_player/services/behavior_service.dart';
-import 'package:lunar_iptv_player/services/cache_service.dart';
 
 import '../core/constants/app_constants.dart';
 import '../models/xtream_models.dart';
@@ -30,6 +28,7 @@ class _SeriesSortMsg {
 }
 
 List<Series> _seriesSortIsolate(_SeriesSortMsg msg) {
+  final favs = msg.favIds.toSet();
   final filter = SeriesFilter.values[msg.filterIndex];
   final sort = SeriesSortBy.values[msg.sortIndex];
 
@@ -38,7 +37,7 @@ List<Series> _seriesSortIsolate(_SeriesSortMsg msg) {
   switch (filter) {
     case SeriesFilter.favorites:
       filtered = msg.list
-          .where((s) => msg.favIds.contains(s.seriesId))
+          .where((s) => favs.contains(s.seriesId))
           .toList();
     case SeriesFilter.recent:
       final map = {for (final s in msg.list) s.seriesId: s};
@@ -128,6 +127,13 @@ final sortedSeriesListProvider = FutureProvider<List<Series>>((ref) async {
     return [];
   }
 
+  // Fast path — default view needs no filtering/sorting: skip the isolate.
+  if (filter == SeriesFilter.all &&
+      query.isEmpty &&
+      sort == SeriesSortBy.defaultOrder) {
+    return allList;
+  }
+
   final scores = <String, double>{};
   if (query.isNotEmpty) {
     for (final s in allList) {
@@ -141,15 +147,11 @@ final sortedSeriesListProvider = FutureProvider<List<Series>>((ref) async {
     }
   }
 
-  final sortInput =
-      (filter == SeriesFilter.all && query.isEmpty && allList.length > 20000)
-      ? allList.sublist(0, 20000)
-      : allList;
-
-  return Isolate.run(
-    () => _seriesSortIsolate(
+  // Heavy filter/sort in a background isolate; no item cap any more.
+  return compute(
+    _seriesSortIsolate,
       _SeriesSortMsg(
-        list: sortInput,
+        list: allList,
         filterIndex: filter.index,
         sortIndex: sort.index,
         query: query,
@@ -157,7 +159,6 @@ final sortedSeriesListProvider = FutureProvider<List<Series>>((ref) async {
         recentIds: recentIds,
         scores: scores,
       ),
-    ),
   );
 });
 
@@ -211,14 +212,7 @@ final seriesFilterProvider = StateProvider<SeriesFilter>(
   (ref) => SeriesFilter.all,
 );
 
-// ── Series All List (no category filter) ─────────────────────────────────────
-final seriesAllListProvider = FutureProvider<List<Series>>((ref) async {
-  final cached = CacheService.instance.loadSeriesList(ignoreExpiry: true);
-  if (cached != null) return cached;
-  final service = ref.watch(xtreamServiceProvider);
-  if (service == null) return [];
-  return service.getSeries();
-});
+// seriesAllListProvider now lives in app_providers.dart (shared library).
 
 // ── Recently Viewed Series ────────────────────────────────────────────────────
 final recentlyViewedSeriesProvider =

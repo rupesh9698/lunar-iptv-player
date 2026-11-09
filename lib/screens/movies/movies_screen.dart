@@ -43,8 +43,8 @@ class _MoviesScreenState extends ConsumerState<MoviesScreen> {
     if (activeId != null) CacheService.instance.setActivePlaylist(activeId);
 
     final cache = CacheService.instance;
-    final streams = cache.loadVodStreams(ignoreExpiry: true);
-    _hasCache = streams?.isNotEmpty ?? false;
+    // Cheap check — the library itself is decoded later, in an isolate.
+    _hasCache = cache.hasVodStreams();
     _isRefreshing = !_hasCache || cache.isVodStale();
     if (_isRefreshing) {
       WidgetsBinding.instance.addPostFrameCallback((_) => _doRefresh());
@@ -74,7 +74,7 @@ class _MoviesScreenState extends ConsumerState<MoviesScreen> {
         await CacheService.instance.saveVodCategories(cats);
         await CacheService.instance.saveVodStreams(streams);
         ref.invalidate(vodCategoriesProvider);
-        ref.invalidate(vodStreamsProvider);
+        ref.invalidate(vodAllStreamsProvider);
         success = true;
       } catch (_) {}
     }
@@ -230,7 +230,7 @@ class _TopBar extends ConsumerWidget {
           const SizedBox(width: 8),
           // Refresh
           IconButton(
-            onPressed: () => ref.invalidate(vodStreamsProvider),
+            onPressed: () => ref.invalidate(vodAllStreamsProvider),
             icon: const Icon(
               Icons.refresh,
               color: AppTheme.textSecondary,
@@ -445,20 +445,15 @@ class _VodCategorySidebarState extends ConsumerState<_VodCategorySidebar> {
   Widget build(BuildContext context) {
     final categoriesAsync = ref.watch(vodCategoriesProvider);
     final selected = ref.watch(selectedVodCategoryProvider);
-    final streamsAsync = ref.watch(vodStreamsProvider);
     final filter = ref.watch(vodFilterProvider);
     final favorites = ref.watch(vodFavoritesProvider);
     final recentIds = ref.watch(recentlyViewedVodProvider);
 
-    // Count per category
-    final countMap = <String, int>{};
-    streamsAsync.whenData((streams) {
-      for (final s in streams) {
-        final id = s.categoryId ?? '';
-        countMap[id] = (countMap[id] ?? 0) + 1;
-      }
-    });
-    final totalCount = streamsAsync.whenData((s) => s.length).value ?? 0;
+    // Per-category counts come from a provider computed once per library
+    // load (this loop over 60k movies used to run on every rebuild, and
+    // counted only the selected category).
+    final countMap = ref.watch(vodCategoryCountsProvider);
+    final totalCount = ref.watch(vodAllStreamsProvider).valueOrNull?.length ?? 0;
 
     return SizedBox(
       width: widget.width,
@@ -685,6 +680,7 @@ class _MoviesGrid extends ConsumerStatefulWidget {
 
 class _MoviesGridState extends ConsumerState<_MoviesGrid> {
   int _displayLimit = 60;
+  int _total = 0; // length of the current list (set in build)
   final ScrollController _scrollCtrl = ScrollController();
 
   @override
@@ -696,8 +692,10 @@ class _MoviesGridState extends ConsumerState<_MoviesGrid> {
   void _onScroll() {
     if (!mounted) return;
     final pos = _scrollCtrl.position;
-    if (pos.pixels > pos.maxScrollExtent - 1200) {
-      setState(() => _displayLimit = (_displayLimit + 60).clamp(0, 60000));
+    // Grow the window only while there is more to show (the old hard cap
+    // of 60,000 hid the end of very large libraries).
+    if (pos.pixels > pos.maxScrollExtent - 1200 && _displayLimit < _total) {
+      setState(() => _displayLimit += 60);
     }
   }
 
@@ -729,7 +727,7 @@ class _MoviesGridState extends ConsumerState<_MoviesGrid> {
             Text('$e', style: const TextStyle(color: AppTheme.textSecondary)),
             const SizedBox(height: 12),
             ElevatedButton.icon(
-              onPressed: () => ref.invalidate(vodStreamsProvider),
+              onPressed: () => ref.invalidate(vodAllStreamsProvider),
               icon: const Icon(Icons.refresh),
               label: const Text('Retry'),
             ),
@@ -753,6 +751,7 @@ class _MoviesGridState extends ConsumerState<_MoviesGrid> {
         // The underlying list can be 60k+ — we never pass more than
         // _displayLimit items to the grid delegate so Flutter never
         // tries to measure 60k cells at once.
+        _total = streams.length;
         final visibleStreams = streams.length > _displayLimit
             ? streams.sublist(0, _displayLimit)
             : streams;

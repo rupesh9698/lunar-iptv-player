@@ -229,6 +229,7 @@ class _ContinueCardState extends State<_ContinueCard> {
                     ? CachedNetworkImage(
                   imageUrl: imageUrl,
                   fit: BoxFit.cover,
+                  memCacheWidth: 420, // card is 212 px wide
                   placeholder: (_, _) =>
                       _Placeholder(type: type),
                   errorWidget: (_, _, _) =>

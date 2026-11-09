@@ -1,4 +1,7 @@
 import 'dart:convert';
+import 'dart:isolate';
+
+import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'package:lunar_iptv_player/services/stream_proxy_service.dart';
 import '../models/xtream_models.dart';
@@ -28,6 +31,8 @@ class XtreamService {
     return Uri.parse(resolvedUrl);
   }
 
+  /// Small requests (account info, categories, EPG, item info): parsed on
+  /// the calling isolate — they are only a few KB.
   Future<T> _get<T>(Uri uri, T Function(dynamic) parser) async {
     final response = await _client
         .get(uri, headers: {'Accept': 'application/json'})
@@ -36,7 +41,36 @@ class XtreamService {
     if (response.statusCode != 200) {
       throw Exception('HTTP ${response.statusCode}: ${response.reasonPhrase}');
     }
-    return parser(json.decode(response.body));
+    return parser(
+      json.decode(utf8.decode(response.bodyBytes, allowMalformed: true)),
+    );
+  }
+
+  /// Library-sized requests (all channels / 60k movies / 20k series): the
+  /// UTF-8 decode, JSON parse and model construction all run in a background
+  /// isolate, so the UI never freezes and the giant intermediate maps never
+  /// touch the UI isolate's heap. [parser] must be a top-level function.
+  /// Bigger timeout: these responses can be tens of MB on slow servers.
+  Future<List<T>> _getList<T>(
+    Uri uri,
+    List<T> Function(Object? json) parser,
+  ) async {
+    final response = await _client
+        .get(uri, headers: {'Accept': 'application/json'})
+        .timeout(const Duration(seconds: 150));
+
+    if (response.statusCode != 200) {
+      throw Exception('HTTP ${response.statusCode}: ${response.reasonPhrase}');
+    }
+    if (kIsWeb) {
+      return parser(json.decode(utf8.decode(response.bodyBytes)));
+    }
+    // TransferableTypedData moves the bytes to the worker without a copy.
+    final bytes = TransferableTypedData.fromList([response.bodyBytes]);
+    return Isolate.run(() {
+      final data = bytes.materialize().asUint8List();
+      return parser(json.decode(utf8.decode(data, allowMalformed: true)));
+    });
   }
 
   // ── Authentication & Account Info ────────────────────────────
@@ -64,12 +98,7 @@ class XtreamService {
       AppConstants.actionGetLiveStreams,
       categoryId != null ? {'category_id': categoryId} : null,
     );
-    return _get(
-      uri,
-      (data) => (data as List)
-          .map((e) => LiveStream.fromJson(e as Map<String, dynamic>))
-          .toList(),
-    );
+    return _getList(uri, _parseLiveList);
   }
 
   // ── Movies (VOD) ─────────────────────────────────────────────
@@ -88,12 +117,7 @@ class XtreamService {
       AppConstants.actionGetVodStreams,
       categoryId != null ? {'category_id': categoryId} : null,
     );
-    return _get(
-      uri,
-      (data) => (data as List)
-          .map((e) => VodStream.fromJson(e as Map<String, dynamic>))
-          .toList(),
-    );
+    return _getList(uri, _parseVodList);
   }
 
   Future<VodInfo> getVodInfo(String vodId) async {
@@ -117,12 +141,7 @@ class XtreamService {
       AppConstants.actionGetSeries,
       categoryId != null ? {'category_id': categoryId} : null,
     );
-    return _get(
-      uri,
-      (data) => (data as List)
-          .map((e) => Series.fromJson(e as Map<String, dynamic>))
-          .toList(),
-    );
+    return _getList(uri, _parseSeriesList);
   }
 
   Future<SeriesInfo> getSeriesInfo(String seriesId) async {
@@ -201,3 +220,16 @@ class XtreamService {
     return {'live': live, 'vod': vod, 'series': series};
   }
 }
+
+// ── Isolate parsers (top-level so they can be sent to Isolate.run) ──────────
+List<Map<String, dynamic>> _maps(Object? data) =>
+    data is List ? data.whereType<Map<String, dynamic>>().toList() : const [];
+
+List<LiveStream> _parseLiveList(Object? data) =>
+    _maps(data).map(LiveStream.fromJson).toList();
+
+List<VodStream> _parseVodList(Object? data) =>
+    _maps(data).map(VodStream.fromJson).toList();
+
+List<Series> _parseSeriesList(Object? data) =>
+    _maps(data).map(Series.fromJson).toList();

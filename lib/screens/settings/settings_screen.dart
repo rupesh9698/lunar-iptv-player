@@ -9,9 +9,11 @@ import 'package:package_info_plus/package_info_plus.dart';
 import '../../core/constants/app_constants.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/utils/focus_utils.dart';
+import '../../core/utils/performance.dart';
 import '../../core/utils/platform_utils.dart';
 import '../../models/xtream_models.dart';
 import '../../providers/app_providers.dart';
+import '../../providers/live_player_provider.dart';
 import '../../providers/live_tv_provider.dart';
 import '../../providers/movies_provider.dart';
 import '../../providers/series_provider.dart';
@@ -892,6 +894,44 @@ class _PlaybackSectionState extends ConsumerState<_PlaybackSection> {
                     // Clear saved position when user disables
                     ref.read(lastWatchedLiveProvider.notifier).clear();
                   }
+                },
+                activeTrackColor: AppTheme.primary,
+                activeThumbColor: Colors.white,
+                inactiveTrackColor: AppTheme.surfaceVariant,
+                inactiveThumbColor: AppTheme.textMuted,
+              ),
+            ),
+          ),
+          const Padding(
+            padding: EdgeInsets.fromLTRB(16, 16, 16, 4),
+            child: Text(
+              'PERFORMANCE',
+              style: TextStyle(
+                color: AppTheme.textMuted,
+                fontSize: 10,
+                fontWeight: FontWeight.w700,
+                letterSpacing: 1,
+              ),
+            ),
+          ),
+          _SettCard(
+            child: _SettTile(
+              icon: Icons.speed_rounded,
+              title: 'Low-spec performance mode',
+              subtitle:
+                  'Direct hardware video output, smaller buffers and lighter '
+                  'UI. ${Perf.userOverride == null ? 'Automatic' : 'Manual'}'
+                  ' — ${Perf.detectedLowEnd ? 'recommended' : 'not needed'}'
+                  ' for this device. Turn off if a channel shows no picture. '
+                  'Applies to the next video you open.',
+              trailing: Switch(
+                value: Perf.enabled,
+                onChanged: (v) async {
+                  await Perf.setUserOverride(v);
+                  // Live TV keeps one player for the whole session —
+                  // recreate it so the new video output takes effect.
+                  ref.invalidate(livePlayerProvider);
+                  if (mounted) setState(() {});
                 },
                 activeTrackColor: AppTheme.primary,
                 activeThumbColor: Colors.white,

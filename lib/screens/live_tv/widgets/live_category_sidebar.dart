@@ -6,6 +6,7 @@ import 'package:lunar_iptv_player/screens/live_tv/widgets/time_of_day_strip.dart
 
 import '../../../core/theme/app_theme.dart';
 import '../../../core/utils/focus_utils.dart';
+import '../../../core/utils/performance.dart';
 import '../../../models/xtream_models.dart';
 import '../../../providers/app_providers.dart';
 import '../../../providers/live_tv_provider.dart';
@@ -386,7 +387,14 @@ class _LiveCategorySidebarState extends ConsumerState<LiveCategorySidebar> {
                                 _onCategoryTap(context, cat, selected),
                             onLongPress: () =>
                                 _showHideDialog(context, cat, selected),
-                          ).animate().fadeIn(
+                          ).animate(
+                            // Stagger only the first rows, and never on
+                            // low-spec devices — one animation per category
+                            // (hundreds) ran for seconds after opening.
+                            // value: 1 = start at the end state (no animation).
+                            value: Perf.listAnimations && i < 15 ? 0 : 1,
+                            autoPlay: Perf.listAnimations && i < 15,
+                          ).fadeIn(
                             delay: Duration(milliseconds: i * 18),
                             duration: 250.ms,
                           ),

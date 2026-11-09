@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'package:lunar_iptv_player/widgets/app_network_image.dart';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -183,7 +184,7 @@ class _EpgTimelineState extends ConsumerState<EpgTimeline> {
               _channelFocusNodes.isNotEmpty ? _channelFocusNodes[0] : null,
           onRefresh: () {
             ref.read(epgCacheProvider.notifier).clear();
-            ref.invalidate(liveStreamsProvider);
+            ref.invalidate(liveAllStreamsProvider);
           },
         ),
 
@@ -223,7 +224,7 @@ class _EpgTimelineState extends ConsumerState<EpgTimeline> {
                   ),
                   const SizedBox(height: 8),
                   TextButton(
-                    onPressed: () => ref.invalidate(liveStreamsProvider),
+                    onPressed: () => ref.invalidate(liveAllStreamsProvider),
                     child: const Text('Retry'),
                   ),
                 ],
@@ -874,10 +875,14 @@ class _ChannelCellState extends State<_ChannelCell> with TvFocusMixin {
   Widget _logo() {
     final icon = widget.channel.streamIcon;
     if (icon != null && icon.isNotEmpty) {
-      return Image.network(
-        icon,
+      // Disk-cached and decoded at logo size — hundreds of channel rows used
+      // to download and decode full-size logos on every visit.
+      return AppNetworkImage(
+        url: icon,
+        width: 40,
+        height: 32,
         fit: BoxFit.contain,
-        errorBuilder: (_, _, _) => _placeholder(),
+        fallback: _placeholder(),
       );
     }
     return _placeholder();

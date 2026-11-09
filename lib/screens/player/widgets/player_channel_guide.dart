@@ -430,6 +430,7 @@ class _ChannelItemState extends State<_ChannelItem> {
                     ? CachedNetworkImage(
                   imageUrl: widget.channel.streamIcon!,
                   fit: BoxFit.contain,
+                  memCacheWidth: 110,
                   placeholder: (_, _) =>
                   const Icon(Icons.tv, color: Colors.white30, size: 18),
                   errorWidget: (_, _, _) =>

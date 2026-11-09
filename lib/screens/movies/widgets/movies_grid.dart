@@ -98,7 +98,7 @@ class MoviesGrid extends ConsumerWidget {
               ),
               const SizedBox(height: 12),
               TextButton.icon(
-                onPressed: () => ref.invalidate(vodStreamsProvider),
+                onPressed: () => ref.invalidate(vodAllStreamsProvider),
                 icon: const Icon(Icons.refresh),
                 label: const Text('Retry'),
               ),

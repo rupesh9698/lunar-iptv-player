@@ -313,11 +313,11 @@ class _LeftPanel extends ConsumerWidget {
     ref.read(continueWatchingProvider.notifier).refresh();
     ref.invalidate(accountInfoProvider);
     ref.invalidate(liveCategoriesProvider);
-    ref.invalidate(liveStreamsProvider);
+    ref.invalidate(liveAllStreamsProvider);
     ref.invalidate(vodCategoriesProvider);
-    ref.invalidate(vodStreamsProvider);
+    ref.invalidate(vodAllStreamsProvider);
     ref.invalidate(seriesCategoriesProvider);
-    ref.invalidate(seriesListProvider);
+    ref.invalidate(seriesAllListProvider);
     ref.read(cacheLastSyncProvider.notifier).state = DateTime.now();
   }
 

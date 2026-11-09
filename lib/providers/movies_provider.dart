@@ -1,8 +1,6 @@
-import 'dart:isolate';
-
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:lunar_iptv_player/services/behavior_service.dart';
-import 'package:lunar_iptv_player/services/cache_service.dart';
 
 import '../core/constants/app_constants.dart';
 import '../models/xtream_models.dart';
@@ -38,9 +36,8 @@ List<VodStream> _vodSortIsolate(_VodSortMsg msg) {
 
   switch (filter) {
     case VodFilter.favorites:
-      filtered = msg.streams
-          .where((s) => msg.favIds.contains(s.streamId))
-          .toList();
+      final favs = msg.favIds.toSet();
+      filtered = msg.streams.where((s) => favs.contains(s.streamId)).toList();
     case VodFilter.recent:
       final map = {for (final s in msg.streams) s.streamId: s};
       filtered = msg.recentIds
@@ -139,6 +136,14 @@ final sortedVodStreamsProvider = FutureProvider<List<VodStream>>((ref) async {
     return [];
   }
 
+  // Fast path — the default view (most common, and what opens first) needs
+  // no filtering or sorting, so skip the isolate round-trip entirely.
+  if (filter == VodFilter.all &&
+      query.isEmpty &&
+      sort == VodSortBy.defaultOrder) {
+    return allStreams;
+  }
+
   // Pre-compute search scores (fast — only on matched items)
   final scores = <String, double>{};
   if (query.isNotEmpty) {
@@ -153,18 +158,12 @@ final sortedVodStreamsProvider = FutureProvider<List<VodStream>>((ref) async {
     }
   }
 
-  // Run heavy sort in background isolate to prevent ANR.
-  // Cap input to 20k for non-search views to prevent OOM on 60k+ libraries.
-  // For search/favorites/recent the list is already small.
-  final sortInput =
-      (filter == VodFilter.all && query.isEmpty && allStreams.length > 20000)
-      ? allStreams.sublist(0, 20000)
-      : allStreams;
-
-  return Isolate.run(
-    () => _vodSortIsolate(
+  // Heavy filter/sort runs in a background isolate (compute also works on
+  // web). No item cap any more — the whole library stays searchable.
+  return compute(
+    _vodSortIsolate,
       _VodSortMsg(
-        streams: sortInput,
+        streams: allStreams,
         filterIndex: filter.index,
         sortIndex: sort.index,
         query: query,
@@ -172,7 +171,6 @@ final sortedVodStreamsProvider = FutureProvider<List<VodStream>>((ref) async {
         recentIds: recentIds,
         scores: scores,
       ),
-    ),
   );
 });
 
@@ -220,19 +218,7 @@ enum VodFilter { all, favorites, recent, recentlyAdded }
 
 final vodFilterProvider = StateProvider<VodFilter>((ref) => VodFilter.all);
 
-// ── Vod All Streams (no category filter) ─────────────────────────────────
-// Hard cap at 20k to prevent OOM on low-end devices.
-// The isolate sort in sortedVodStreamsProvider already caps at 20k, but
-// the decode itself can OOM before we even get there. Cap here too.
-final vodAllStreamsProvider = FutureProvider<List<VodStream>>((ref) async {
-  final cached = CacheService.instance.loadVodStreams(ignoreExpiry: true);
-  if (cached != null) {
-    return cached.length > 20000 ? cached.sublist(0, 20000) : cached;
-  }
-  final service = ref.watch(xtreamServiceProvider);
-  if (service == null) return [];
-  return service.getVodStreams();
-});
+// vodAllStreamsProvider now lives in app_providers.dart (shared library).
 
 // ── Recently Viewed VOD ───────────────────────────────────────────────────────
 final recentlyViewedVodProvider =

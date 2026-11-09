@@ -89,8 +89,8 @@ class _LiveTVScreenState extends ConsumerState<LiveTVScreen> {
     }
 
     final cache = CacheService.instance;
-    final streams = cache.loadLiveStreams(ignoreExpiry: true);
-    _hasCache = streams?.isNotEmpty ?? false;
+    // Cheap check — no decoding of the channel list on the UI thread.
+    _hasCache = cache.hasLiveStreams();
 
     // M3U: only refresh when cache is empty (don't stale-expire like Xtream)
     // Xtream: refresh when cache is empty OR older than 24h
@@ -244,7 +244,7 @@ class _LiveTVScreenState extends ConsumerState<LiveTVScreen> {
             hasSeries: false,
           );
           ref.invalidate(liveCategoriesProvider);
-          ref.invalidate(liveStreamsProvider);
+          ref.invalidate(liveAllStreamsProvider);
           success = true;
         } catch (_) {}
       }
@@ -292,7 +292,7 @@ class _LiveTVScreenState extends ConsumerState<LiveTVScreen> {
         await CacheService.instance.saveLiveStreams(channels);
 
         ref.invalidate(liveCategoriesProvider);
-        ref.invalidate(liveStreamsProvider);
+        ref.invalidate(liveAllStreamsProvider);
         success = true;
       } on TimeoutException {
         // retry
@@ -629,7 +629,8 @@ class _LiveTVScreenState extends ConsumerState<LiveTVScreen> {
     // Fallback: search all cached streams
     if (channel == null) {
       final allCached =
-          CacheService.instance.loadLiveStreams(ignoreExpiry: true) ?? [];
+          await CacheService.instance.loadLiveStreams(ignoreExpiry: true) ??
+          const <LiveStream>[];
       channel = allCached.firstWhereOrNull((s) => s.streamId == last.channelId);
 
       // If found in cache but not in filtered list, category may have been

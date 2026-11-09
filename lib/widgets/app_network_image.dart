@@ -1,12 +1,22 @@
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter_animate/flutter_animate.dart';
-import '../services/app_cache_manager.dart';
 
 import '../core/theme/app_theme.dart';
+import '../core/utils/performance.dart';
+import '../services/app_cache_manager.dart';
 
-/// A robust network image widget with shimmer loading, error fallback,
+/// A robust network image widget with a light placeholder, error fallback,
 /// and proper caching. Use this everywhere instead of Image.network.
+///
+/// Performance notes (low-spec TVs):
+/// • Images are DECODED at their on-screen size (measured with a
+///   LayoutBuilder). Poster URLs are frequently 2000×3000 originals — 24 MB
+///   each once decoded — which exhausted memory and made posters vanish.
+/// • No `maxWidthDiskCache`/`maxHeightDiskCache`: with a plain CacheManager
+///   those trip an assertion (every poster showed the fallback in debug
+///   builds) and are ignored in release.
+/// • The placeholder is static — an animated shimmer per tile kept dozens of
+///   animations running while a grid loaded.
 class AppNetworkImage extends StatelessWidget {
   final String? url;
   final BoxFit fit;
@@ -33,25 +43,32 @@ class AppNetworkImage extends StatelessWidget {
 
     final child = cleanUrl == null
         ? _fallbackWidget()
-        : CachedNetworkImage(
-            imageUrl: cleanUrl,
-            fit: fit,
-            width: width,
-            height: height,
-            httpHeaders: headers,
-            cacheManager:
-                AppCacheManager.instance, // ← custom cache (2000 objects)
-            memCacheHeight: height != null ? (height! * 2).toInt() : null,
-            memCacheWidth: width != null ? (width! * 2).toInt() : null,
-            maxHeightDiskCache: 600,
-            maxWidthDiskCache: 400,
-            placeholder: (_, _) => _ShimmerBox(
-              width: width ?? double.infinity,
-              height: height ?? double.infinity,
-            ),
-            errorWidget: (_, _, _) => _fallbackWidget(),
-            fadeInDuration: const Duration(milliseconds: 200),
-            fadeOutDuration: const Duration(milliseconds: 100),
+        : LayoutBuilder(
+            builder: (context, constraints) {
+              final dpr = MediaQuery.devicePixelRatioOf(context);
+              final logicalW =
+                  width ??
+                  (constraints.hasBoundedWidth ? constraints.maxWidth : 200);
+              return CachedNetworkImage(
+                imageUrl: cleanUrl,
+                fit: fit,
+                width: width,
+                height: height,
+                httpHeaders: headers,
+                cacheManager: AppCacheManager.instance,
+                // Width only → aspect ratio preserved by the decoder.
+                memCacheWidth: Perf.decodeWidth(logicalW, dpr),
+                placeholder: (_, _) => _ShimmerBox(
+                  width: width ?? double.infinity,
+                  height: height ?? double.infinity,
+                ),
+                errorWidget: (_, _, _) => _fallbackWidget(),
+                fadeInDuration: Perf.enabled
+                    ? Duration.zero
+                    : const Duration(milliseconds: 150),
+                fadeOutDuration: Duration.zero,
+              );
+            },
           );
 
     if (borderRadius != null) {
@@ -95,16 +112,12 @@ class _ShimmerBox extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // Static on purpose (see class docs) — cheap even with 50 tiles loading.
     return Container(
-          width: width,
-          height: height,
-          color: AppTheme.surfaceVariant,
-        )
-        .animate(onPlay: (c) => c.repeat(reverse: true))
-        .shimmer(
-          duration: 1200.ms,
-          color: AppTheme.cardHover.withValues(alpha: 0.6),
-        );
+      width: width,
+      height: height,
+      color: AppTheme.surfaceVariant,
+    );
   }
 }
 

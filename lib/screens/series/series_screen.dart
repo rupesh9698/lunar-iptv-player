@@ -42,8 +42,8 @@ class _SeriesScreenState extends ConsumerState<SeriesScreen> {
     if (activeId != null) CacheService.instance.setActivePlaylist(activeId);
 
     final cache = CacheService.instance;
-    final list = cache.loadSeriesList(ignoreExpiry: true);
-    _hasCache = list?.isNotEmpty ?? false;
+    // Cheap check — the library itself is decoded later, in an isolate.
+    _hasCache = cache.hasSeriesList();
     _isRefreshing = !_hasCache || cache.isSeriesStale();
     if (_isRefreshing) {
       WidgetsBinding.instance.addPostFrameCallback((_) => _doRefresh());
@@ -73,7 +73,7 @@ class _SeriesScreenState extends ConsumerState<SeriesScreen> {
         await CacheService.instance.saveSeriesCategories(cats);
         await CacheService.instance.saveSeriesList(series);
         ref.invalidate(seriesCategoriesProvider);
-        ref.invalidate(seriesListProvider);
+        ref.invalidate(seriesAllListProvider);
         success = true;
       } catch (_) {}
     }
@@ -227,7 +227,7 @@ class _SeriesTopBar extends ConsumerWidget {
           _SeriesSearchButton(),
           const SizedBox(width: 8),
           IconButton(
-            onPressed: () => ref.invalidate(seriesListProvider),
+            onPressed: () => ref.invalidate(seriesAllListProvider),
             icon: const Icon(
               Icons.refresh,
               color: AppTheme.textSecondary,
@@ -434,19 +434,14 @@ class _SeriesCategorySidebarState
   Widget build(BuildContext context) {
     final categoriesAsync = ref.watch(seriesCategoriesProvider);
     final selected = ref.watch(selectedSeriesCategoryProvider);
-    final seriesAsync = ref.watch(seriesListProvider);
     final filter = ref.watch(seriesFilterProvider);
     final favorites = ref.watch(seriesFavoritesProvider);
     final recentIds = ref.watch(recentlyViewedSeriesProvider);
 
-    final countMap = <String, int>{};
-    seriesAsync.whenData((list) {
-      for (final s in list) {
-        final id = s.categoryId ?? '';
-        countMap[id] = (countMap[id] ?? 0) + 1;
-      }
-    });
-    final totalCount = seriesAsync.whenData((s) => s.length).value ?? 0;
+    // Per-category counts computed once per library load (see provider).
+    final countMap = ref.watch(seriesCategoryCountsProvider);
+    final totalCount =
+        ref.watch(seriesAllListProvider).valueOrNull?.length ?? 0;
 
     return SizedBox(
       width: widget.width,
@@ -862,6 +857,7 @@ class _SeriesGrid extends ConsumerStatefulWidget {
 
 class _SeriesGridState extends ConsumerState<_SeriesGrid> {
   int _displayLimit = 30;
+  int _total = 0; // length of the current list (set in build)
   final ScrollController _scrollCtrl = ScrollController();
 
   @override
@@ -873,8 +869,10 @@ class _SeriesGridState extends ConsumerState<_SeriesGrid> {
   void _onScroll() {
     if (!mounted) return;
     final pos = _scrollCtrl.position;
-    if (pos.pixels > pos.maxScrollExtent - 600) {
-      setState(() => _displayLimit = (_displayLimit + 30).clamp(0, 5000));
+    // Grow only while there is more to show (the old cap of 5,000 made
+    // three quarters of a 20k-series library unreachable).
+    if (pos.pixels > pos.maxScrollExtent - 900 && _displayLimit < _total) {
+      setState(() => _displayLimit += 40);
     }
   }
 
@@ -904,7 +902,7 @@ class _SeriesGridState extends ConsumerState<_SeriesGrid> {
             const Icon(Icons.error_outline, color: AppTheme.error, size: 40),
             const SizedBox(height: 12),
             TextButton.icon(
-              onPressed: () => ref.invalidate(seriesListProvider),
+              onPressed: () => ref.invalidate(seriesAllListProvider),
               icon: const Icon(Icons.refresh),
               label: const Text('Retry'),
             ),
@@ -971,7 +969,10 @@ class _SeriesGridState extends ConsumerState<_SeriesGrid> {
                   (ctx, i) => RepaintBoundary(
                     child: _SeriesPosterCard(series: seriesList[i]),
                   ),
-                  childCount: seriesList.length.clamp(0, _displayLimit),
+                  childCount: (_total = seriesList.length).clamp(
+                    0,
+                    _displayLimit,
+                  ),
                   // Reuse widgets when scrolling for memory efficiency
                   addRepaintBoundaries: false,
                   addAutomaticKeepAlives: false,

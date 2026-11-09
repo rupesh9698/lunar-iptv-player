@@ -118,11 +118,10 @@ final forYouVodProvider = Provider<AsyncValue<List<VodStream>>>((ref) {
         movie.streamId,
         base,
       );
-      scored.add((movie, score));
+      _pushTop(scored, (movie, score));
     }
 
-    scored.sort((a, b) => b.$2.compareTo(a.$2));
-    return scored.take(25).map((e) => e.$1).toList();
+    return scored.map((e) => e.$1).toList();
   });
 });
 
@@ -152,11 +151,10 @@ final forYouSeriesProvider = Provider<AsyncValue<List<Series>>>((ref) {
       }
 
       final score = BehaviorService.instance.getSearchScore(s.seriesId, base);
-      scored.add((s, score));
+      _pushTop(scored, (s, score));
     }
 
-    scored.sort((a, b) => b.$2.compareTo(a.$2));
-    return scored.take(25).map((e) => e.$1).toList();
+    return scored.map((e) => e.$1).toList();
   });
 });
 
@@ -184,3 +182,18 @@ final autoFavSuggestionsProvider = Provider<List<String>>((ref) {
   final allFavs = <String>{...liveFavs, ...vodFavs, ...seriesFavs};
   return BehaviorService.instance.getSuggestedFavorites(allFavs, minViews: 5);
 });
+
+
+/// Keeps [top] sorted by score (desc) and at most [_kForYouCount] long.
+/// O(n·k) with tiny k — avoids materialising and sorting the whole library.
+const int _kForYouCount = 25;
+
+void _pushTop<T>(List<(T, double)> top, (T, double) item) {
+  if (top.length == _kForYouCount && item.$2 <= top.last.$2) return;
+  var i = top.length;
+  while (i > 0 && top[i - 1].$2 < item.$2) {
+    i--;
+  }
+  top.insert(i, item);
+  if (top.length > _kForYouCount) top.removeLast();
+}

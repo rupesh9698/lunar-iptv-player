@@ -160,6 +160,7 @@ class _ForYouCardState extends State<_ForYouCard> {
                     ? CachedNetworkImage(
                   imageUrl: item.imageUrl!,
                   fit: BoxFit.cover,
+                  memCacheWidth: 200, // tile is 94 px wide
                   placeholder: (_, _) =>
                       Container(color: AppTheme.surfaceVariant),
                   errorWidget: (_, _, _) => Container(

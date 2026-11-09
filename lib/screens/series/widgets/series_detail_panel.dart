@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:lunar_iptv_player/widgets/app_network_image.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -354,11 +355,12 @@ class _SeriesDetailPanelState extends ConsumerState<SeriesDetailPanel> {
           height: 200,
           width: double.infinity,
           child: backdrop != null && backdrop.isNotEmpty
-              ? Image.network(
-                  backdrop,
+              // Disk-cached + decoded at panel size (was a full-size,
+              // uncached Image.network).
+              ? AppNetworkImage(
+                  url: backdrop,
                   fit: BoxFit.cover,
-                  errorBuilder: (_, _, _) =>
-                      Container(color: AppTheme.surfaceVariant),
+                  fallback: Container(color: AppTheme.surfaceVariant),
                 )
               : Container(color: AppTheme.surfaceVariant),
         ),
@@ -432,12 +434,12 @@ class _SeriesDetailPanelState extends ConsumerState<SeriesDetailPanel> {
                 if (cover != null && cover.isNotEmpty)
                   ClipRRect(
                     borderRadius: BorderRadius.circular(8),
-                    child: Image.network(
-                      cover,
+                    child: AppNetworkImage(
+                      url: cover,
                       width: 60,
                       height: 88,
                       fit: BoxFit.cover,
-                      errorBuilder: (_, _, _) => const SizedBox.shrink(),
+                      fallback: const SizedBox(width: 60, height: 88),
                     ),
                   ),
 

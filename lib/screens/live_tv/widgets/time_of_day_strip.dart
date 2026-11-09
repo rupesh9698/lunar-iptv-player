@@ -175,6 +175,7 @@ class _TimeOfDayChipState extends ConsumerState<_TimeOfDayChip>
                           ? CachedNetworkImage(
                               imageUrl: widget.channel.streamIcon!,
                               fit: BoxFit.contain,
+                              memCacheWidth: 80,
                               placeholder: (_, _) => const Icon(
                                 Icons.tv,
                                 color: AppTheme.textMuted,
