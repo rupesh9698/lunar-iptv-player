@@ -11,7 +11,7 @@ import 'package:lunar_iptv_player/core/utils/responsive.dart';
 import 'package:lunar_iptv_player/providers/behavior_providers.dart';
 import 'package:lunar_iptv_player/services/behavior_service.dart';
 import 'package:lunar_iptv_player/widgets/continue_watching_row.dart';
-import 'package:upgrader/upgrader.dart';
+import '../../services/app_update_service.dart';
 
 import '../../core/theme/app_theme.dart';
 import '../../models/xtream_models.dart';
@@ -32,6 +32,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _triggerBackgroundRefreshIfStale();
+      // In-app update check (Play / App Store / appcast) — once a session.
+      Future.delayed(const Duration(seconds: 3), () {
+        if (mounted) AppUpdateService.instance.checkAndPrompt(context);
+      });
       // Decode the movie / series libraries in the background while the
       // user is on Home, so those screens open instantly.
       Future.delayed(const Duration(milliseconds: 1500), () {
@@ -62,13 +66,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
   }
 
   Widget _buildHome() {
-    return UpgradeAlert(
-      showIgnore: true,
-      showLater: true,
-      barrierDismissible: false,
-      upgrader: Upgrader(durationUntilAlertAgain: const Duration(days: 1)),
-      navigatorKey: GlobalKey<NavigatorState>(),
-      child: PopScope(
+    return PopScope(
         canPop: false,
         onPopInvokedWithResult: (_, _) => _showExitDialog(),
         child: Scaffold(
@@ -92,7 +90,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
             ),
           ),
         ),
-      ),
     );
   }
 

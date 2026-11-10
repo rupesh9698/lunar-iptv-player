@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Lunar IPTV Player – update feed (Sparkle appcast), read by the app on
+  Windows, macOS, Linux and sideloaded Android (no Google Play).
+  Served at https://lunar-iptv.web.app/appcast.xml
+
+  To ship a release:
+    1. Bump sparkle:version on the matching platform <item> to the new
+       pubspec version (e.g. 1.0.4) and update the release notes.
+    2. firebase deploy --only hosting:lunar-iptv
+  Add <sparkle:criticalUpdate /> inside an <item> to make it mandatory.
+  Android from Google Play and iOS ignore this file (they use the stores).
+-->
+<rss version="2.0" xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle">
+  <channel>
+    <title>Lunar IPTV Player</title>
+
+    <!-- Windows (Microsoft Store). Replace PRODUCT_ID with the Store ID
+         from Partner Center → App identity (e.g. 9NXXXXXXXXXX). -->
+    <item>
+      <title>Version 1.0.3</title>
+      <description>Bug fixes and improvements.</description>
+      <pubDate>Wed, 11 Nov 2026 12:00:00 +0530</pubDate>
+      <enclosure url="ms-windows-store://pdp/?productid=PRODUCT_ID"
+                 sparkle:version="1.0.3" sparkle:os="windows" />
+    </item>
+
+    <!-- Android APK for TV boxes / phones without Google Play. -->
+    <item>
+      <title>Version 1.0.3</title>
+      <description>Bug fixes and improvements.</description>
+      <pubDate>Wed, 11 Nov 2026 12:00:00 +0530</pubDate>
+      <enclosure url="https://github.com/rupesh9698/lunar-iptv-player/releases/latest"
+                 sparkle:version="1.0.3" sparkle:os="android" />
+    </item>
+
+    <!-- macOS / Linux (when published). -->
+    <item>
+      <title>Version 1.0.3</title>
+      <description>Bug fixes and improvements.</description>
+      <pubDate>Wed, 11 Nov 2026 12:00:00 +0530</pubDate>
+      <enclosure url="https://lunar-iptv.web.app/"
+                 sparkle:version="1.0.3" sparkle:os="macos" />
+    </item>
+    <item>
+      <title>Version 1.0.3</title>
+      <description>Bug fixes and improvements.</description>
+      <pubDate>Wed, 11 Nov 2026 12:00:00 +0530</pubDate>
+      <enclosure url="https://lunar-iptv.web.app/"
+                 sparkle:version="1.0.3" sparkle:os="linux" />
+    </item>
+  </channel>
+</rss>

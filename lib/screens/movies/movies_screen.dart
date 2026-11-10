@@ -728,6 +728,7 @@ class _MoviesGridState extends ConsumerState<_MoviesGrid> {
     final forYouAsync = ref.watch(forYouVodProvider);
 
     return streamsAsync.when(
+      skipLoadingOnReload: true, // keep the grid + scroll position
       loading: () => const Center(
         child: CircularProgressIndicator(
           color: AppTheme.primary,

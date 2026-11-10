@@ -62,6 +62,14 @@ class TvBackKeyGuard extends StatelessWidget {
 
   static bool _downReachedRoot = true;
 
+  /// Set when a held OK fired a long-press: the rest of that press (its
+  /// auto-repeats and the key-up) must not reach whatever the long-press
+  /// opened. Otherwise the repeats "click" the dialog's focused button —
+  /// the Hide Category dialog flashed up and closed straight away on TV.
+  static bool _swallowActivation = false;
+
+  static void swallowRestOfActivation() => _swallowActivation = true;
+
   static bool isBackKey(LogicalKeyboardKey k) =>
       k == LogicalKeyboardKey.goBack ||
       k == LogicalKeyboardKey.escape ||
@@ -73,6 +81,14 @@ class TvBackKeyGuard extends StatelessWidget {
       canRequestFocus: false,
       skipTraversal: true,
       onKeyEvent: (node, event) {
+        if (_isActivationKey(event.logicalKey) && _swallowActivation) {
+          if (event is KeyDownEvent) {
+            _swallowActivation = false; // a new press: deliver normally
+            return KeyEventResult.ignored;
+          }
+          if (event is KeyUpEvent) _swallowActivation = false;
+          return KeyEventResult.handled;
+        }
         if (!isBackKey(event.logicalKey)) return KeyEventResult.ignored;
         if (event is KeyDownEvent) {
           _downReachedRoot = true; // nobody below handled it → system back
@@ -283,6 +299,7 @@ class _TvFocusableState extends State<TvFocusable> with TvFocusMixin {
     if (widget.onLongPress == null) return;
     _longPressFired = true;
     setTvPressed(false);
+    TvBackKeyGuard.swallowRestOfActivation();
     widget.onLongPress!();
   }
 

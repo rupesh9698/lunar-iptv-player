@@ -12,6 +12,14 @@ import '../../../models/xtream_models.dart';
 import '../../../providers/app_providers.dart';
 import '../../../providers/live_tv_provider.dart';
 
+/// Moves remote focus into the channel column. With [preferSelected] the
+/// playing channel's row is used when it is in the list, otherwise the first
+/// visible row. Returns false when the list has no rows.
+/// With [selectedOnly] nothing happens (false) unless the playing channel
+/// is listed.
+typedef EpgEntryFocus =
+    bool Function({bool preferSelected, bool selectedOnly});
+
 class EpgTimeline extends ConsumerStatefulWidget {
   final bool isFullscreen;
   final VoidCallback onToggleFullscreen;
@@ -29,6 +37,9 @@ class EpgTimeline extends ConsumerStatefulWidget {
   /// Reports the first channel cell's FocusNode once built.
   final ValueChanged<FocusNode>? onFirstItemFocusReady;
 
+  /// Reports the "enter the channel list" action (see [EpgEntryFocus]).
+  final ValueChanged<EpgEntryFocus>? onEntryReady;
+
   const EpgTimeline({
     super.key,
     required this.isFullscreen,
@@ -39,6 +50,7 @@ class EpgTimeline extends ConsumerStatefulWidget {
     this.watchNowFocus,
     this.categoryEntryFocus,
     this.onFirstItemFocusReady,
+    this.onEntryReady,
   });
 
   @override
@@ -67,8 +79,25 @@ class _EpgTimelineState extends ConsumerState<EpgTimeline> {
   /// beyond the ListView's cache extent — common when the D-pad is held
   /// down), first jump the list so the row gets built, then focus it on the
   /// next frame. Without this, focus silently stopped at the last built row.
-  void _focusChannel(int index) {
+  void _focusChannel(int index, {bool reveal = false}) {
     final node = _channelNode(index);
+    // Entering the list (not stepping row to row): bring a row that is out
+    // of view into view first — a built-but-hidden row would take focus
+    // off-screen.
+    if (reveal && _leftCtrl.hasClients) {
+      final pos = _leftCtrl.position;
+      final top = index * _rowH;
+      if (top < pos.pixels ||
+          top + _rowH > pos.pixels + pos.viewportDimension) {
+        _leftCtrl.jumpTo(
+          (top - pos.viewportDimension * 0.3).clamp(0.0, pos.maxScrollExtent),
+        );
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted && node.context != null) node.requestFocus();
+        });
+        return;
+      }
+    }
     if (node.context != null) {
       node.requestFocus();
       return;
@@ -86,6 +115,29 @@ class _EpgTimelineState extends ConsumerState<EpgTimeline> {
     });
   }
 
+  /// Channels currently listed (set on every build).
+  List<LiveStream> _streams = const [];
+
+  bool _focusEntry({bool preferSelected = false, bool selectedOnly = false}) {
+    if (!mounted || _streams.isEmpty) return false;
+    var idx = -1;
+    if (preferSelected) {
+      final sel = ref.read(selectedChannelProvider);
+      if (sel != null) {
+        idx = _streams.indexWhere((c) => c.streamId == sel.streamId);
+      }
+    }
+    if (idx < 0 && selectedOnly) return false;
+    if (idx < 0) {
+      // First row that is fully visible.
+      idx = _leftCtrl.hasClients
+          ? (_leftCtrl.offset / _rowH).ceil().clamp(0, _streams.length - 1)
+          : 0;
+    }
+    _focusChannel(idx, reveal: true);
+    return true;
+  }
+
   // Channel column narrows on small screens so the timeline stays usable.
   double _chColW = 240.0;
   static const double _rowH = 58.0;
@@ -100,7 +152,10 @@ class _EpgTimelineState extends ConsumerState<EpgTimeline> {
     _clockTimer = Timer.periodic(const Duration(minutes: 1), (_) {
       if (mounted) setState(() => _now = DateTime.now());
     });
-    WidgetsBinding.instance.addPostFrameCallback((_) => _jumpToNow());
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _jumpToNow();
+      if (mounted) widget.onEntryReady?.call(_focusEntry);
+    });
   }
 
   @override
@@ -180,8 +235,7 @@ class _EpgTimelineState extends ConsumerState<EpgTimeline> {
           fullscreenFocusNode: widget.fullscreenFocusNode,
           watchNowFocus: widget.watchNowFocus,
           categoryEntryFocus: widget.categoryEntryFocus,
-          firstChannelFocus: () =>
-              _channelFocusNodes.isNotEmpty ? _channelFocusNodes[0] : null,
+          enterChannels: () => _focusEntry(),
           onRefresh: () {
             ref.read(epgCacheProvider.notifier).clear();
             ref.invalidate(liveAllStreamsProvider);
@@ -246,6 +300,7 @@ class _EpgTimelineState extends ConsumerState<EpgTimeline> {
     double totalW,
     int hours,
   ) {
+    _streams = streams;
     final nowOffsetPx = _now.isAfter(windowStart) && _now.isBefore(windowEnd)
         ? _now.difference(windowStart).inMinutes / 60.0 * _pxPerHour
         : -1.0;
@@ -427,7 +482,7 @@ class _EpgControlBar extends ConsumerStatefulWidget {
   final FocusNode? refreshFocusNode;
   final FocusNode? fullscreenFocusNode;
   final FocusNode? watchNowFocus;
-  final FocusNode? Function()? firstChannelFocus;
+  final bool Function()? enterChannels;
   final FocusNode? Function()? categoryEntryFocus;
 
   const _EpgControlBar({
@@ -438,7 +493,7 @@ class _EpgControlBar extends ConsumerStatefulWidget {
     this.refreshFocusNode,
     this.fullscreenFocusNode,
     this.watchNowFocus,
-    this.firstChannelFocus,
+    this.enterChannels,
     this.categoryEntryFocus,
   });
 
@@ -457,7 +512,7 @@ class _EpgControlBarState extends ConsumerState<_EpgControlBar> {
   }
 
   void _goFirstChannelOrSelf(FocusNode self) {
-    (widget.firstChannelFocus?.call() ?? self).requestFocus();
+    if (!(widget.enterChannels?.call() ?? false)) self.requestFocus();
   }
 
   @override

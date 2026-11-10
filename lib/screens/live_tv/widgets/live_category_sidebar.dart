@@ -19,6 +19,10 @@ class LiveCategorySidebar extends ConsumerStatefulWidget {
   /// Returns the focus node of the first focusable item in the channel
   /// list panel (EPG), used for "arrow-right" from a category tile.
   final FocusNode? Function()? channelListEntryFocus;
+
+  /// Preferred way into the channel list (playing channel / first
+  /// visible row, scrolling as needed). Returns false if it couldn't.
+  final bool Function()? onEnterChannels;
   /// Called once the first category-list item's FocusNode is created so
   /// the parent screen can route "arrow-up at top of list" to it.
   final ValueChanged<FocusNode>? onFirstItemFocusReady;
@@ -32,6 +36,7 @@ class LiveCategorySidebar extends ConsumerStatefulWidget {
     required this.width,
     this.searchFocusNode,
     this.channelListEntryFocus,
+    this.onEnterChannels,
     this.onFirstItemFocusReady,
     this.onSelectedItemFocusReady,
   });
@@ -64,6 +69,11 @@ class _LiveCategorySidebarState extends ConsumerState<LiveCategorySidebar> {
   /// outside the ListView's cache extent — e.g. the D-pad is held down),
   /// nudges the list in the direction of travel and retries next frame
   /// instead of silently dropping the key press.
+  void _enterChannels() {
+    if (widget.onEnterChannels?.call() ?? false) return;
+    widget.channelListEntryFocus?.call()?.requestFocus();
+  }
+
   void _focusItem(int index, [int attempt = 0]) {
     if (!mounted) return;
     final node = _nodeFor(index);
@@ -192,8 +202,7 @@ class _LiveCategorySidebarState extends ConsumerState<LiveCategorySidebar> {
                         },
                         onDownNext: () => _focusItem(1),
                         onRightToChannels: () =>
-                            widget.channelListEntryFocus?.call()
-                                ?.requestFocus(),
+                            _enterChannels(),
                         icon: Icons.all_inclusive,
                         iconColor: AppTheme.primary,
                         label: 'All Channels',
@@ -216,8 +225,7 @@ class _LiveCategorySidebarState extends ConsumerState<LiveCategorySidebar> {
                         onUpAtTop: () => _focusItem(0),
                         onDownNext: () => _focusItem(2),
                         onRightToChannels: () =>
-                            widget.channelListEntryFocus?.call()
-                                ?.requestFocus(),
+                            _enterChannels(),
                         icon: Icons.star_rounded,
                         iconColor: const Color(0xFFFBBF24),
                         label: 'Favorites',
@@ -239,8 +247,7 @@ class _LiveCategorySidebarState extends ConsumerState<LiveCategorySidebar> {
                         onUpAtTop: () => _focusItem(1),
                         onDownNext: () => _focusItem(3),
                         onRightToChannels: () =>
-                            widget.channelListEntryFocus?.call()
-                                ?.requestFocus(),
+                            _enterChannels(),
                         icon: Icons.history,
                         iconColor: AppTheme.primary,
                         label: 'Recently Viewed',
@@ -257,30 +264,11 @@ class _LiveCategorySidebarState extends ConsumerState<LiveCategorySidebar> {
                               .state =
                           null;
                         },
-                        trailing: recentIds.isNotEmpty
-                            ? GestureDetector(
-                          onTap: () {
-                            ref
-                                .read(recentlyViewedLiveProvider.notifier)
-                                .clear();
-                            if (ref.read(liveFilterProvider) ==
-                                LiveFilter.recent) {
-                              ref
-                                  .read(liveFilterProvider.notifier)
-                                  .state =
-                                  LiveFilter.all;
-                            }
-                          },
-                          child: const Padding(
-                            padding: EdgeInsets.all(4),
-                            child: Icon(
-                              Icons.delete_outline,
-                              size: 14,
-                              color: AppTheme.textMuted,
-                            ),
-                          ),
-                        )
-                            : null,
+                        // Bin: its own remote focus stop (Right from the
+                        // tile), so TV users can reach it.
+                        onDelete: recentIds.isEmpty
+                            ? null
+                            : () => _confirmClearRecent(context),
                       ),
 
                       // ── Divider + CATEGORIES label ────────────────────
@@ -371,10 +359,7 @@ class _LiveCategorySidebarState extends ConsumerState<LiveCategorySidebar> {
                             onDownNext: i < filtered.length - 1
                                 ? () => _focusItem(globalIdx + 1)
                                 : null, // last item: Down = no action
-                            onRightToChannels: () => widget
-                                .channelListEntryFocus
-                                ?.call()
-                                ?.requestFocus(),
+                            onRightToChannels: () => _enterChannels(),
                             category: cat,
                             isSelected:
                             filter == LiveFilter.all &&
@@ -468,7 +453,7 @@ class _LiveCategorySidebarState extends ConsumerState<LiveCategorySidebar> {
                 return KeyEventResult.handled;
               }
               if (key == LogicalKeyboardKey.arrowRight) {
-                widget.channelListEntryFocus?.call()?.requestFocus();
+                _enterChannels();
                 return KeyEventResult.handled;
               }
               return KeyEventResult.ignored;
@@ -755,7 +740,6 @@ class _SidebarTile extends StatefulWidget {
   final int? count;
   final bool isSelected;
   final VoidCallback onTap;
-  final Widget? trailing;
   final FocusNode? focusNode;
   final VoidCallback? onUpAtTop;
   final VoidCallback? onDownNext;
@@ -768,23 +752,89 @@ class _SidebarTile extends StatefulWidget {
     required this.isSelected,
     required this.onTap,
     this.count,
-    this.trailing,
     this.focusNode,
     this.onUpAtTop,
     this.onDownNext,
     this.onRightToChannels,
     this.onLongPress,
+    this.onDelete,
   });
 
   final VoidCallback? onLongPress;
+
+  /// Shows a delete (bin) button after the tile — a separate focus stop:
+  /// Right from the tile, Right again to the channel list.
+  final VoidCallback? onDelete;
 
   @override
   State<_SidebarTile> createState() => _SidebarTileState();
 }
 
 class _SidebarTileState extends State<_SidebarTile> with TvFocusMixin {
+  final _deleteFocus = FocusNode(debugLabel: 'sidebarTileDelete');
+
+  @override
+  void dispose() {
+    _deleteFocus.dispose();
+    super.dispose();
+  }
+
+  Widget _deleteButton() {
+    return TvFocusable(
+      focusNode: _deleteFocus,
+      onActivate: widget.onDelete,
+      onArrowKey: (key) {
+        if (key == LogicalKeyboardKey.arrowLeft) {
+          widget.focusNode?.requestFocus();
+        } else if (key == LogicalKeyboardKey.arrowRight) {
+          (widget.onRightToChannels ?? () {})();
+        } else if (key == LogicalKeyboardKey.arrowUp) {
+          (widget.onUpAtTop ?? () {})();
+        } else if (key == LogicalKeyboardKey.arrowDown) {
+          (widget.onDownNext ?? () {})();
+        } else {
+          return KeyEventResult.ignored;
+        }
+        return KeyEventResult.handled;
+      },
+      builder: (focused, _) => Tooltip(
+        message: 'Clear Recently Viewed',
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 150),
+          margin: const EdgeInsets.only(right: 8),
+          padding: const EdgeInsets.all(7),
+          decoration: BoxDecoration(
+            color: focused
+                ? AppTheme.error.withValues(alpha: 0.18)
+                : Colors.transparent,
+            borderRadius: BorderRadius.circular(8),
+            border: focused
+                ? Border.all(color: AppTheme.error.withValues(alpha: 0.7))
+                : null,
+          ),
+          child: Icon(
+            Icons.delete_outline,
+            size: 16,
+            color: focused ? AppTheme.error : AppTheme.textMuted,
+          ),
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
+    final tile = _buildTile(context);
+    if (widget.onDelete == null) return tile;
+    return Row(
+      children: [
+        Expanded(child: tile),
+        _deleteButton(),
+      ],
+    );
+  }
+
+  Widget _buildTile(BuildContext context) {
     return TvFocusable(
       focusNode: widget.focusNode,
       onActivate: widget.onTap,
@@ -800,7 +850,11 @@ class _SidebarTileState extends State<_SidebarTile> with TvFocusMixin {
           return KeyEventResult.handled;
         }
         if (key == LogicalKeyboardKey.arrowRight) {
-          (widget.onRightToChannels ?? () {})();
+          if (widget.onDelete != null) {
+            _deleteFocus.requestFocus();
+          } else {
+            (widget.onRightToChannels ?? () {})();
+          }
           return KeyEventResult.handled;
         }
         return KeyEventResult.ignored;
@@ -809,7 +863,12 @@ class _SidebarTileState extends State<_SidebarTile> with TvFocusMixin {
         final lit = isTvHovered || focused;
         return AnimatedContainer(
           duration: const Duration(milliseconds: 150),
-          margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+          margin: EdgeInsets.fromLTRB(
+            8,
+            2,
+            widget.onDelete != null ? 2 : 8,
+            2,
+          ),
           padding:
           const EdgeInsets.symmetric(horizontal: 10, vertical: 9),
           decoration: BoxDecoration(
@@ -852,7 +911,6 @@ class _SidebarTileState extends State<_SidebarTile> with TvFocusMixin {
                 Text('${widget.count}',
                     style: const TextStyle(
                         color: AppTheme.textMuted, fontSize: 10)),
-              if (widget.trailing != null) widget.trailing!,
             ],
           ),
         );

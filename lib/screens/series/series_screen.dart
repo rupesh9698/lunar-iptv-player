@@ -904,7 +904,11 @@ class _SeriesGridState extends ConsumerState<_SeriesGrid> {
     final seriesAsync = ref.watch(sortedSeriesListProvider);
     final forYouAsync = ref.watch(forYouSeriesProvider);
 
+    // skipLoadingOnReload: favouriting / watching an episode re-sorts the
+    // list; showing the spinner meanwhile threw the grid away and it came
+    // back scrolled to the top.
     return seriesAsync.when(
+      skipLoadingOnReload: true,
       loading: () => const Center(
         child: CircularProgressIndicator(
           color: AppTheme.primary,
@@ -1021,7 +1025,8 @@ class _SeriesPosterCardState extends ConsumerState<_SeriesPosterCard>
     ref.read(selectedSeriesStreamProvider.notifier).state = widget.series;
     // Remote / keyboard: move focus to the detail panel's Play button.
     if (FocusManager.instance.highlightMode == FocusHighlightMode.traditional) {
-      TvNav.focusSoon(seriesDetailPlayFocus);
+      // Episodes load first on slow servers → wait up to ~6 s.
+      TvNav.focusSoon(seriesDetailPlayFocus, tries: 40);
     }
   }
 

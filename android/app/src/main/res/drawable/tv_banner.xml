@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Android TV launcher banner (16:9, shown at 320x180 dp on the TV home row).
+  Placeholder: app logo centred on the brand background.
+
+  To use your own artwork: add  res/drawable-xhdpi/tv_banner.png  (320 x 180 px,
+  optionally res/drawable-xxhdpi/tv_banner.png at 480 x 270 px) and DELETE this
+  file, so the PNG is the only "tv_banner" resource.
+-->
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <item>
+        <shape android:shape="rectangle">
+            <solid android:color="#0A0C14" />
+        </shape>
+    </item>
+    <item
+        android:width="96dp"
+        android:height="96dp"
+        android:gravity="center">
+        <bitmap
+            android:src="@mipmap/ic_launcher"
+            android:gravity="fill" />
+    </item>
+</layer-list>

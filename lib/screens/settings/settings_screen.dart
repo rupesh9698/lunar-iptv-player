@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -20,6 +21,7 @@ import '../../providers/live_tv_provider.dart';
 import '../../providers/movies_provider.dart';
 import '../../providers/series_provider.dart';
 import '../../services/cache_service.dart';
+import '../../services/app_update_service.dart';
 import '../../services/storage_service.dart';
 import '../../services/xmltv_epg_service.dart';
 import '../add_playlist/add_playlist_screen.dart';
@@ -1795,6 +1797,25 @@ class _AboutSectionState extends State<_AboutSection> {
               ],
             ),
           ),
+
+          if (!kIsWeb)
+            _SettCard(
+              child: _SettTile(
+                icon: Icons.system_update_outlined,
+                iconColor: AppTheme.primary,
+                title: 'Check for Updates',
+                subtitle: 'Install the latest version of the app',
+                trailing: const Icon(
+                  Icons.chevron_right,
+                  color: AppTheme.textMuted,
+                  size: 18,
+                ),
+                onTap: () => AppUpdateService.instance.checkAndPrompt(
+                  context,
+                  force: true,
+                ),
+              ),
+            ),
 
           // Disclaimer
           Padding(

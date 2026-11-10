@@ -79,9 +79,95 @@ class _SeriesDetailPanelState extends ConsumerState<SeriesDetailPanel> {
     }
   }
 
+  // ── Remote navigation ────────────────────────────────────────────────
+  // Explicit order instead of geometric guessing (which skipped rows or
+  // jumped out of the panel inside the scrolling list):
+  //   Watch ⇄ Favourite → Trailer → selected Season chip → Episodes.
+  final _favFocus = FocusNode(debugLabel: 'seriesFav');
+  final _trailerFocus = FocusNode(debugLabel: 'seriesTrailer');
+  final Map<String, FocusNode> _seasonFocus = {};
+  final List<FocusNode> _epFocus = [];
+  bool _hasTrailer = false;
+  List<String> _seasonKeys = const [];
+  String? _curSeason;
+  int _epCount = 0;
+
+  FocusNode _seasonNode(String k) =>
+      _seasonFocus.putIfAbsent(k, () => FocusNode(debugLabel: 'season$k'));
+
+  FocusNode _epNode(int i) {
+    while (_epFocus.length <= i) {
+      _epFocus.add(FocusNode(debugLabel: 'episode${_epFocus.length}'));
+    }
+    return _epFocus[i];
+  }
+
+  /// Focus [n]; if it isn't built yet (scrolled out of the cache), on the
+  /// next frame.
+  void _go(FocusNode? n) {
+    if (n == null) return;
+    if (n.context != null) {
+      n.requestFocus();
+      return;
+    }
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted && n.context != null) n.requestFocus();
+    });
+  }
+
+  FocusNode? get _seasonEntry =>
+      _curSeason != null && _seasonKeys.contains(_curSeason)
+      ? _seasonNode(_curSeason!)
+      : null;
+  FocusNode? get _firstEpisode => _epCount > 0 ? _epNode(0) : null;
+  FocusNode? get _belowTrailer => _seasonEntry ?? _firstEpisode;
+  FocusNode? get _belowActions =>
+      _hasTrailer ? _trailerFocus : _belowTrailer;
+  FocusNode get _aboveSeasons =>
+      _hasTrailer ? _trailerFocus : seriesDetailPlayFocus;
+
+  /// Arrow handler: a null target for Up/Down keeps focus where it is
+  /// (handled), a null Left/Right falls back to normal traversal.
+  KeyEventResult Function(LogicalKeyboardKey) _arrows({
+    FocusNode? Function()? up,
+    FocusNode? Function()? down,
+    FocusNode? Function()? left,
+    FocusNode? Function()? right,
+  }) {
+    return (key) {
+      FocusNode? Function()? f;
+      var vertical = false;
+      if (key == LogicalKeyboardKey.arrowUp) {
+        f = up;
+        vertical = true;
+      } else if (key == LogicalKeyboardKey.arrowDown) {
+        f = down;
+        vertical = true;
+      } else if (key == LogicalKeyboardKey.arrowLeft) {
+        f = left;
+      } else if (key == LogicalKeyboardKey.arrowRight) {
+        f = right;
+      }
+      final target = f?.call();
+      if (target != null) {
+        _go(target);
+        return KeyEventResult.handled;
+      }
+      return vertical ? KeyEventResult.handled : KeyEventResult.ignored;
+    };
+  }
+
   @override
   void dispose() {
     _scrollFocus.dispose();
+    _favFocus.dispose();
+    _trailerFocus.dispose();
+    for (final n in _seasonFocus.values) {
+      n.dispose();
+    }
+    for (final n in _epFocus) {
+      n.dispose();
+    }
     super.dispose();
   }
 
@@ -212,6 +298,13 @@ class _SeriesDetailPanelState extends ConsumerState<SeriesDetailPanel> {
     final List<Episode> episodes = curSeason != null
         ? (seasons[curSeason] ?? <Episode>[])
         : <Episode>[];
+    final trailer = info.series.youtubeTrailer?.isNotEmpty == true
+        ? info.series.youtubeTrailer
+        : series.youtubeTrailer;
+    _hasTrailer = episodes.isNotEmpty && trailer != null && trailer.isNotEmpty;
+    _seasonKeys = keys;
+    _curSeason = curSeason;
+    _epCount = episodes.length;
 
     return Focus(
       focusNode: _scrollFocus,
@@ -316,6 +409,13 @@ class _SeriesDetailPanelState extends ConsumerState<SeriesDetailPanel> {
               final ep = episodes[i];
               return _EpisodeTile(
                 key: ValueKey('ep_${ep.id}'),
+                focusNode: _epNode(i),
+                onArrowKey: _arrows(
+                  up: () => i > 0
+                      ? _epNode(i - 1)
+                      : (_seasonEntry ?? _aboveSeasons),
+                  down: () => i < _epCount - 1 ? _epNode(i + 1) : null,
+                ),
                 episode: ep,
                 seriesName: series.name,
                 seriesCover: series.cover,
@@ -711,6 +811,11 @@ class _SeriesDetailPanelState extends ConsumerState<SeriesDetailPanel> {
                 child: TvFocusable(
                   focusNode: seriesDetailPlayFocus,
                   autoScroll: true, // panel scrolls: keep the focused button on screen
+                  onArrowKey: _arrows(
+                    up: () => null,
+                    down: () => _belowActions,
+                    right: () => _favFocus,
+                  ),
                   onActivate: () => _playEpisode(context, ref, info, first),
                   builder: (focused, _) => AnimatedContainer(
                     duration: const Duration(milliseconds: 150),
@@ -747,7 +852,14 @@ class _SeriesDetailPanelState extends ConsumerState<SeriesDetailPanel> {
               ),
               const SizedBox(width: 8),
               TvFocusable(
+                focusNode: _favFocus,
                 autoScroll: true, // panel scrolls: keep the focused button on screen
+                onArrowKey: _arrows(
+                  up: () => null,
+                  down: () => _belowActions,
+                  left: () => seriesDetailPlayFocus,
+                  right: () => _favFocus,
+                ),
                 onActivate: () => ref
                     .read(seriesFavoritesProvider.notifier)
                     .toggle(series.seriesId),
@@ -791,7 +903,14 @@ class _SeriesDetailPanelState extends ConsumerState<SeriesDetailPanel> {
           if (trailerKey != null && trailerKey.isNotEmpty) ...[
             const SizedBox(height: 8),
             TvFocusable(
+              focusNode: _trailerFocus,
               autoScroll: true, // panel scrolls: keep the focused button on screen
+              onArrowKey: _arrows(
+                up: () => seriesDetailPlayFocus,
+                down: () => _belowTrailer,
+                left: () => _trailerFocus,
+                right: () => _trailerFocus,
+              ),
               onActivate: () =>
                   launchYouTubeTrailer(context, trailerKey),
               builder: (focused, _) => AnimatedContainer(
@@ -851,14 +970,22 @@ class _SeriesDetailPanelState extends ConsumerState<SeriesDetailPanel> {
           SingleChildScrollView(
             scrollDirection: Axis.horizontal,
             child: Row(
-              children: keys.map((k) {
-                final isSel = k == current;
-                return _FocusableSeasonChip(
-                  label: 'Season $k',
-                  isSelected: isSel,
-                  onTap: () => setState(() => _selectedSeason = k),
-                );
-              }).toList(),
+              children: [
+                for (var i = 0; i < keys.length; i++)
+                  _FocusableSeasonChip(
+                    focusNode: _seasonNode(keys[i]),
+                    onArrowKey: _arrows(
+                      up: () => _aboveSeasons,
+                      down: () => _firstEpisode,
+                      left: () => _seasonNode(keys[i > 0 ? i - 1 : i]),
+                      right: () =>
+                          _seasonNode(keys[i < keys.length - 1 ? i + 1 : i]),
+                    ),
+                    label: 'Season ${keys[i]}',
+                    isSelected: keys[i] == current,
+                    onTap: () => setState(() => _selectedSeason = keys[i]),
+                  ),
+              ],
             ),
           ),
         ],
@@ -923,9 +1050,13 @@ class _EpisodeTile extends StatefulWidget {
   final String season;
   final VoidCallback onPlay;
   final VoidCallback? onDownload;
+  final FocusNode? focusNode;
+  final KeyEventResult Function(LogicalKeyboardKey key)? onArrowKey;
 
   const _EpisodeTile({
     super.key,
+    this.focusNode,
+    this.onArrowKey,
     required this.episode,
     required this.seriesName,
     required this.seriesCover,
@@ -947,6 +1078,8 @@ class _EpisodeTileState extends State<_EpisodeTile> with TvFocusMixin {
     final dur   = ep.formattedDuration;
 
     return TvFocusable(
+      focusNode: widget.focusNode,
+      onArrowKey: widget.onArrowKey,
       onActivate: widget.onPlay,
       // Remote: hold OK (or Menu) to download — the icon is pointer-only.
       onLongPress: widget.onDownload,
@@ -1095,8 +1228,12 @@ class _FocusableSeasonChip extends StatefulWidget {
   final String label;
   final bool isSelected;
   final VoidCallback onTap;
+  final FocusNode? focusNode;
+  final KeyEventResult Function(LogicalKeyboardKey key)? onArrowKey;
 
   const _FocusableSeasonChip({
+    this.focusNode,
+    this.onArrowKey,
     required this.label,
     required this.isSelected,
     required this.onTap,
@@ -1110,6 +1247,8 @@ class _FocusableSeasonChipState extends State<_FocusableSeasonChip> {
   @override
   Widget build(BuildContext context) {
     return TvFocusable(
+      focusNode: widget.focusNode,
+      onArrowKey: widget.onArrowKey,
       onActivate: widget.onTap,
       builder: (focused, _) => AnimatedContainer(
         duration: const Duration(milliseconds: 200),

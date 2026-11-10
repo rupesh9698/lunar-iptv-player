@@ -272,6 +272,60 @@ void main() {
       expect(await tester.sendKeyUpEvent(LogicalKeyboardKey.escape), isTrue);
     });
 
+    testWidgets('held OK: the dialog a long-press opens stays open', (
+      tester,
+    ) async {
+      TvKeyTracker.install();
+      var closedBy = '';
+      await tester.pumpWidget(
+        MaterialApp(
+          builder: (context, child) => TvBackKeyGuard(child: child!),
+          home: Builder(
+            builder: (context) => TvFocusable(
+              autofocus: true,
+              onActivate: () {},
+              onLongPress: () => showDialog<void>(
+                context: context,
+                builder: (ctx) => AlertDialog(
+                  title: const Text('Hide Category'),
+                  actions: [
+                    TextButton(
+                      autofocus: true,
+                      onPressed: () {
+                        closedBy = 'cancel';
+                        Navigator.pop(ctx);
+                      },
+                      child: const Text('Cancel'),
+                    ),
+                  ],
+                ),
+              ),
+              builder: (_, _) => const SizedBox(width: 50, height: 50),
+            ),
+          ),
+        ),
+      );
+      await tester.pump();
+      await tester.sendKeyDownEvent(LogicalKeyboardKey.select);
+      await tester.pump(const Duration(milliseconds: 500)); // long-press timer
+      await tester.pumpAndSettle();
+      expect(find.text('Hide Category'), findsOneWidget);
+      // The remote keeps auto-repeating while OK is still held, then
+      // releases — none of that may "click" Cancel.
+      for (var i = 0; i < 5; i++) {
+        await tester.sendKeyRepeatEvent(LogicalKeyboardKey.select);
+        await tester.pump(const Duration(milliseconds: 50));
+      }
+      await tester.sendKeyUpEvent(LogicalKeyboardKey.select);
+      await tester.pumpAndSettle();
+      expect(closedBy, isEmpty);
+      expect(find.text('Hide Category'), findsOneWidget);
+      // A fresh OK press works normally.
+      await tester.sendKeyEvent(LogicalKeyboardKey.select);
+      await tester.pumpAndSettle();
+      expect(closedBy, 'cancel');
+    });
+
     testWidgets('unhandled Back passes through to the system', (tester) async {
       TvKeyTracker.install();
       await tester.pumpWidget(app(screenHandlesBack: false));
