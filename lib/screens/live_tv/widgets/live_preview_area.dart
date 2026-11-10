@@ -87,7 +87,7 @@ class _LiveInlinePlayerState extends ConsumerState<LiveInlinePlayer> {
   /// Where remote focus goes when the full-screen player opens: on TV the
   /// player itself (so OK opens the guide and Left/Right zap), elsewhere
   /// the play/pause button.
-  FocusNode get _maxEntryFocus => _tv ? _maxRootFocus : _maxPlayFocus;
+  FocusNode get _maxEntryFocus => _maxRootFocus;
 
   @override
   void initState() {
@@ -272,7 +272,7 @@ class _LiveInlinePlayerState extends ConsumerState<LiveInlinePlayer> {
         return KeyEventResult.handled;
       }
       if (_isOk(k)) {
-        if (isDown) _tv ? _openGuide() : _showControls(focusPlay: true);
+        if (isDown) _openGuide();
         return KeyEventResult.handled;
       }
       if (k == LogicalKeyboardKey.arrowUp ||
@@ -689,8 +689,6 @@ class _LiveInlinePlayerState extends ConsumerState<LiveInlinePlayer> {
                         .contains(channel?.streamId ?? ''),
                     onMinimize: widget.onMinimize,
                     onLock: () => setState(() => _locked = true),
-                    onTogglePlay: () =>
-                        ref.read(livePlayerProvider.notifier).togglePlayPause(),
                     onVolumeChange: (v) =>
                         ref.read(livePlayerProvider.notifier).setVolume(v),
                     onToggleFav: channel != null
@@ -698,8 +696,6 @@ class _LiveInlinePlayerState extends ConsumerState<LiveInlinePlayer> {
                               .read(liveFavoritesNotifierProvider.notifier)
                               .toggle(channel.streamId)
                         : null,
-                    onPrevChannel: () => _switchChannel(-1),
-                    onNextChannel: () => _switchChannel(1),
                     onToggleGuide: () =>
                         setState(() => _showChannelGuide = true),
                   ),
@@ -921,11 +917,8 @@ class _MaximizedControls extends StatelessWidget {
   final bool isFavorite;
   final VoidCallback onMinimize;
   final VoidCallback onLock;
-  final VoidCallback onTogglePlay;
   final ValueChanged<double> onVolumeChange;
   final VoidCallback? onToggleFav;
-  final VoidCallback onPrevChannel;
-  final VoidCallback onNextChannel;
   final VoidCallback onToggleGuide;
 
   const _MaximizedControls({
@@ -936,11 +929,8 @@ class _MaximizedControls extends StatelessWidget {
     required this.isFavorite,
     required this.onMinimize,
     required this.onLock,
-    required this.onTogglePlay,
     required this.onVolumeChange,
     required this.onToggleFav,
-    required this.onPrevChannel,
-    required this.onNextChannel,
     required this.onToggleGuide,
   });
 
@@ -1040,33 +1030,6 @@ class _MaximizedControls extends StatelessWidget {
 
             const Spacer(),
 
-            // Center play — focusable so the remote has an anchor
-            TvFocusable(
-              focusNode: playFocusNode,
-              autoScroll: false,
-              onActivate: onTogglePlay,
-              builder: (focused, _) => AnimatedContainer(
-                duration: const Duration(milliseconds: 200),
-                width: 60,
-                height: 60,
-                decoration: BoxDecoration(
-                  color: Colors.white.withValues(alpha: focused ? 0.28 : 0.18),
-                  shape: BoxShape.circle,
-                  border: Border.all(
-                    color: focused
-                        ? AppTheme.primary
-                        : Colors.white.withValues(alpha: 0.35),
-                    width: focused ? 3 : 1.5,
-                  ),
-                ),
-                child: Icon(
-                  ps.isPlaying ? Icons.pause_rounded : Icons.play_arrow_rounded,
-                  color: Colors.white,
-                  size: 34,
-                ),
-              ),
-            ),
-
             const Spacer(),
 
             // Bottom bar
@@ -1074,30 +1037,15 @@ class _MaximizedControls extends StatelessWidget {
               padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
               child: Row(
                 children: [
-                  IconButton(
-                    onPressed: onTogglePlay,
-                    padding: const EdgeInsets.all(8),
-                    icon: Icon(
-                      ps.isPlaying
-                          ? Icons.pause_rounded
-                          : Icons.play_arrow_rounded,
-                      color: Colors.white,
-                      size: 30,
-                    ),
-                  ),
-                  _ChannelBtn(
-                    icon: Icons.skip_previous_rounded,
-                    tooltip: 'Previous Channel',
-                    onTap: onPrevChannel,
-                  ),
-                  _ChannelBtn(
-                    icon: Icons.skip_next_rounded,
-                    tooltip: 'Next Channel',
-                    onTap: onNextChannel,
-                  ),
-                  _ChannelBtn(
+                  // Live TV: no play/pause or prev/next — ◀ ▶ / CH± change
+                  // channel, OK / Enter opens this guide.
+                  TvIconButton(
+                    focusNode: playFocusNode,
                     icon: Icons.video_library_outlined,
-                    tooltip: 'Channel Guide (G)',
+                    color: Colors.white,
+                    size: 24,
+                    circle: true,
+                    tooltip: 'TV Guide (OK / G)',
                     onTap: onToggleGuide,
                   ),
                   const Spacer(),

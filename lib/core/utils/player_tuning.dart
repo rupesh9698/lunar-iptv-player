@@ -50,11 +50,18 @@ class PlayerTuning {
     if (kIsWeb || native is! NativePlayer) return;
     final low = Perf.enabled;
 
+    // NOTE: no stream / network / cache options for LIVE streams. Before
+    // this class existed none of the tuning ever applied and live TV played
+    // fine on media_kit's defaults; forcing `stream-lavf-o reconnect_streamed`,
+    // `cache-secs`, a short `network-timeout` and a tiny back-buffer made
+    // some providers' live streams pause, jump backwards and replay in a loop.
     final props = <String, String>{
-      'network-timeout': '20',
-      // Back-buffer: playback never needs much rewind cache; bufferSize sets
-      // it equal to the forward cache (32 MB) by default — wasted RAM.
-      'demuxer-max-back-bytes': live ? '1MiB' : (low ? '8MiB' : '16MiB'),
+      if (!live) ...{
+        'network-timeout': '30',
+        // VOD back-buffer: bufferSize sets it equal to the forward cache
+        // (32 MB) by default — wasted RAM on low-end boxes.
+        'demuxer-max-back-bytes': low ? '8MiB' : '16MiB',
+      },
       // Cheap scalers / no post-processing (only matter for vo=gpu).
       'scale': 'bilinear',
       'dscale': 'bilinear',
@@ -68,15 +75,8 @@ class PlayerTuning {
         // Software-decode fallback only: skip the in-loop deblocking filter
         // on non-key frames (big CPU saving, barely visible).
         'vd-lavc-skiploopfilter': 'nonkey',
-        // Keyframe seeks are near-instant on weak CPUs.
-        'hr-seek': 'no',
-      },
-      if (live) ...{
-        'cache': 'yes',
-        'cache-secs': low ? '8' : '12',
-        // Auto-reconnect dropped HTTP/HLS connections.
-        'stream-lavf-o':
-            'reconnect=1,reconnect_streamed=1,reconnect_delay_max=4',
+        // Keyframe seeks are near-instant on weak CPUs (VOD only).
+        if (!live) 'hr-seek': 'no',
       },
     };
 
