@@ -630,12 +630,31 @@ class EpgListing {
     required this.end,
     required this.startTimestamp,
     required this.stopTimestamp,
-  });
+  }) : _plain = false;
+
+  /// A listing whose [title] / [description] are plain text (external
+  /// XMLTV guide) rather than the Xtream API's base64.
+  EpgListing.plain({
+    required this.title,
+    required this.description,
+    required this.startTimestamp,
+    required this.stopTimestamp,
+    this.epgId = '',
+  }) : id = '',
+       start = '',
+       end = '',
+       _plain = true;
+
+  final bool _plain;
 
   // Decoded once and memoised — EPG blocks are rebuilt constantly, and
   // base64 + UTF-8 decoding on every build was measurable on TV boxes.
-  late final String decodedTitle = _decodeB64(title).trim();
-  late final String decodedDescription = _decodeB64(description).trim();
+  late final String decodedTitle = _plain
+      ? title.trim()
+      : _decodeB64(title).trim();
+  late final String decodedDescription = _plain
+      ? description.trim()
+      : _decodeB64(description).trim();
 
   static String _decodeB64(String v) {
     if (v.isEmpty) return '';
@@ -672,7 +691,15 @@ class EpgListing {
     'off air',
   };
 
-  EpgListing copyWith({int? startTimestamp, int? stopTimestamp}) => EpgListing(
+  EpgListing copyWith({int? startTimestamp, int? stopTimestamp}) => _plain
+      ? EpgListing.plain(
+          title: title,
+          description: description,
+          epgId: epgId,
+          startTimestamp: startTimestamp ?? this.startTimestamp,
+          stopTimestamp: stopTimestamp ?? this.stopTimestamp,
+        )
+      : EpgListing(
     id: id,
     epgId: epgId,
     title: title,

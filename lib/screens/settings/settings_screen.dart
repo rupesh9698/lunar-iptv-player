@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -19,6 +21,7 @@ import '../../providers/movies_provider.dart';
 import '../../providers/series_provider.dart';
 import '../../services/cache_service.dart';
 import '../../services/storage_service.dart';
+import '../../services/xmltv_epg_service.dart';
 import '../add_playlist/add_playlist_screen.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1402,6 +1405,9 @@ class _ContentSectionState extends ConsumerState<_ContentSection> {
             ),
           ),
 
+          // ── External TV guide (XMLTV) ─────────────────────────────────
+          if (XmltvEpgService.instance.supported) const _TvGuideSourceCard(),
+
           // ── Hidden categories ─────────────────────────────────────────
           const Padding(
             padding: EdgeInsets.fromLTRB(16, 20, 16, 4),
@@ -1933,6 +1939,284 @@ class _FocusableSettTileState extends State<_FocusableSettTile> {
                 endIndent: 16),
         ],
       ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// TV GUIDE SOURCE (external XMLTV EPG)
+// ─────────────────────────────────────────────────────────────────────────────
+class _TvGuideSourceCard extends ConsumerStatefulWidget {
+  const _TvGuideSourceCard();
+
+  @override
+  ConsumerState<_TvGuideSourceCard> createState() => _TvGuideSourceCardState();
+}
+
+class _TvGuideSourceCardState extends ConsumerState<_TvGuideSourceCard> {
+  final _svc = XmltvEpgService.instance;
+  StreamSubscription<XmltvIndex?>? _sub;
+
+  @override
+  void initState() {
+    super.initState();
+    _sub = _svc.updates.listen((_) {
+      if (mounted) setState(() {});
+    });
+  }
+
+  @override
+  void dispose() {
+    _sub?.cancel();
+    super.dispose();
+  }
+
+  String _label(String url) {
+    for (final p in XmltvEpgService.presets) {
+      if (p.url == url) return p.label;
+    }
+    return Uri.tryParse(url)?.host ?? url;
+  }
+
+  String _status() {
+    if (_svc.isRefreshing) return 'Updating guide…';
+    final idx = _svc.current;
+    if (idx != null) {
+      final ago = DateTime.now().difference(idx.updated);
+      final when = ago.inMinutes < 1
+          ? 'just now'
+          : ago.inHours < 1
+          ? '${ago.inMinutes} min ago'
+          : '${ago.inHours} h ago';
+      return 'Updated $when · ${idx.matchedStreams} channels matched';
+    }
+    if (_svc.lastError != null) return 'Last update failed — select to retry';
+    return 'Downloads when you open Live TV';
+  }
+
+  Future<void> _update() async {
+    final messenger = ScaffoldMessenger.of(context);
+    final f = ref.read(epgCacheProvider.notifier).refreshExternalGuide();
+    setState(() {});
+    await f;
+    if (!mounted) return;
+    final idx = _svc.current;
+    final err = _svc.lastError;
+    messenger.showSnackBar(
+      SnackBar(
+        behavior: SnackBarBehavior.floating,
+        content: Text(
+          idx != null && err == null
+              ? 'TV guide updated — ${idx.matchedStreams} channels matched'
+              : 'TV guide update failed${err != null ? ': $err' : ''}',
+        ),
+      ),
+    );
+  }
+
+  Future<void> _setEnabled(bool v) async {
+    await _svc.setEnabled(v);
+    ref.read(epgCacheProvider.notifier).clear();
+    if (mounted) setState(() {});
+  }
+
+  Future<void> _pickSources() async {
+    final picked = await showDialog<List<String>>(
+      context: context,
+      builder: (_) => _GuideSourcesDialog(selected: _svc.sources),
+    );
+    if (picked == null) return;
+    await _svc.setSources(picked);
+    ref.read(epgCacheProvider.notifier).clear();
+    if (!mounted) return;
+    setState(() {});
+    if (picked.isNotEmpty) _update();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final enabled = _svc.enabled;
+    final sources = _svc.sources;
+    return _SettCard(
+      child: Column(
+        children: [
+          _SettTile(
+            icon: Icons.live_tv_outlined,
+            iconColor: AppTheme.primary,
+            title: 'Enhanced TV Guide',
+            subtitle: 'Real programme names from free XMLTV guides',
+            showDivider: enabled,
+            onTap: () => _setEnabled(!enabled),
+            trailing: Switch(
+              value: enabled,
+              onChanged: _setEnabled,
+              activeTrackColor: AppTheme.primary,
+              activeThumbColor: Colors.white,
+              inactiveTrackColor: AppTheme.surfaceVariant,
+              inactiveThumbColor: AppTheme.textMuted,
+            ),
+          ),
+          if (enabled) ...[
+            _SettTile(
+              icon: Icons.public,
+              title: 'Guide Regions',
+              subtitle: sources.isEmpty
+                  ? 'None selected'
+                  : sources.map(_label).join(', '),
+              showDivider: true,
+              trailing: const Icon(
+                Icons.chevron_right,
+                color: AppTheme.textMuted,
+                size: 18,
+              ),
+              onTap: _pickSources,
+            ),
+            _SettTile(
+              icon: Icons.sync,
+              title: 'Update Guide Now',
+              subtitle: _status(),
+              trailing: _svc.isRefreshing
+                  ? const SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : const Icon(
+                      Icons.refresh,
+                      color: AppTheme.textMuted,
+                      size: 20,
+                    ),
+              onTap: _svc.isRefreshing ? null : _update,
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+class _GuideSourcesDialog extends StatefulWidget {
+  final List<String> selected;
+  const _GuideSourcesDialog({required this.selected});
+
+  @override
+  State<_GuideSourcesDialog> createState() => _GuideSourcesDialogState();
+}
+
+class _GuideSourcesDialogState extends State<_GuideSourcesDialog> {
+  late final Set<String> _sel = widget.selected.toSet();
+  late final List<String> _custom = widget.selected
+      .where((u) => !XmltvEpgService.presets.any((p) => p.url == u))
+      .toList();
+
+  Future<void> _addCustom() async {
+    final ctrl = TextEditingController();
+    final url = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Custom XMLTV URL'),
+        content: TvTextFieldNav(
+          controller: ctrl,
+          child: TextField(
+            controller: ctrl,
+            autofocus: true,
+            keyboardType: TextInputType.url,
+            decoration: const InputDecoration(
+              hintText: 'https://…/guide.xml.gz',
+            ),
+            onSubmitted: (v) => Navigator.pop(ctx, v.trim()),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, ctrl.text.trim()),
+            child: const Text('Add'),
+          ),
+        ],
+      ),
+    );
+    ctrl.dispose();
+    if (url == null) return;
+    final u = Uri.tryParse(url);
+    if (u == null || !(u.scheme == 'http' || u.scheme == 'https')) return;
+    setState(() {
+      if (!_custom.contains(url)) _custom.add(url);
+      _sel.add(url);
+    });
+  }
+
+  Widget _row(String url, String title, {String? subtitle, bool auto = false}) {
+    return CheckboxListTile(
+      autofocus: auto,
+      dense: true,
+      value: _sel.contains(url),
+      onChanged: (v) =>
+          setState(() => v == true ? _sel.add(url) : _sel.remove(url)),
+      title: Text(title),
+      subtitle: subtitle == null
+          ? null
+          : Text(
+              subtitle,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(color: AppTheme.textMuted, fontSize: 11),
+            ),
+      activeColor: AppTheme.primary,
+      controlAffinity: ListTileControlAffinity.leading,
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    const presets = XmltvEpgService.presets;
+    return AlertDialog(
+      title: const Text('TV Guide Regions'),
+      contentPadding: const EdgeInsets.fromLTRB(8, 12, 8, 0),
+      content: SizedBox(
+        width: 420,
+        child: ListView(
+          shrinkWrap: true,
+          children: [
+            const Padding(
+              padding: EdgeInsets.fromLTRB(16, 0, 16, 8),
+              child: Text(
+                'Pick the regions of your channels. Free guides from '
+                'epgshare01.online, refreshed every 12 hours. Channels a '
+                'guide does not cover keep your provider\'s EPG.',
+                style: TextStyle(color: AppTheme.textMuted, fontSize: 12),
+              ),
+            ),
+            for (var i = 0; i < presets.length; i++)
+              _row(presets[i].url, presets[i].label, auto: i == 0),
+            for (final u in _custom) _row(u, 'Custom', subtitle: u),
+            ListTile(
+              dense: true,
+              leading: const Icon(Icons.add_link),
+              title: const Text('Add custom XMLTV URL…'),
+              onTap: _addCustom,
+            ),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Cancel'),
+        ),
+        TextButton(
+          onPressed: () => Navigator.pop(context, [
+            for (final p in presets)
+              if (_sel.contains(p.url)) p.url,
+            for (final u in _custom)
+              if (_sel.contains(u)) u,
+          ]),
+          child: const Text('Save'),
+        ),
+      ],
     );
   }
 }

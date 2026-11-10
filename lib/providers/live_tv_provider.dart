@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:lunar_iptv_player/services/behavior_service.dart';
 
@@ -6,6 +8,7 @@ import '../models/xtream_models.dart';
 import '../providers/app_providers.dart';
 import '../services/cache_service.dart';
 import '../services/storage_service.dart';
+import '../services/xmltv_epg_service.dart';
 
 // ── Show Channel Number ───────────────────────────────────────────────────────
 final showChannelNumberProvider =
@@ -95,11 +98,71 @@ class EpgCacheNotifier extends StateNotifier<Map<String, List<EpgListing>>> {
   // Minimum time between API calls for the same stream
   static const _throttle = Duration(seconds: 30);
 
-  EpgCacheNotifier(this._ref) : super({});
+  EpgCacheNotifier(this._ref) : super({}) {
+    // A (re)downloaded external guide → re-resolve every channel on screen.
+    _xmltvSub = XmltvEpgService.instance.updates.listen((idx) {
+      // Status pings (e.g. "updating…") repeat the same index → ignore.
+      if (!mounted || identical(idx, _seenGuide)) return;
+      _seenGuide = idx;
+      _lastFetched.clear();
+      for (final id in state.keys.toList()) {
+        loadEpg(id, force: true);
+      }
+    });
+  }
 
-  Future<void> loadEpg(String streamId) async {
+  StreamSubscription<XmltvIndex?>? _xmltvSub;
+  XmltvIndex? _seenGuide;
+
+  @override
+  void dispose() {
+    _xmltvSub?.cancel();
+    super.dispose();
+  }
+
+  /// External XMLTV guide (Settings → TV Guide source) for [streamId], or
+  /// null when it doesn't cover the channel / only has filler for it.
+  Future<List<EpgListing>?> _xmltvListings(String streamId) async {
+    final svc = XmltvEpgService.instance;
+    if (!svc.enabled) return null;
+    final playlist = _ref.read(activePlaylistProvider);
+    if (playlist == null) return null;
+    try {
+      final idx = await svc.index(
+        playlistId: playlist.id,
+        channels: _xmltvChannels,
+      );
+      final raw = idx?.listingsFor(streamId);
+      if (raw == null || raw.isEmpty) return null;
+      final list = EpgNormalizer.normalize(raw);
+      if (list.isEmpty || list.every((e) => e.isGeneric)) return null;
+      return list;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<List<XmltvChannelRef>> _xmltvChannels() async {
+    final streams = await _ref.read(liveAllStreamsProvider.future);
+    return [
+      for (final s in streams)
+        XmltvChannelRef(s.streamId, s.name, s.epgChannelId),
+    ];
+  }
+
+  /// Settings → "Update guide now": re-download the external guide.
+  Future<void> refreshExternalGuide() async {
+    final playlist = _ref.read(activePlaylistProvider);
+    if (playlist == null) return;
+    await XmltvEpgService.instance.refresh(
+      playlistId: playlist.id,
+      channels: _xmltvChannels,
+    );
+  }
+
+  Future<void> loadEpg(String streamId, {bool force = false}) async {
     // Already in memory
-    if (state.containsKey(streamId)) return;
+    if (!force && state.containsKey(streamId)) return;
     // Currently loading
     if (_loading.contains(streamId)) return;
     // Throttle: don't re-fetch too soon
@@ -111,6 +174,14 @@ class EpgCacheNotifier extends StateNotifier<Map<String, List<EpgListing>>> {
     _loading.add(streamId);
 
     try {
+      // 0. External XMLTV guide — real titles where the provider only has
+      //    "Movie" blocks; also gives M3U playlists a guide.
+      final external = await _xmltvListings(streamId);
+      if (external != null) {
+        if (mounted) state = {...state, streamId: external};
+        return;
+      }
+
       // 1. Check disk cache (30-min TTL)
       final diskCached = await CacheService.instance.loadEpg(
         streamId,
