@@ -217,7 +217,8 @@ class _LiveTVScreenState extends ConsumerState<LiveTVScreen> {
       TvNav.handler(
       up: backBtnFocus,
       down: channelSearchFocus,
-      left: miniPlayPauseFocus,
+      // The mini player has no buttons any more → straight to categories.
+      onLeft: () => _categoryEntry()?.requestFocus(),
       ),
     );
 

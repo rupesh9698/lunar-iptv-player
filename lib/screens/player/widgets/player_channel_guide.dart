@@ -112,6 +112,12 @@ class _PlayerChannelGuideState extends ConsumerState<PlayerChannelGuide>
 
   Future<void> _selectChannel(int idx, LiveStream ch) async {
     _bumpIdle();
+    // OK on the channel that is already playing: just close the guide
+    // (don't restart the stream).
+    if (ref.read(selectedChannelProvider)?.streamId == ch.streamId) {
+      widget.onClose();
+      return;
+    }
     setState(() => _focusedIndex = idx);
 
     ref.read(selectedChannelProvider.notifier).state = ch;

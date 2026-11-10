@@ -107,16 +107,23 @@ class _LiveInlinePlayerState extends ConsumerState<LiveInlinePlayer> {
     if (old.isMaximized != widget.isMaximized) {
       // Windows/macOS/Linux: real full screen (covers title bar + taskbar).
       PlatformUtils.setDesktopFullScreen(widget.isMaximized);
-      setState(() {
-        _ctrlVisible = true;
-        _showChannelGuide = false;
-      });
-      _resetHideTimer();
-      // Move remote focus into the new layout — the previously focused
-      // button no longer exists.
-      _focusAfterFrame(
-        widget.isMaximized ? _maxEntryFocus : widget.watchNowFocusNode,
-      );
+      if (widget.isMaximized) {
+        // Full screen opens with the TV Guide visible (it closes itself
+        // after 5 s); the guide takes focus itself.
+        _hideTimer?.cancel();
+        setState(() {
+          _ctrlVisible = false;
+          _showChannelGuide = true;
+        });
+      } else {
+        setState(() {
+          _ctrlVisible = true;
+          _showChannelGuide = false;
+        });
+        _resetHideTimer();
+        // The previously focused full-screen button no longer exists.
+        _focusAfterFrame(widget.watchNowFocusNode);
+      }
     }
   }
 
@@ -125,6 +132,7 @@ class _LiveInlinePlayerState extends ConsumerState<LiveInlinePlayer> {
     widget.playPauseFocusNode?.removeListener(_onMiniPlayFocus);
     _hideTimer?.cancel();
     _channelSwitchTimer?.cancel();
+    _volOverlayTimer?.cancel();
     _maxRootFocus.dispose();
     _maxPlayFocus.dispose();
     _maxMinimizeFocus.dispose();
@@ -173,6 +181,22 @@ class _LiveInlinePlayerState extends ConsumerState<LiveInlinePlayer> {
   void _showControls({bool focusPlay = false}) {
     _resetHideTimer();
     if (focusPlay) _focusAfterFrame(_tv ? _maxMinimizeFocus : _maxPlayFocus);
+  }
+
+  /// Desktop / web: keyboard Up / Down control the volume.
+  static bool get _keyboardVolume => !_tv && !PlatformUtils.isMobile;
+
+  Timer? _volOverlayTimer;
+
+  void _nudgeVolume(double delta) {
+    final notifier = ref.read(livePlayerProvider.notifier);
+    final v = (ref.read(livePlayerProvider).volume + delta).clamp(0.0, 1.0);
+    notifier.setVolume(v);
+    setState(() => _showVol = true);
+    _volOverlayTimer?.cancel();
+    _volOverlayTimer = Timer(const Duration(milliseconds: 900), () {
+      if (mounted) setState(() => _showVol = false);
+    });
   }
 
   void _openGuide() {
@@ -277,7 +301,13 @@ class _LiveInlinePlayerState extends ConsumerState<LiveInlinePlayer> {
       }
       if (k == LogicalKeyboardKey.arrowUp ||
           k == LogicalKeyboardKey.arrowDown) {
-        if (isDown) _showControls(focusPlay: true);
+        if (_keyboardVolume) {
+          // Desktop: Up / Down = volume (TV uses the remote's volume keys,
+          // phones use the swipe gesture).
+          _nudgeVolume(k == LogicalKeyboardKey.arrowUp ? 0.05 : -0.05);
+        } else if (isDown) {
+          _showControls(focusPlay: true);
+        }
         return KeyEventResult.handled;
       }
       return KeyEventResult.ignored;
@@ -493,7 +523,6 @@ class _LiveInlinePlayerState extends ConsumerState<LiveInlinePlayer> {
                 ctrlVisible: _ctrlVisible,
                 onTap: _toggleControls,
                 onDoubleTap: widget.onMaximize,
-                overlay: _compactOverlay(ps),
               ),
             ),
             // Info pane
@@ -514,87 +543,6 @@ class _LiveInlinePlayerState extends ConsumerState<LiveInlinePlayer> {
           ],
         ),
       ),
-    );
-  }
-
-  Widget _compactOverlay(LivePlayerState ps) {
-    return Column(
-      children: [
-        Padding(
-          padding: const EdgeInsets.fromLTRB(8, 6, 8, 0),
-          child: Row(
-            children: [
-              if (ps.quality.isNotEmpty) _QualityBadge(ps.quality),
-              const Spacer(),
-              _OverlayBtn(
-                icon: Icons.fullscreen_rounded,
-                tooltip: 'Maximize',
-                onTap: widget.onMaximize,
-              ),
-            ],
-          ),
-        ),
-        const Spacer(),
-        Padding(
-          padding: const EdgeInsets.fromLTRB(8, 0, 8, 8),
-          child: Row(
-            children: [
-              _PlayPauseFocusBtn(
-                focusNode: widget.playPauseFocusNode,
-                isPlaying: ps.isPlaying,
-                onTap: () =>
-                    ref.read(livePlayerProvider.notifier).togglePlayPause(),
-                onUp: () => widget.backFocusNode?.requestFocus(),
-                onDown: () => widget.channelSearchFocus?.requestFocus(),
-                onLeft: () => widget.categoryEntryFocus?.call()?.requestFocus(),
-                onRight: () => widget.watchNowFocusNode?.requestFocus(),
-              ),
-              // TV: volume belongs to the remote's volume keys.
-              if (!_tv) ...[
-              const SizedBox(width: 4),
-              Icon(
-                ps.volume > 0.5
-                    ? Icons.volume_up
-                    : ps.volume > 0
-                    ? Icons.volume_down
-                    : Icons.volume_off,
-                color: Colors.white70,
-                size: 14,
-              ),
-              SizedBox(
-                width: 52,
-                // Not reachable by D-pad (would trap focus) — remote users
-                // have hardware volume keys.
-                child: ExcludeFocus(
-                child: SliderTheme(
-                  data: SliderThemeData(
-                    trackHeight: 1.5,
-                    thumbShape: const RoundSliderThumbShape(
-                      enabledThumbRadius: 4,
-                    ),
-                    overlayShape: const RoundSliderOverlayShape(
-                      overlayRadius: 8,
-                    ),
-                    activeTrackColor: Colors.white,
-                    inactiveTrackColor: Colors.white30,
-                    thumbColor: Colors.white,
-                    overlayColor: Colors.white24,
-                  ),
-                  child: Slider(
-                    value: ps.volume,
-                    onChanged: (v) =>
-                        ref.read(livePlayerProvider.notifier).setVolume(v),
-                  ),
-                ),
-                ),
-              ),
-              ],
-              const Spacer(),
-              _LiveBadge(),
-            ],
-          ),
-        ),
-      ],
     );
   }
 
@@ -624,7 +572,8 @@ class _LiveInlinePlayerState extends ConsumerState<LiveInlinePlayer> {
                       ps: ps,
                       videoFill: _videoFill,
                       ctrlVisible: _ctrlVisible,
-                      onTap: _showChannelGuide ? _closeGuide : _toggleControls,
+                      // Click / tap = OK: toggles the TV Guide.
+                      onTap: _showChannelGuide ? _closeGuide : _openGuide,
                       onDoubleTap: _showChannelGuide ? null : _onDoubleTap,
                       onDragStart: _onDragStart,
                       onDragUpdate: _onDragUpdate,
@@ -789,7 +738,6 @@ class _VideoArea extends StatelessWidget {
   final GestureDragStartCallback? onDragStart;
   final GestureDragUpdateCallback? onDragUpdate;
   final GestureDragEndCallback? onDragEnd;
-  final Widget? overlay;
 
   const _VideoArea({
     required this.ctrl,
@@ -801,7 +749,6 @@ class _VideoArea extends StatelessWidget {
     this.onDragStart,
     this.onDragUpdate,
     this.onDragEnd,
-    this.overlay,
   });
 
   @override
@@ -854,33 +801,8 @@ class _VideoArea extends StatelessWidget {
               onVerticalDragEnd: onDragEnd,
             ),
           ),
-          if (overlay != null)
-            Positioned.fill(
-              child: AnimatedOpacity(
-                opacity: ctrlVisible ? 1.0 : 0.0,
-                duration: const Duration(milliseconds: 200),
-                child: IgnorePointer(
-                  ignoring: !ctrlVisible,
-                  child: Container(
-                    decoration: BoxDecoration(
-                      gradient: LinearGradient(
-                        begin: Alignment.topCenter,
-                        end: Alignment.bottomCenter,
-                        colors: [
-                          Colors.black.withValues(alpha: 0.65),
-                          Colors.transparent,
-                          Colors.transparent,
-                          Colors.black.withValues(alpha: 0.75),
-                        ],
-                        stops: const [0.0, 0.3, 0.7, 1.0],
-                      ),
-                    ),
-                    child: overlay,
-                  ),
-                ),
-              ),
-            ),
-          if (ps.isBuffering && overlay != null)
+          // Mini player: small spinner while (re)buffering.
+          if (ps.isBuffering && !ctrlVisible)
             Positioned(
               bottom: 8,
               right: 8,
@@ -1048,32 +970,6 @@ class _MaximizedControls extends StatelessWidget {
                     tooltip: 'TV Guide (OK / G)',
                     onTap: onToggleGuide,
                   ),
-                  const Spacer(),
-                  Icon(
-                    ps.volume > 0.5 ? Icons.volume_up : Icons.volume_off,
-                    color: Colors.white,
-                    size: 20,
-                  ),
-                  SizedBox(
-                    width: 96,
-                    child: TvSlider(
-                      value: ps.volume,
-                      onChanged: onVolumeChange,
-                      theme: const SliderThemeData(
-                        trackHeight: 2,
-                        thumbShape: RoundSliderThumbShape(
-                          enabledThumbRadius: 5,
-                        ),
-                        overlayShape: RoundSliderOverlayShape(
-                          overlayRadius: 10,
-                        ),
-                        activeTrackColor: Colors.white,
-                        inactiveTrackColor: Colors.white30,
-                        thumbColor: Colors.white,
-                      ),
-                    ),
-                  ),
-
                 ],
               ),
             ),
@@ -1499,99 +1395,6 @@ class _QualityBadge extends StatelessWidget {
       ),
     ),
   );
-}
-
-class _OverlayBtn extends StatelessWidget {
-  final IconData icon;
-  final VoidCallback onTap;
-  final String? tooltip;
-  const _OverlayBtn({required this.icon, required this.onTap, this.tooltip});
-  @override
-  Widget build(BuildContext context) => GestureDetector(
-    onTap: onTap,
-    child: Tooltip(
-      message: tooltip ?? '',
-      child: Container(
-        padding: const EdgeInsets.all(5),
-        decoration: BoxDecoration(
-          color: Colors.black.withValues(alpha: 0.6),
-          borderRadius: BorderRadius.circular(6),
-        ),
-        child: Icon(icon, color: Colors.white, size: 16),
-      ),
-    ),
-  );
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// PLAY/PAUSE BUTTON — mini-player, fully focusable with explicit nav graph.
-// ─────────────────────────────────────────────────────────────────────────────
-class _PlayPauseFocusBtn extends StatelessWidget {
-  final FocusNode? focusNode;
-  final bool isPlaying;
-  final VoidCallback onTap;
-  final VoidCallback? onUp;
-  final VoidCallback? onDown;
-  final VoidCallback? onLeft;
-  final VoidCallback? onRight;
-
-  const _PlayPauseFocusBtn({
-    required this.focusNode,
-    required this.isPlaying,
-    required this.onTap,
-    this.onUp,
-    this.onDown,
-    this.onLeft,
-    this.onRight,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return TvFocusable(
-      focusNode: focusNode,
-      autoScroll: false,
-      onActivate: onTap,
-      onArrowKey: (key) {
-        if (key == LogicalKeyboardKey.arrowUp) {
-          (onUp ?? () {})();
-          return KeyEventResult.handled;
-        }
-        if (key == LogicalKeyboardKey.arrowDown) {
-          (onDown ?? () {})();
-          return KeyEventResult.handled;
-        }
-        if (key == LogicalKeyboardKey.arrowLeft) {
-          (onLeft ?? () {})();
-          return KeyEventResult.handled;
-        }
-        if (key == LogicalKeyboardKey.arrowRight) {
-          (onRight ?? () {})();
-          return KeyEventResult.handled;
-        }
-        return KeyEventResult.ignored;
-      },
-      builder: (focused, _) => Container(
-        padding: const EdgeInsets.all(5),
-        decoration: BoxDecoration(
-          color: focused
-              ? AppTheme.primary.withValues(alpha: 0.85)
-              : Colors.black.withValues(alpha: 0.6),
-          borderRadius: BorderRadius.circular(6),
-          border: focused
-              ? Border.all(
-                  color: Colors.white.withValues(alpha: 0.7),
-                  width: 1.5,
-                )
-              : null,
-        ),
-        child: Icon(
-          isPlaying ? Icons.pause_rounded : Icons.play_arrow_rounded,
-          color: Colors.white,
-          size: 16,
-        ),
-      ),
-    );
-  }
 }
 
 class _Label extends StatelessWidget {

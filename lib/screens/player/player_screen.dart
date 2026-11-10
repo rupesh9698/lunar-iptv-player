@@ -88,6 +88,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
   double _volume = 1.0;
   double _brightness = 0.5;
   bool _showVol = false;
+  Timer? _volHideTimer;
   bool _showBright = false;
   bool _dragIsLeft = false;
   bool _playerDisposed = false;
@@ -110,6 +111,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
   void dispose() {
     _playerDisposed = true;
     _hideTimer?.cancel();
+    _volHideTimer?.cancel();
     _rootFocus.dispose();
     _playFocus.dispose();
     _reconnectTimer?.cancel();
@@ -517,6 +519,27 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
     if (event is KeyUpEvent) return KeyEventResult.ignored;
     final key = event.logicalKey;
     final isDown = event is KeyDownEvent;
+
+    // Desktop / web: Up / Down = volume (no on-screen volume slider; TV uses
+    // the remote's volume keys, phones the swipe gesture).
+    if (!_locked &&
+        !PlatformUtils.isTV &&
+        !PlatformUtils.isMobile &&
+        (key == LogicalKeyboardKey.arrowUp ||
+            key == LogicalKeyboardKey.arrowDown)) {
+      final nv = (_volume + (key == LogicalKeyboardKey.arrowUp ? 0.05 : -0.05))
+          .clamp(0.0, 1.0);
+      setState(() {
+        _volume = nv;
+        _showVol = true;
+      });
+      _player.setVolume(nv * 100);
+      _volHideTimer?.cancel();
+      _volHideTimer = Timer(const Duration(milliseconds: 900), () {
+        if (mounted) setState(() => _showVol = false);
+      });
+      return KeyEventResult.handled;
+    }
 
     // ── D-pad while the OSD is hidden ──────────────────────────────────
     //  VOD : Left/Right = seek ∓/±10s, Up/Down/OK = show controls
@@ -1328,49 +1351,6 @@ class _BottomBar extends StatelessWidget {
             const SizedBox(height: 4),
           ],
 
-          // Controls row
-          Row(
-            children: [
-              // Play/pause and ±10 s live in the centre button, double-tap
-              // gestures and the remote's ◀ ▶ — no duplicate buttons here.
-              const Spacer(),
-
-              // Volume (desktop)
-              if (PlatformUtils.isDesktop) ...[
-                Icon(
-                  volume > 0.5 ? Icons.volume_up : Icons.volume_off,
-                  color: Colors.white,
-                  size: 20,
-                ),
-                SizedBox(
-                  width: 80,
-                  child: SliderTheme(
-                    data: SliderThemeData(
-                      trackHeight: 2,
-                      thumbShape: const RoundSliderThumbShape(
-                        enabledThumbRadius: 5,
-                      ),
-                      overlayShape: const RoundSliderOverlayShape(
-                        overlayRadius: 10,
-                      ),
-                      activeTrackColor: Colors.white,
-                      inactiveTrackColor: Colors.white30,
-                      thumbColor: Colors.white,
-                    ),
-                    child: TvSlider(value: volume, onChanged: onVolumeChange),
-                  ),
-                ),
-                const SizedBox(width: 8),
-              ],
-
-              _PlayerIconBtn(
-                icon: isVideoFill
-                    ? Icons.fullscreen_exit_rounded
-                    : Icons.fullscreen_rounded,
-                onTap: onToggleFit,
-              ),
-            ],
-          ),
         ],
       ),
     );
