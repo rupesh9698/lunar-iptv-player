@@ -18,7 +18,7 @@ import '../../providers/app_providers.dart';
 import '../../providers/movies_provider.dart';
 import '../../services/cache_service.dart';
 import '../../widgets/app_network_image.dart';
-import 'widgets/movie_detail_panel.dart';
+import '../details/content_details_screen.dart';
 
 class MoviesScreen extends ConsumerStatefulWidget {
   const MoviesScreen({super.key});
@@ -104,12 +104,6 @@ class _MoviesScreenState extends ConsumerState<MoviesScreen> {
       canPop: false,
       onPopInvokedWithResult: (didPop, _) {
         if (didPop) return;
-        // Back closes the detail panel first (focus returns to the poster
-        // via the focus scope's history), then leaves the screen.
-        if (ref.read(selectedVodStreamProvider) != null) {
-          ref.read(selectedVodStreamProvider.notifier).state = null;
-          return;
-        }
         context.go('/home');
       },
       child: Scaffold(
@@ -650,43 +644,10 @@ class _MoviesContent extends ConsumerStatefulWidget {
 }
 
 class _MoviesContentState extends ConsumerState<_MoviesContent> {
-  double _detailWidth = 320;
-  static const _detailMin = 260.0;
-  static const _detailMax = 480.0;
-
+  // Selecting a movie opens the full-screen details page
+  // (content_details_screen.dart) instead of a side panel.
   @override
-  Widget build(BuildContext context) {
-    // Detail panel never takes more than half the content area
-    // (phones / small windows / TV).
-    final maxDetail = (Responsive.of(context).width * 0.40).clamp(
-      220.0,
-      _detailMax,
-    );
-    final selected = ref.watch(selectedVodStreamProvider);
-
-    return Row(
-      children: [
-        // Movies grid
-        Expanded(child: _MoviesGrid()),
-
-        // Detail panel
-        if (selected != null) ...[
-          _ResizableDivider(
-            onDrag: (dx) => setState(() {
-              _detailWidth = (_detailWidth - dx).clamp(_detailMin, _detailMax);
-            }),
-          ),
-          SizedBox(
-            width: _detailWidth.clamp(
-              _detailMin < maxDetail ? _detailMin : maxDetail,
-              maxDetail,
-            ),
-            child: MovieDetailPanel(movie: selected),
-          ),
-        ],
-      ],
-    );
-  }
+  Widget build(BuildContext context) => _MoviesGrid();
 }
 
 class _MoviesGrid extends ConsumerStatefulWidget {
@@ -798,9 +759,8 @@ class _MoviesGridState extends ConsumerState<_MoviesGrid> {
                         (m) => m.streamId == id,
                         orElse: () => forYouMovies.first,
                       );
-                      ref.read(selectedVodStreamProvider.notifier).state =
-                          movie;
                       BehaviorService.instance.recordOpen(id);
+                      openMovieDetails(context, movie);
                     },
                   ),
                 ),
@@ -849,11 +809,9 @@ class _MoviePosterCardState extends ConsumerState<_MoviePosterCard>
       BehaviorService.instance.recordSearchClick(widget.movie.streamId);
     }
     BehaviorService.instance.recordOpen(widget.movie.streamId);
+    // Remembered so the poster stays marked when coming back.
     ref.read(selectedVodStreamProvider.notifier).state = widget.movie;
-    // Remote / keyboard: move focus to the detail panel's Play button.
-    if (FocusManager.instance.highlightMode == FocusHighlightMode.traditional) {
-      TvNav.focusSoon(movieDetailPlayFocus);
-    }
+    openMovieDetails(context, widget.movie);
   }
 
   @override

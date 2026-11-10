@@ -413,14 +413,75 @@ class _PlaylistItem extends StatefulWidget {
 }
 
 class _PlaylistItemState extends State<_PlaylistItem> with TvFocusMixin {
+  final _tileFocus = FocusNode(debugLabel: 'playlistTile');
+  final _deleteFocus = FocusNode(debugLabel: 'playlistDelete');
+
+  @override
+  void dispose() {
+    _tileFocus.dispose();
+    _deleteFocus.dispose();
+    super.dispose();
+  }
+
   @override
   Widget build(BuildContext context) {
+    return Row(
+      children: [
+        Expanded(child: _buildTile(context)),
+        // Always-visible delete button: its own focus stop (Right from the
+        // playlist on a remote), tap / click on touch and mouse.
+        TvFocusable(
+          focusNode: _deleteFocus,
+          onActivate: widget.onDelete,
+          onArrowKey: (key) {
+            if (key == LogicalKeyboardKey.arrowLeft) {
+              _tileFocus.requestFocus();
+              return KeyEventResult.handled;
+            }
+            return KeyEventResult.ignored;
+          },
+          builder: (focused, _) => Tooltip(
+            message: 'Delete playlist',
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 150),
+              margin: const EdgeInsets.only(left: 4),
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: focused
+                    ? AppTheme.error.withValues(alpha: 0.18)
+                    : AppTheme.error.withValues(alpha: 0.06),
+                borderRadius: BorderRadius.circular(9),
+                border: Border.all(
+                  color: focused
+                      ? AppTheme.error
+                      : AppTheme.error.withValues(alpha: 0.25),
+                  width: focused ? 2 : 1,
+                ),
+              ),
+              child: const Icon(
+                Icons.delete_outline_rounded,
+                size: 17,
+                color: AppTheme.error,
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildTile(BuildContext context) {
     final pl = widget.playlist;
     return TvFocusable(
+      focusNode: _tileFocus,
       onActivate: widget.onTap,
-      // Remote: hold OK (or press Menu) to delete — the trash icon only
-      // appears on hover/focus and can't be reached with a D-pad.
-      onLongPress: widget.onDelete,
+      onArrowKey: (key) {
+        if (key == LogicalKeyboardKey.arrowRight) {
+          _deleteFocus.requestFocus();
+          return KeyEventResult.handled;
+        }
+        return KeyEventResult.ignored;
+      },
       onFocusChange: setTvFocused,
       builder: (focused, pressed) {
         final lit = isTvHovered || focused;
@@ -518,21 +579,6 @@ class _PlaylistItemState extends State<_PlaylistItem> with TvFocusMixin {
                   ),
                 ),
               ],
-              AnimatedOpacity(
-                opacity: lit ? 1.0 : 0.0,
-                duration: const Duration(milliseconds: 150),
-                child: GestureDetector(
-                  onTap: widget.onDelete,
-                  child: Padding(
-                    padding: const EdgeInsets.only(left: 6),
-                    child: Icon(
-                      Icons.delete_outline_rounded,
-                      size: 15,
-                      color: AppTheme.error,
-                    ),
-                  ),
-                ),
-              ),
             ],
           ),
         );

@@ -83,7 +83,20 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
   Offset _lastTap = Offset.zero;
   bool _showSkipLeft = false;
   bool _showSkipRight = false;
-  static const _skipSecs = 10;
+  Timer? _skipHideTimer;
+
+  // ── Accelerating seek (remote / keyboard / seek bar / double-tap) ───
+  // Like Prime Video: the first steps are 10 s, keep pressing (or hold)
+  // in the same direction and the step grows to 30 s, 1 min, 2 min. The
+  // target is shown at once; the real seek runs once the presses pause,
+  // so a held key doesn't fire dozens of network seeks.
+  int _seekDir = 0;
+  int _seekChain = 0;
+  DateTime _lastSeekStep = DateTime(0);
+  Duration? _pendingSeek;
+  Duration _chainBase = Duration.zero;
+  int _skipAmount = 10; // signed seconds shown in the skip bubble
+  Timer? _seekCommitTimer;
 
   // ── Gesture (volume / brightness) ───────────────────────────────────
   double _volume = 1.0;
@@ -110,6 +123,8 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
 
   @override
   void dispose() {
+    _seekCommitTimer?.cancel();
+    _skipHideTimer?.cancel();
     _finalSaveAndRefresh(); // any other exit path (e.g. route replaced)
     _playerDisposed = true;
     _hideTimer?.cancel();
@@ -357,14 +372,12 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
   }
 
   void _flashSkip(bool forward) {
+    _skipHideTimer?.cancel();
     setState(() {
-      if (forward) {
-        _showSkipRight = true;
-      } else {
-        _showSkipLeft = true;
-      }
+      _showSkipRight = forward;
+      _showSkipLeft = !forward;
     });
-    Future.delayed(const Duration(milliseconds: 700), () {
+    _skipHideTimer = Timer(const Duration(milliseconds: 900), () {
       if (mounted) {
         setState(() {
           _showSkipLeft = false;
@@ -374,14 +387,61 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
     });
   }
 
-  void _togglePlay() {
-    _player.playOrPause();
+  /// Seek step for the [n]th press of a continuous run.
+  static int _stepFor(int n) => n <= 3
+      ? 10
+      : n <= 8
+      ? 30
+      : n <= 14
+      ? 60
+      : 120;
+
+  /// One seek step forward/back. Presses (or key repeats) in the same
+  /// direction less than ~1 s apart form a run whose step accelerates.
+  void _stepSeek(bool forward) {
+    if (_isLive || _playerDisposed) return;
+    final now = DateTime.now();
+    final gap = now.difference(_lastSeekStep);
+    // Remote auto-repeat fires every ~50 ms: take one step per 150 ms.
+    if (gap < const Duration(milliseconds: 150) &&
+        _seekDir == (forward ? 1 : -1)) {
+      return;
+    }
+    final dir = forward ? 1 : -1;
+    if (dir != _seekDir || gap > const Duration(milliseconds: 1000)) {
+      _seekDir = dir;
+      _seekChain = 0;
+      _chainBase = _pendingSeek ?? _pos;
+    }
+    _seekChain++;
+    _lastSeekStep = now;
+    final base = _pendingSeek ?? _pos;
+    var target = base + Duration(seconds: dir * _stepFor(_seekChain));
+    if (target < Duration.zero) target = Duration.zero;
+    if (_dur > Duration.zero && target > _dur) target = _dur;
+    _pendingSeek = target;
+    _skipAmount = (target - _chainBase).inSeconds;
+    if (_skipAmount == 0) _skipAmount = dir * 10;
+    _flashSkip(forward);
     _resetHideTimer();
+    _seekCommitTimer?.cancel();
+    _seekCommitTimer = Timer(const Duration(milliseconds: 450), _commitSeek);
   }
 
-  void _seekRelative(int secs) {
-    if (_isLive) return;
-    _player.seek((_pos + Duration(seconds: secs)).clamp(Duration.zero, _dur));
+  void _commitSeek() {
+    _seekCommitTimer?.cancel();
+    final t = _pendingSeek;
+    if (t == null || _playerDisposed) return;
+    _player.seek(t).whenComplete(() {
+      if (!mounted) return;
+      // Keep showing the target until the player reports it (no jump
+      // back to the old position on the bar).
+      setState(() => _pendingSeek = null);
+    });
+  }
+
+  void _togglePlay() {
+    _player.playOrPause();
     _resetHideTimer();
   }
 
@@ -394,18 +454,13 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
   void _onDoubleTap() {
     if (_locked) return;
     final w = MediaQuery.of(context).size.width;
-    if (_lastTap.dx < w / 3) {
-      _seekRelative(-_skipSecs);
-      setState(() => _showSkipLeft = true);
-      Future.delayed(const Duration(milliseconds: 700), () {
-        if (mounted) setState(() => _showSkipLeft = false);
-      });
-    } else if (_lastTap.dx > w * 2 / 3) {
-      _seekRelative(_skipSecs);
-      setState(() => _showSkipRight = true);
-      Future.delayed(const Duration(milliseconds: 700), () {
-        if (mounted) setState(() => _showSkipRight = false);
-      });
+    // Live streams can't seek: no skip bubbles, only the centre (pause).
+    if (!_isLive && _lastTap.dx < w / 3) {
+      _stepSeek(false);
+    } else if (!_isLive && _lastTap.dx > w * 2 / 3) {
+      _stepSeek(true);
+    } else if (_isLive && (_lastTap.dx < w / 3 || _lastTap.dx > w * 2 / 3)) {
+      return;
     } else {
       _togglePlay();
     }
@@ -589,9 +644,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
         node.hasPrimaryFocus &&
         (key == LogicalKeyboardKey.arrowLeft ||
             key == LogicalKeyboardKey.arrowRight)) {
-      final fwd = key == LogicalKeyboardKey.arrowRight;
-      _seekRelative(fwd ? _skipSecs : -_skipSecs);
-      _flashSkip(fwd);
+      _stepSeek(key == LogicalKeyboardKey.arrowRight);
       return KeyEventResult.handled;
     }
     if (!_locked && !_ctrlVisible && _error.isEmpty) {
@@ -644,12 +697,12 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
     if (!_isLive) {
       if (key == LogicalKeyboardKey.mediaRewind ||
           key == LogicalKeyboardKey.mediaStepBackward) {
-        _seekRelative(-_skipSecs);
+        _stepSeek(false);
         return KeyEventResult.handled;
       }
       if (key == LogicalKeyboardKey.mediaFastForward ||
           key == LogicalKeyboardKey.mediaStepForward) {
-        _seekRelative(_skipSecs);
+        _stepSeek(true);
         return KeyEventResult.handled;
       }
     }
@@ -791,7 +844,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
                         playing: _playing,
                         quality: _quality,
                         isFavorite: _isLive ? _isFavorite : false,
-                        pos: _pos,
+                        pos: _pendingSeek ?? _pos,
                         dur: _dur,
                         isSeeking: _isSeeking,
                         seekVal: _seekVal,
@@ -817,8 +870,8 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
                         isVideoFill: _videoFill,
                         onToggleFit: () =>
                             setState(() => _videoFill = !_videoFill),
-                        onSeekBack: () => _seekRelative(-10),
-                        onSeekFwd: () => _seekRelative(10),
+                        onSeekBack: () => _stepSeek(false),
+                        onSeekFwd: () => _stepSeek(true),
                       ),
                     ),
                   ),
@@ -834,19 +887,23 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
                 ),
 
               // ── Skip indicators ───────────────────────────────────────
-              if (_showSkipLeft)
-                const Positioned(
+              if (_showSkipLeft && !_isLive)
+                Positioned(
                   left: 32,
                   top: 0,
                   bottom: 0,
-                  child: Center(child: _SkipIndicator(seconds: -_skipSecs)),
+                  child: Center(
+                    child: _SkipIndicator(seconds: -_skipAmount.abs()),
+                  ),
                 ),
-              if (_showSkipRight)
-                const Positioned(
+              if (_showSkipRight && !_isLive)
+                Positioned(
                   right: 32,
                   top: 0,
                   bottom: 0,
-                  child: Center(child: _SkipIndicator(seconds: _skipSecs)),
+                  child: Center(
+                    child: _SkipIndicator(seconds: _skipAmount.abs()),
+                  ),
                 ),
 
               // ── Volume / Brightness overlays ──────────────────────────
@@ -1376,7 +1433,6 @@ class _BottomBar extends StatelessWidget {
             ),
             const SizedBox(height: 4),
           ],
-
         ],
       ),
     );
@@ -1429,6 +1485,16 @@ class _SkipIndicator extends StatelessWidget {
   final int seconds;
   const _SkipIndicator({required this.seconds});
 
+  static String _label(int s) {
+    if (s < 60) return '${s}s';
+    final m = s ~/ 60;
+    final r = s % 60;
+    if (m < 60) return r == 0 ? '${m}m' : '${m}m ${r}s';
+    final h = m ~/ 60;
+    final rm = m % 60;
+    return rm == 0 ? '${h}h' : '${h}h ${rm}m';
+  }
+
   @override
   Widget build(BuildContext context) => Container(
     padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
@@ -1446,7 +1512,7 @@ class _SkipIndicator extends StatelessWidget {
         ),
         const SizedBox(height: 4),
         Text(
-          '${seconds.abs()}s',
+          _label(seconds.abs()),
           style: const TextStyle(
             color: Colors.white,
             fontSize: 13,

@@ -5,7 +5,9 @@ import 'package:go_router/go_router.dart';
 import 'package:lunar_iptv_player/screens/stats/stats_screen.dart';
 
 import '../../providers/app_providers.dart';
+import '../../models/xtream_models.dart';
 import '../../screens/add_playlist/add_playlist_screen.dart';
+import '../../screens/details/content_details_screen.dart';
 import '../../screens/home/home_screen.dart';
 import '../../screens/live_tv/live_tv_screen.dart';
 import '../../screens/movies/movies_screen.dart';
@@ -38,6 +40,18 @@ final routerProvider = Provider<GoRouter>((ref) {
       GoRoute(path: '/live-tv', builder: (_, _) => const LiveTVScreen()),
       GoRoute(path: '/movies', builder: (_, _) => const MoviesScreen()),
       GoRoute(path: '/series', builder: (_, _) => const SeriesScreen()),
+      GoRoute(
+        path: '/movie-details',
+        builder: (_, state) => state.extra is VodStream
+            ? MovieDetailsScreen(movie: state.extra as VodStream)
+            : const DetailsMissingScreen(),
+      ),
+      GoRoute(
+        path: '/series-details',
+        builder: (_, state) => state.extra is Series
+            ? SeriesDetailsScreen(series: state.extra as Series)
+            : const DetailsMissingScreen(),
+      ),
       GoRoute(path: '/settings', builder: (_, _) => const SettingsScreen()),
       GoRoute(path: '/stats', builder: (_, _) => const StatsScreen()),
       GoRoute(

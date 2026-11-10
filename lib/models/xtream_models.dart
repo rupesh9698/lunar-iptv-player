@@ -367,8 +367,15 @@ class VodInfoDetails {
   final String? tmdbId;
   final String? audioLanguage;
   final String? videoLanguage;
+  final int?    videoHeight;   // from the ffprobe "video" block
+  final String? videoCodec;
+  final int?    audioChannels;
+
+  /// "4K" / "1080p" / "720p" / "SD" label, or null if unknown.
+  String? get qualityLabel => _qualityLabel(videoHeight);
 
   const VodInfoDetails({
+    this.videoHeight, this.videoCodec, this.audioChannels,
     this.name, this.oName, this.coverBig, this.movieImage,
     this.releaseDate, this.youtubeTrailer, this.director, this.cast,
     this.description, this.plot, this.mpaaRating, this.country,
@@ -390,11 +397,17 @@ class VodInfoDetails {
     // Extract language from nested audio/video tags
     String? audioLang;
     String? videoLang;
+    int? vHeight;
+    String? vCodec;
+    int? aChannels;
     try {
-      final audioMap = json['audio'] as Map?;
+      final audioMap = json['audio'] is Map ? json['audio'] as Map : null;
       audioLang = (audioMap?['tags'] as Map?)?['language']?.toString();
-      final videoMap = json['video'] as Map?;
+      aChannels = int.tryParse('${audioMap?['channels'] ?? ''}');
+      final videoMap = json['video'] is Map ? json['video'] as Map : null;
       videoLang = (videoMap?['tags'] as Map?)?['language']?.toString();
+      vHeight = int.tryParse('${videoMap?['height'] ?? ''}');
+      vCodec = videoMap?['codec_name']?.toString();
     } catch (_) {}
 
     return VodInfoDetails(
@@ -424,8 +437,51 @@ class VodInfoDetails {
       tmdbId:         json['tmdb_id']?.toString(),
       audioLanguage:  audioLang,
       videoLanguage:  videoLang,
+      videoHeight:    vHeight,
+      videoCodec:     vCodec,
+      audioChannels:  aChannels,
     );
   }
+}
+
+String? _qualityLabel(int? h) {
+  if (h == null || h <= 0) return null;
+  if (h >= 2000) return '4K';
+  if (h >= 1000) return '1080p';
+  if (h >= 700) return '720p';
+  if (h >= 560) return '576p';
+  return 'SD';
+}
+
+/// Season metadata from get_series_info's "seasons" array.
+class SeasonMeta {
+  final String number;
+  final String? name;
+  final String? overview;
+  final String? cover;
+  final String? airDate;
+  final int? episodeCount;
+  final double? rating;
+
+  const SeasonMeta({
+    required this.number,
+    this.name,
+    this.overview,
+    this.cover,
+    this.airDate,
+    this.episodeCount,
+    this.rating,
+  });
+
+  factory SeasonMeta.fromJson(Map<String, dynamic> j) => SeasonMeta(
+    number: '${j['season_number'] ?? ''}',
+    name: j['name']?.toString(),
+    overview: j['overview']?.toString(),
+    cover: (j['cover_big'] ?? j['cover'])?.toString(),
+    airDate: j['air_date']?.toString(),
+    episodeCount: int.tryParse('${j['episode_count'] ?? ''}'),
+    rating: double.tryParse('${j['vote_average'] ?? ''}'),
+  );
 }
 
 class VodMovieData {
@@ -519,7 +575,14 @@ class SeriesInfo {
   final Series series;
   final Map<String, List<Episode>> seasons;
 
-  SeriesInfo({required this.series, required this.seasons});
+  /// Season number → name / overview / cover (may be empty).
+  final Map<String, SeasonMeta> seasonMeta;
+
+  SeriesInfo({
+    required this.series,
+    required this.seasons,
+    this.seasonMeta = const {},
+  });
 
   factory SeriesInfo.fromJson(Map<String, dynamic> json) {
     // Merge outer series_id into info if not present
@@ -530,16 +593,40 @@ class SeriesInfo {
     }
 
     final seasons = <String, List<Episode>>{};
-    final episodesJson = json['episodes'] as Map<String, dynamic>? ?? {};
-    episodesJson.forEach((seasonNum, episodeList) {
-      if (episodeList is List) {
-        seasons[seasonNum] = episodeList
-            .map((e) => Episode.fromJson(e as Map<String, dynamic>))
-            .toList();
+    final rawEpisodes = json['episodes'];
+    if (rawEpisodes is Map) {
+      rawEpisodes.forEach((seasonNum, episodeList) {
+        if (episodeList is List) {
+          seasons['$seasonNum'] = episodeList
+              .whereType<Map>()
+              .map((e) => Episode.fromJson(Map<String, dynamic>.from(e)))
+              .toList();
+        }
+      });
+    } else if (rawEpisodes is List) {
+      // Some panels send a list of season lists.
+      for (final list in rawEpisodes.whereType<List>()) {
+        for (final e in list.whereType<Map>()) {
+          final ep = Episode.fromJson(Map<String, dynamic>.from(e));
+          (seasons[ep.season] ??= []).add(ep);
+        }
       }
-    });
+    }
 
-    return SeriesInfo(series: Series.fromJson(infoMap), seasons: seasons);
+    final meta = <String, SeasonMeta>{};
+    final rawSeasons = json['seasons'];
+    if (rawSeasons is List) {
+      for (final m in rawSeasons.whereType<Map>()) {
+        final sm = SeasonMeta.fromJson(Map<String, dynamic>.from(m));
+        if (sm.number.isNotEmpty) meta[sm.number] = sm;
+      }
+    }
+
+    return SeriesInfo(
+      series: Series.fromJson(infoMap),
+      seasons: seasons,
+      seasonMeta: meta,
+    );
   }
 }
 
@@ -554,8 +641,16 @@ class Episode {
   final String? added;
   final String season;
   final String? audioLanguage;
+  final String? plot;
+  final String? image; // episode still (info.movie_image)
+  final double? rating;
+  final int? durationSecs;
 
   Episode({
+    this.plot,
+    this.image,
+    this.rating,
+    this.durationSecs,
     required this.id,
     required this.episodeNum,
     required this.title,
@@ -582,11 +677,23 @@ class Episode {
     String? duration;
     String? releaseDate;
     String? audioLanguage;
+    String? plot;
+    String? image;
+    double? rating;
+    int? durationSecs;
 
     final infoRaw = json['info'];
     if (infoRaw is Map) {
       duration    = infoRaw['duration']?.toString();
       releaseDate = infoRaw['releasedate']?.toString();
+      final p = infoRaw['plot']?.toString().trim();
+      plot = (p == null || p.isEmpty) ? null : p;
+      final img = (infoRaw['movie_image'] ?? infoRaw['cover_big'])
+          ?.toString()
+          .trim();
+      image = (img == null || !img.startsWith('http')) ? null : img;
+      rating = double.tryParse('${infoRaw['rating'] ?? ''}');
+      durationSecs = int.tryParse('${infoRaw['duration_secs'] ?? ''}');
       try {
         final audioMap = infoRaw['audio'] as Map?;
         audioLanguage = (audioMap?['tags'] as Map?)?['language']?.toString();
@@ -604,6 +711,10 @@ class Episode {
       added:              json['added']?.toString(),
       season:             json['season']?.toString() ?? '1',
       audioLanguage:      audioLanguage,
+      plot:               plot,
+      image:              image,
+      rating:             rating,
+      durationSecs:       durationSecs,
     );
   }
 }

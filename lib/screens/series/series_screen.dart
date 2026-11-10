@@ -18,7 +18,7 @@ import '../../providers/app_providers.dart';
 import '../../providers/series_provider.dart';
 import '../../services/cache_service.dart';
 import '../../widgets/app_network_image.dart';
-import 'widgets/series_detail_panel.dart';
+import '../details/content_details_screen.dart';
 
 class SeriesScreen extends ConsumerStatefulWidget {
   const SeriesScreen({super.key});
@@ -103,10 +103,6 @@ class _SeriesScreenState extends ConsumerState<SeriesScreen> {
         if (didPop) return;
         // Back closes the detail panel first (focus returns to the poster
         // via the focus scope's history), then leaves the screen.
-        if (ref.read(selectedSeriesStreamProvider) != null) {
-          ref.read(selectedSeriesStreamProvider.notifier).state = null;
-          return;
-        }
         context.go('/home');
       },
       child: Scaffold(
@@ -830,40 +826,10 @@ class _SeriesContent extends ConsumerStatefulWidget {
 }
 
 class _SeriesContentState extends ConsumerState<_SeriesContent> {
-  double _detailWidth = 340;
-  static const _detailMin = 280.0;
-  static const _detailMax = 500.0;
-
+  // Selecting a series opens the full-screen details page
+  // (content_details_screen.dart) instead of a side panel.
   @override
-  Widget build(BuildContext context) {
-    // Detail panel never takes more than half the content area
-    // (phones / small windows / TV).
-    final maxDetail = (Responsive.of(context).width * 0.40).clamp(
-      220.0,
-      _detailMax,
-    );
-    final selected = ref.watch(selectedSeriesStreamProvider);
-
-    return Row(
-      children: [
-        Expanded(child: _SeriesGrid()),
-        if (selected != null) ...[
-          _ResizableDivider(
-            onDrag: (dx) => setState(() {
-              _detailWidth = (_detailWidth - dx).clamp(_detailMin, _detailMax);
-            }),
-          ),
-          SizedBox(
-            width: _detailWidth.clamp(
-              _detailMin < maxDetail ? _detailMin : maxDetail,
-              maxDetail,
-            ),
-            child: const SeriesDetailPanel(),
-          ),
-        ],
-      ],
-    );
-  }
+  Widget build(BuildContext context) => _SeriesGrid();
 }
 
 class _SeriesGrid extends ConsumerStatefulWidget {
@@ -967,9 +933,8 @@ class _SeriesGridState extends ConsumerState<_SeriesGrid> {
                         (s) => s.seriesId == id,
                         orElse: () => forYouSeries.first,
                       );
-                      ref.read(selectedSeriesStreamProvider.notifier).state =
-                          series;
                       BehaviorService.instance.recordOpen(id);
+                      openSeriesDetails(context, series);
                     },
                   ),
                 ),
@@ -1022,12 +987,9 @@ class _SeriesPosterCardState extends ConsumerState<_SeriesPosterCard>
       BehaviorService.instance.recordSearchClick(widget.series.seriesId);
     }
     BehaviorService.instance.recordOpen(widget.series.seriesId);
+    // Remembered so the poster stays marked when coming back.
     ref.read(selectedSeriesStreamProvider.notifier).state = widget.series;
-    // Remote / keyboard: move focus to the detail panel's Play button.
-    if (FocusManager.instance.highlightMode == FocusHighlightMode.traditional) {
-      // Episodes load first on slow servers → wait up to ~6 s.
-      TvNav.focusSoon(seriesDetailPlayFocus, tries: 40);
-    }
+    openSeriesDetails(context, widget.series);
   }
 
   @override

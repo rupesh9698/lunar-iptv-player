@@ -98,6 +98,19 @@ class BehaviorService {
     await _prunePositions();
   }
 
+  /// Saved resume point for [id] (position, duration, progress, url, …),
+  /// or null when there is none.
+  Map<String, dynamic>? getPosition(String id) {
+    if (_box == null) return null;
+    final raw = _box!.get(_k('watch_pos_$id'));
+    if (raw == null) return null;
+    try {
+      return jsonDecode(raw as String) as Map<String, dynamic>;
+    } catch (_) {
+      return null;
+    }
+  }
+
   Future<void> clearPosition(String id) async {
     await _box?.delete(_k('watch_pos_$id'));
   }

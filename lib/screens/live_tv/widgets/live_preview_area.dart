@@ -65,9 +65,6 @@ class _LiveInlinePlayerState extends ConsumerState<LiveInlinePlayer> {
   bool _showVol = false;
   bool _showBright = false;
   double _brightness = 0.5;
-  final Offset _lastTap = Offset.zero;
-  bool _showSkipLeft = false;
-  bool _showSkipRight = false;
 
   // Channel switching
   LiveStream? _switchingChannel;
@@ -404,24 +401,6 @@ class _LiveInlinePlayerState extends ConsumerState<LiveInlinePlayer> {
     }
   }
 
-  void _onDoubleTap() {
-    if (_locked) return;
-    final w = MediaQuery.of(context).size.width;
-    if (_lastTap.dx < w / 3) {
-      setState(() => _showSkipLeft = true);
-      Future.delayed(const Duration(milliseconds: 700), () {
-        if (mounted) setState(() => _showSkipLeft = false);
-      });
-    } else if (_lastTap.dx > w * 2 / 3) {
-      setState(() => _showSkipRight = true);
-      Future.delayed(const Duration(milliseconds: 700), () {
-        if (mounted) setState(() => _showSkipRight = false);
-      });
-    } else {
-      ref.read(livePlayerProvider.notifier).togglePlayPause();
-    }
-  }
-
   void _onDragStart(DragStartDetails d) {
     _isDragging = true;
     _dragIsLeft = d.localPosition.dx < MediaQuery.of(context).size.width / 2;
@@ -580,7 +559,10 @@ class _LiveInlinePlayerState extends ConsumerState<LiveInlinePlayer> {
                       ctrlVisible: _ctrlVisible,
                       // Click / tap = OK: toggles the TV Guide.
                       onTap: _showChannelGuide ? _closeGuide : _openGuide,
-                      onDoubleTap: _showChannelGuide ? null : _onDoubleTap,
+                      // No double-tap: live can't rewind / fast-forward
+                      // (it used to flash a "-10s" bubble that never
+                      // seeked), and without it single taps are instant.
+                      onDoubleTap: null,
                       onDragStart: _onDragStart,
                       onDragUpdate: _onDragUpdate,
                       onDragEnd: _onDragEnd,
@@ -661,22 +643,6 @@ class _LiveInlinePlayerState extends ConsumerState<LiveInlinePlayer> {
             // Lock overlay
             if (_locked)
               _LockOverlay(onUnlock: () => setState(() => _locked = false)),
-
-            // Skip indicators
-            if (_showSkipLeft)
-              const Positioned(
-                left: 32,
-                top: 0,
-                bottom: 0,
-                child: Center(child: _SkipIndicator(forward: false)),
-              ),
-            if (_showSkipRight)
-              const Positioned(
-                right: 32,
-                top: 0,
-                bottom: 0,
-                child: Center(child: _SkipIndicator(forward: true)),
-              ),
 
             // Volume / Brightness
             if (_showVol)
@@ -1502,39 +1468,6 @@ class _LockOverlay extends StatelessWidget {
           child: const Icon(Icons.lock_rounded, color: Colors.white, size: 22),
         ),
       ),
-    ),
-  );
-}
-
-class _SkipIndicator extends StatelessWidget {
-  final bool forward;
-  const _SkipIndicator({required this.forward});
-
-  @override
-  Widget build(BuildContext context) => Container(
-    padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
-    decoration: BoxDecoration(
-      color: Colors.black.withValues(alpha: 0.55),
-      borderRadius: BorderRadius.circular(40),
-    ),
-    child: Column(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Icon(
-          forward ? Icons.fast_forward_rounded : Icons.fast_rewind_rounded,
-          color: Colors.white,
-          size: 28,
-        ),
-        const SizedBox(height: 4),
-        Text(
-          forward ? '+10s' : '-10s',
-          style: const TextStyle(
-            color: Colors.white,
-            fontSize: 13,
-            fontWeight: FontWeight.w600,
-          ),
-        ),
-      ],
     ),
   );
 }
