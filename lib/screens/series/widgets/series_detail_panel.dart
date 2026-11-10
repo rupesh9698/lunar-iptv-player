@@ -215,8 +215,11 @@ class _SeriesDetailPanelState extends ConsumerState<SeriesDetailPanel> {
 
     return Focus(
       focusNode: _scrollFocus,
-      onKeyEvent: (_, event) {
-        // Let up/down scroll the list
+      onKeyEvent: (node, event) {
+        // Only scroll when the panel ITSELF has focus. This handler used to
+        // swallow every Up/Down bubbling from the buttons, season chips and
+        // episodes inside, so the remote could never move between them.
+        if (!node.hasPrimaryFocus) return KeyEventResult.ignored;
         if (event is KeyDownEvent) {
           final ctrl = PrimaryScrollController.maybeOf(context);
           if (event.logicalKey == LogicalKeyboardKey.arrowDown) {

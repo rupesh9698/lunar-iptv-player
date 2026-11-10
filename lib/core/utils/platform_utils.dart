@@ -2,6 +2,7 @@ import 'package:device_info_plus/device_info_plus.dart';
 import 'package:flutter/foundation.dart';
 import 'package:screen_brightness/screen_brightness.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
+import 'package:window_manager/window_manager.dart';
 
 class PlatformUtils {
   PlatformUtils._();
@@ -54,6 +55,20 @@ class PlatformUtils {
 
   /// wakelock_plus: all platforms
   static bool get supportsWakelock => true;
+
+  // ── Desktop full screen ─────────────────────────────────────────
+  /// True full screen on Windows / macOS / Linux: hides the window title bar
+  /// and covers the OS taskbar (like VLC). SystemChrome immersive modes only
+  /// affect Android/iOS, so the desktop player used to stay windowed.
+  static Future<void> setDesktopFullScreen(bool on) async {
+    if (!isDesktop) return;
+    try {
+      if (await windowManager.isFullScreen() == on) return;
+      await windowManager.setFullScreen(on);
+    } catch (e) {
+      debugPrint('Desktop full screen unavailable: $e');
+    }
+  }
 
   // ── Wakelock Helper ───────────────────────────────────────────────
   static Future<void> initWakelock() async {

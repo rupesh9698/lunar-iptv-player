@@ -403,7 +403,14 @@ class _EpgTimelineState extends ConsumerState<EpgTimeline> {
     );
   }
 
+  /// First click / OK previews the channel in the mini player; clicking or
+  /// pressing OK again on the channel that is already playing (i.e. a
+  /// double-click) opens it full screen — same as "Watch Now".
   void _onChannelTap(BuildContext ctx, LiveStream ch) {
+    if (ref.read(selectedChannelProvider)?.streamId == ch.streamId) {
+      ref.read(livePlayerMaximizedProvider.notifier).state = true;
+      return;
+    }
     ref.read(selectedChannelProvider.notifier).state = ch;
     ref.read(epgCacheProvider.notifier).loadEpg(ch.streamId);
   }
@@ -885,17 +892,6 @@ class _ChannelCellState extends State<_ChannelCell> with TvFocusMixin {
                       ],
                     ),
                   ),
-                  if (rowLit || widget.isSelected)
-                    Padding(
-                      padding: const EdgeInsets.only(left: 2),
-                      child: Icon(
-                        Icons.play_circle_outline,
-                        size: 16,
-                        color: widget.isSelected
-                            ? AppTheme.primary
-                            : AppTheme.textMuted,
-                      ),
-                    ),
                 ],
               ),
             ),

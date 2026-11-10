@@ -276,6 +276,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
   // ── System UI ─────────────────────────────────────────────────────────
   void _enterImmersive() {
     if (kIsWeb) return;
+    PlatformUtils.setDesktopFullScreen(true);
     try {
       // SystemUiMode.immersiveSticky hides taskbar on ALL native platforms
       SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
@@ -295,6 +296,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
     if (_immersiveExited) return;
     _immersiveExited = true;
     if (kIsWeb) return;
+    PlatformUtils.setDesktopFullScreen(false);
     try {
       SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
       if (defaultTargetPlatform == TargetPlatform.android ||
@@ -572,6 +574,12 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
         key == LogicalKeyboardKey.goBack ||
         key == LogicalKeyboardKey.browserBack) {
       if (_locked) return KeyEventResult.ignored; // let lock UI handle it
+      // Controls showing → Back just hides them; next Back leaves.
+      if (_ctrlVisible && _error.isEmpty) {
+        _hideTimer?.cancel();
+        _hideControls();
+        return KeyEventResult.handled;
+      }
       _exitPlayer();
       return KeyEventResult.handled;
     }
@@ -645,6 +653,12 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
       canPop: false,
       onPopInvokedWithResult: (didPop, _) {
         if (didPop) return;
+        // System back (gesture / back button): dismiss controls first.
+        if (_ctrlVisible && !_locked && _error.isEmpty) {
+          _hideTimer?.cancel();
+          _hideControls();
+          return;
+        }
         _exitPlayer();
       },
       child: Focus(
@@ -1141,14 +1155,13 @@ class _PlayerIconBtn extends StatelessWidget {
   final VoidCallback onTap;
   final Color iconColor;
   final String? tooltip;
-  final double size;
+  double get size => 22;
 
   const _PlayerIconBtn({
     required this.icon,
     required this.onTap,
     this.iconColor = Colors.white,
     this.tooltip,
-    this.size = 22,
   });
 
   @override
@@ -1318,23 +1331,8 @@ class _BottomBar extends StatelessWidget {
           // Controls row
           Row(
             children: [
-              _PlayerIconBtn(
-                icon: playing ? Icons.pause_rounded : Icons.play_arrow_rounded,
-                size: 30,
-                onTap: onTogglePlay,
-              ),
-
-              if (!isLive) ...[
-                _PlayerIconBtn(
-                  icon: Icons.replay_10_rounded,
-                  onTap: onSeekBack,
-                ),
-                _PlayerIconBtn(
-                  icon: Icons.forward_10_rounded,
-                  onTap: onSeekFwd,
-                ),
-              ],
-
+              // Play/pause and ±10 s live in the centre button, double-tap
+              // gestures and the remote's ◀ ▶ — no duplicate buttons here.
               const Spacer(),
 
               // Volume (desktop)

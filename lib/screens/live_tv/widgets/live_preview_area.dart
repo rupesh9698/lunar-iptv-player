@@ -105,6 +105,8 @@ class _LiveInlinePlayerState extends ConsumerState<LiveInlinePlayer> {
       widget.playPauseFocusNode?.addListener(_onMiniPlayFocus);
     }
     if (old.isMaximized != widget.isMaximized) {
+      // Windows/macOS/Linux: real full screen (covers title bar + taskbar).
+      PlatformUtils.setDesktopFullScreen(widget.isMaximized);
       setState(() {
         _ctrlVisible = true;
         _showChannelGuide = false;
@@ -126,6 +128,7 @@ class _LiveInlinePlayerState extends ConsumerState<LiveInlinePlayer> {
     _maxRootFocus.dispose();
     _maxPlayFocus.dispose();
     _maxMinimizeFocus.dispose();
+    if (widget.isMaximized) PlatformUtils.setDesktopFullScreen(false);
     _maxFavFocus.dispose();
     super.dispose();
   }
