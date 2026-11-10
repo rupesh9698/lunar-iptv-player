@@ -84,9 +84,38 @@ class LivePlayerNotifier extends StateNotifier<LivePlayerState> {
     if (mounted) state = state.copyWith(isInitialized: true);
   }
 
+  // ── Live "end of stream" handling ───────────────────────────────────────
+  // Many IPTV servers close a live stream's HTTP connection every minute or
+  // two. libmpv then reports end-of-file → media_kit marks the media
+  // `completed` and pauses; pressing Play on a completed media makes
+  // media_kit seek to 0, i.e. replay the buffered minutes ("pauses after
+  // 1-2 min, then goes back"). For live TV an EOF just means "reconnect":
+  // reopen the URL at the live edge, automatically.
+  final List<DateTime> _eofReconnects = [];
+
+  void _onLiveEnded() {
+    final url = state.currentUrl;
+    if (!mounted || url == null) return;
+    final now = DateTime.now();
+    _eofReconnects.removeWhere(
+      (t) => now.difference(t) > const Duration(minutes: 1),
+    );
+    // A stream that "ends" over and over is really dead → show the error.
+    if (_eofReconnects.length >= 5) {
+      state = state.copyWith(isBuffering: false, error: 'Stream unavailable');
+      return;
+    }
+    _eofReconnects.add(now);
+    state = state.copyWith(isBuffering: true);
+    _player?.open(Media(url));
+  }
+
   void _subscribe() {
     final p = _player!;
     _subs.addAll([
+      p.stream.completed.listen((done) {
+        if (done) _onLiveEnded();
+      }),
       p.stream.playing.listen((v) {
         if (mounted) state = state.copyWith(isPlaying: v);
       }),
@@ -169,7 +198,16 @@ class LivePlayerNotifier extends StateNotifier<LivePlayerState> {
     }
   }
 
-  void togglePlayPause() => _player?.playOrPause();
+  void togglePlayPause() {
+    final p = _player;
+    if (p == null) return;
+    // Never "play" a completed live stream — media_kit would rewind to 0.
+    if (p.state.completed) {
+      _onLiveEnded();
+      return;
+    }
+    p.playOrPause();
+  }
 
   void setVolume(double v) {
     final c = v.clamp(0.0, 1.0);

@@ -112,7 +112,7 @@ class _LiveInlinePlayerState extends ConsumerState<LiveInlinePlayer> {
         // after 5 s); the guide takes focus itself.
         _hideTimer?.cancel();
         setState(() {
-          _ctrlVisible = false;
+          _ctrlVisible = true;
           _showChannelGuide = true;
         });
       } else {
@@ -200,15 +200,20 @@ class _LiveInlinePlayerState extends ConsumerState<LiveInlinePlayer> {
   }
 
   void _openGuide() {
+    // Top bar stays up for as long as the guide is open.
     _hideTimer?.cancel();
     setState(() {
       _showChannelGuide = true;
-      _ctrlVisible = false;
+      _ctrlVisible = true;
     });
   }
 
   void _closeGuide() {
-    setState(() => _showChannelGuide = false);
+    _hideTimer?.cancel();
+    setState(() {
+      _showChannelGuide = false;
+      _ctrlVisible = false;
+    });
     _maxRootFocus.requestFocus();
   }
 
@@ -523,6 +528,7 @@ class _LiveInlinePlayerState extends ConsumerState<LiveInlinePlayer> {
                 ctrlVisible: _ctrlVisible,
                 onTap: _toggleControls,
                 onDoubleTap: widget.onMaximize,
+                centerSpinner: true,
               ),
             ),
             // Info pane
@@ -596,10 +602,9 @@ class _LiveInlinePlayerState extends ConsumerState<LiveInlinePlayer> {
               ),
 
             // Controls overlay
-            if (!_locked &&
-                ps.error.isEmpty &&
-                !ps.isReconnecting &&
-                !_showChannelGuide)
+            // (Shown together with the TV Guide: Minimize / Favourite / Lock
+            // stay reachable while the guide is open.)
+            if (!_locked && ps.error.isEmpty && !ps.isReconnecting)
               AnimatedOpacity(
                 opacity: _ctrlVisible ? 1.0 : 0.0,
                 duration: const Duration(milliseconds: 250),
@@ -617,6 +622,7 @@ class _LiveInlinePlayerState extends ConsumerState<LiveInlinePlayer> {
                           isFavorite: ref
                               .watch(liveFavoritesNotifierProvider)
                               .contains(channel?.streamId ?? ''),
+                          showHint: !_showChannelGuide,
                           minimizeFocus: _maxMinimizeFocus,
                           favoriteFocus: _maxFavFocus,
                           onMinimize: widget.onMinimize,
@@ -646,7 +652,7 @@ class _LiveInlinePlayerState extends ConsumerState<LiveInlinePlayer> {
                               .toggle(channel.streamId)
                         : null,
                     onToggleGuide: () =>
-                        setState(() => _showChannelGuide = true),
+                        _showChannelGuide ? _closeGuide() : _openGuide(),
                   ),
                 ),
                 ),
@@ -733,6 +739,7 @@ class _VideoArea extends StatelessWidget {
   final LivePlayerState ps;
   final bool videoFill;
   final bool ctrlVisible;
+  final bool centerSpinner;
   final VoidCallback onTap;
   final VoidCallback? onDoubleTap;
   final GestureDragStartCallback? onDragStart;
@@ -744,6 +751,7 @@ class _VideoArea extends StatelessWidget {
     required this.ps,
     required this.videoFill,
     required this.ctrlVisible,
+    this.centerSpinner = false,
     required this.onTap,
     this.onDoubleTap,
     this.onDragStart,
@@ -802,23 +810,15 @@ class _VideoArea extends StatelessWidget {
             ),
           ),
           // Mini player: small spinner while (re)buffering.
-          if (ps.isBuffering && !ctrlVisible)
-            Positioned(
-              bottom: 8,
-              right: 8,
-              child: Container(
-                padding: const EdgeInsets.all(4),
-                decoration: BoxDecoration(
-                  color: Colors.black.withValues(alpha: 0.6),
-                  borderRadius: BorderRadius.circular(6),
-                ),
-                child: const SizedBox(
-                  width: 12,
-                  height: 12,
-                  child: CircularProgressIndicator(
-                    color: Colors.white,
-                    strokeWidth: 1.5,
-                  ),
+          // Mini player: centred spinner while (re)buffering.
+          if (centerSpinner && ps.isBuffering)
+            const Center(
+              child: SizedBox(
+                width: 30,
+                height: 30,
+                child: CircularProgressIndicator(
+                  color: Colors.white,
+                  strokeWidth: 2.5,
                 ),
               ),
             ),
@@ -858,7 +858,11 @@ class _MaximizedControls extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
+    return GestureDetector(
+      // Click / tap on the video area (not a button) = OK → toggle guide.
+      behavior: HitTestBehavior.translucent,
+      onTap: onToggleGuide,
+      child: Container(
       decoration: BoxDecoration(
         gradient: LinearGradient(
           begin: Alignment.topCenter,
@@ -881,6 +885,7 @@ class _MaximizedControls extends StatelessWidget {
               child: Row(
                 children: [
                   IconButton(
+                    focusNode: playFocusNode,
                     onPressed: onMinimize,
                     icon: const Icon(
                       Icons.fullscreen_exit_rounded,
@@ -951,31 +956,10 @@ class _MaximizedControls extends StatelessWidget {
             ),
 
             const Spacer(),
-
-            const Spacer(),
-
-            // Bottom bar
-            Padding(
-              padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
-              child: Row(
-                children: [
-                  // Live TV: no play/pause or prev/next — ◀ ▶ / CH± change
-                  // channel, OK / Enter opens this guide.
-                  TvIconButton(
-                    focusNode: playFocusNode,
-                    icon: Icons.video_library_outlined,
-                    color: Colors.white,
-                    size: 24,
-                    circle: true,
-                    tooltip: 'TV Guide (OK / G)',
-                    onTap: onToggleGuide,
-                  ),
-                ],
-              ),
-            ),
           ],
         ),
       ),
+    ),
     );
   }
 }
@@ -1744,7 +1728,10 @@ class _TvInfoBar extends StatelessWidget {
     required this.favoriteFocus,
     required this.onMinimize,
     required this.onToggleFav,
+    this.showHint = true,
   });
+
+  final bool showHint;
 
   static String _hm(DateTime t) => DateFormat('HH:mm').format(t);
 
@@ -1863,7 +1850,8 @@ class _TvInfoBar extends StatelessWidget {
             ),
           ),
         ),
-        // Remote hint
+        // Remote hint (hidden while the guide covers the bottom)
+        if (showHint)
         Positioned(
           left: 20,
           bottom: 18,

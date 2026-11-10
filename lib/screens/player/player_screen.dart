@@ -16,6 +16,7 @@ import '../../core/utils/focus_utils.dart';
 import '../../core/utils/platform_utils.dart';
 import '../../core/utils/player_tuning.dart';
 import '../../providers/app_providers.dart';
+import '../../providers/behavior_providers.dart';
 import '../../providers/live_tv_provider.dart';
 import '../../services/web_proxy_client.dart';
 
@@ -109,6 +110,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
 
   @override
   void dispose() {
+    _finalSaveAndRefresh(); // any other exit path (e.g. route replaced)
     _playerDisposed = true;
     _hideTimer?.cancel();
     _volHideTimer?.cancel();
@@ -117,7 +119,6 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
     _reconnectTimer?.cancel();
     // ── Save final position + stop behavior timer ─────────────────────────────
     _positionTimer?.cancel();
-    if (!_isLive && !_playerDisposed) _saveCurrentPosition();
     try {
       BehaviorService.instance.stopWatchTimer(widget.id);
     } catch (_) {}
@@ -198,6 +199,13 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
             : '';
         if (q.isNotEmpty) setState(() => _quality = q);
       }),
+      // Live channels opened in this player: an end-of-stream means the
+      // server closed the connection → reconnect at the live edge instead of
+      // pausing (Play would make media_kit rewind to the start).
+      _player.stream.completed.listen((done) {
+        if (!done || !_isLive || !mounted || _playerDisposed) return;
+        _player.open(Media(widget.url));
+      }),
       _player.stream.error.listen((e) {
         if (e.isEmpty || !mounted) return;
         _handleStreamError(e);
@@ -232,7 +240,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
     // ── Periodic position save (VOD only, every 10s) ─────────────────────────
     if (!_isLive) {
       _positionTimer = Timer.periodic(const Duration(seconds: 10), (_) {
-        if (!_playerDisposed && mounted) _saveCurrentPosition();
+        if (!_playerDisposed && mounted) _saveCurrentPosition().ignore();
       });
     }
 
@@ -470,19 +478,36 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
 
   /// Saves position for Continue Watching. Skips very short content
   /// and near-complete content (handled by BehaviorService internally).
-  void _saveCurrentPosition() {
-    if (_dur.inSeconds < 30 || _playerDisposed || _pos == Duration.zero) return;
-    BehaviorService.instance
-        .savePosition(
-          id: widget.id,
-          url: widget.url,
-          positionSeconds: _pos.inSeconds.toDouble(),
-          durationSeconds: _dur.inSeconds.toDouble(),
-          type: widget.type,
-          title: widget.title,
-          imageUrl: widget.imageUrl,
-        )
-        .ignore();
+  Future<void> _saveCurrentPosition() async {
+    if (_isLive || _dur.inSeconds < 30 || _pos == Duration.zero) return;
+    try {
+      await BehaviorService.instance.savePosition(
+        id: widget.id,
+        url: widget.url,
+        positionSeconds: _pos.inSeconds.toDouble(),
+        durationSeconds: _dur.inSeconds.toDouble(),
+        type: widget.type,
+        title: widget.title,
+        imageUrl: widget.imageUrl,
+      );
+    } catch (_) {}
+  }
+
+  bool _finalSaveDone = false;
+
+  /// Saves the final position once and refreshes Home's "Continue Watching"
+  /// so the item appears immediately (it used to need an app restart: the
+  /// list was loaded once, and the final save was skipped because
+  /// `_playerDisposed` was set before the save check).
+  void _finalSaveAndRefresh() {
+    if (_finalSaveDone) return;
+    _finalSaveDone = true;
+    final cw = ref.read(continueWatchingProvider.notifier);
+    _saveCurrentPosition().whenComplete(() {
+      try {
+        cw.refresh();
+      } catch (_) {}
+    });
   }
 
   // ── Buffer percentage (VOD only) ──────────────────────────────────────
@@ -500,6 +525,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
   }
 
   void _exitPlayer() {
+    _finalSaveAndRefresh();
     if (mounted) setState(() => _playerDisposed = true);
     _exitImmersive();
     try {
