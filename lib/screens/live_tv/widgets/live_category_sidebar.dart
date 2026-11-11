@@ -55,6 +55,18 @@ class _LiveCategorySidebarState extends ConsumerState<LiveCategorySidebar> {
   final _searchCtrl = TextEditingController();
   String _query = '';
   bool _showSearch = false;
+  final _searchFieldFocus = FocusNode(debugLabel: 'categorySearchField');
+
+  /// Opening the search puts the remote straight into the field (and the
+  /// keyboard up) — `autofocus` never fired on TV, where the search button
+  /// already held focus.
+  void _focusSearchFieldSoon() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted && _showSearch && _searchFieldFocus.context != null) {
+        _searchFieldFocus.requestFocus();
+      }
+    });
+  }
   final Map<String, GlobalKey> _catKeys = {};
   final Map<String, int> _catIndexMap = {};
 
@@ -142,6 +154,7 @@ class _LiveCategorySidebarState extends ConsumerState<LiveCategorySidebar> {
   void dispose() {
     _scrollCtrl.dispose();
     _searchCtrl.dispose();
+    _searchFieldFocus.dispose();
     _catKeys.clear();
     for (final n in _itemFocusNodes) {
       n.dispose();
@@ -492,19 +505,22 @@ class _LiveCategorySidebarState extends ConsumerState<LiveCategorySidebar> {
           TvFocusable(
             focusNode: widget.searchFocusNode,
             autoScroll: false,
-            onActivate: () => setState(() {
-              _showSearch = !_showSearch;
-              if (!_showSearch) {
-                _searchCtrl.clear();
-                _query = '';
-              }
-            }),
+            onActivate: () {
+              setState(() {
+                _showSearch = !_showSearch;
+                if (!_showSearch) {
+                  _searchCtrl.clear();
+                  _query = '';
+                }
+              });
+              if (_showSearch) _focusSearchFieldSoon();
+            },
             onArrowKey: (key) {
               if (key == LogicalKeyboardKey.arrowDown) {
-                if (_showSearch &&
-                    FocusManager.instance.primaryFocus
-                            ?.focusInDirection(TraversalDirection.down) ==
-                        true) {
+                // Open search: straight into the field (it used to skip
+                // it and land on All Channels).
+                if (_showSearch && _searchFieldFocus.context != null) {
+                  _searchFieldFocus.requestFocus();
                   return KeyEventResult.handled;
                 }
                 _focusItem(0); // first item = All Channels
@@ -554,6 +570,7 @@ class _LiveCategorySidebarState extends ConsumerState<LiveCategorySidebar> {
           onDown: () => _focusItem(0),
           child: TextField(
           controller: _searchCtrl,
+          focusNode: _searchFieldFocus,
           autofocus: true,
           onChanged: (v) => setState(() => _query = v),
           style: const TextStyle(color: AppTheme.textPrimary, fontSize: 13),

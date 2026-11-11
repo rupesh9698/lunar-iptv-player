@@ -602,7 +602,7 @@ class _LiveInlinePlayerState extends ConsumerState<LiveInlinePlayer> {
     VideoController? ctrl,
   ) {
     final locked = ref.watch(livePlayerLockedProvider);
-    return Focus(
+    return TvKeyRoot(
       focusNode: _maxRootFocus,
       autofocus: !_showChannelGuide,
       onKeyEvent: _onMaxKey,

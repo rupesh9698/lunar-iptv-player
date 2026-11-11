@@ -357,12 +357,25 @@ class _SeriesCategorySidebarState
   final _searchCtrl = TextEditingController();
   String _query = '';
   bool _showSearch = false;
+  final _searchFieldFocus = FocusNode(debugLabel: 'genreSearch');
 
   @override
   void dispose() {
     _scrollCtrl.dispose();
     _searchCtrl.dispose();
+    _searchFieldFocus.dispose();
     super.dispose();
+  }
+
+  /// Opening the search puts the remote straight into the field (and the
+  /// keyboard up) — `autofocus` never fired on TV, where the search button
+  /// already held focus.
+  void _focusSearchFieldSoon() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted && _showSearch && _searchFieldFocus.context != null) {
+        _searchFieldFocus.requestFocus();
+      }
+    });
   }
 
   Widget _buildHeader() {
@@ -386,20 +399,39 @@ class _SeriesCategorySidebarState
               ),
             ),
           ),
-          IconButton(
-            padding: EdgeInsets.zero,
-            constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
-            onPressed: () => setState(() {
-              _showSearch = !_showSearch;
-              if (!_showSearch) {
-                _searchCtrl.clear();
-                _query = '';
+          // Down from the search button goes into the open field (default
+          // traversal skipped it and landed on the first genre).
+          Focus(
+            canRequestFocus: false,
+            skipTraversal: true,
+            onKeyEvent: (_, e) {
+              if (e is! KeyUpEvent &&
+                  e.logicalKey == LogicalKeyboardKey.arrowDown &&
+                  _showSearch &&
+                  _searchFieldFocus.context != null) {
+                _searchFieldFocus.requestFocus();
+                return KeyEventResult.handled;
               }
-            }),
-            icon: Icon(
-              _showSearch ? Icons.close : Icons.search,
-              size: 15,
-              color: _showSearch ? AppTheme.primary : AppTheme.textMuted,
+              return KeyEventResult.ignored;
+            },
+            child: IconButton(
+              padding: EdgeInsets.zero,
+              constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
+              onPressed: () {
+                setState(() {
+                  _showSearch = !_showSearch;
+                  if (!_showSearch) {
+                    _searchCtrl.clear();
+                    _query = '';
+                  }
+                });
+                if (_showSearch) _focusSearchFieldSoon();
+              },
+              icon: Icon(
+                _showSearch ? Icons.close : Icons.search,
+                size: 15,
+                color: _showSearch ? AppTheme.primary : AppTheme.textMuted,
+              ),
             ),
           ),
         ],
@@ -416,6 +448,7 @@ class _SeriesCategorySidebarState
           controller: _searchCtrl,
           child: TextField(
             controller: _searchCtrl,
+            focusNode: _searchFieldFocus,
             autofocus: true,
             onChanged: (v) => setState(() => _query = v.toLowerCase().trim()),
             style: const TextStyle(color: AppTheme.textPrimary, fontSize: 13),

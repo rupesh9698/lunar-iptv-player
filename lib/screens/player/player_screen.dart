@@ -9,7 +9,6 @@ import 'package:go_router/go_router.dart';
 import 'package:lunar_iptv_player/services/behavior_service.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
-import 'package:media_kit_video/media_kit_video_controls/src/controls/extensions/duration.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../../core/theme/app_theme.dart';
@@ -131,6 +130,41 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
   Timer? _positionTimer;
   static const int _kPosSaveInterval = 10;
 
+  // ── Resume ──────────────────────────────────────────────────────────
+  /// Where playback must resume (Continue Watching / details "Resume").
+  /// Null once it got there, or once the user seeks themselves.
+  Duration? _resumeAt;
+  int _resumeTries = 0;
+  DateTime? _lastResumeTry;
+
+  /// The stream is opened with mpv's own start position, which can still
+  /// be lost on some servers / timings (it used to seek once, 300 ms after
+  /// the duration was known, and that seek was often dropped — playback
+  /// then began at 0:00). Once it plays, check where it actually is and
+  /// seek again if needed (a few tries, spaced out).
+  void _checkResume(Duration pos) {
+    final target = _resumeAt;
+    if (target == null || _playerDisposed) return;
+    if (_dur <= Duration.zero || !_playing || _buffering) return;
+    final t = target < _dur ? target : _dur - const Duration(seconds: 10);
+    if ((pos - t).abs() <= const Duration(seconds: 8)) {
+      _resumeAt = null; // landed
+      return;
+    }
+    if (_resumeTries >= 4) {
+      _resumeAt = null;
+      return;
+    }
+    final now = DateTime.now();
+    if (_lastResumeTry != null &&
+        now.difference(_lastResumeTry!) < const Duration(seconds: 2)) {
+      return;
+    }
+    _resumeTries++;
+    _lastResumeTry = now;
+    _player.seek(t < Duration.zero ? Duration.zero : t);
+  }
+
   bool get _isLive => widget.type == 'live';
 
   bool _videoFill = false; // false=contain, true=fill/cover
@@ -213,6 +247,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
         if (_isSeeking || !mounted) return;
         final secondChanged = v.inSeconds != _pos.inSeconds;
         _pos = v; // always keep the latest value (used for saving)
+        _checkResume(v);
         // Rebuild only when the on-screen time changes and the OSD shows it.
         if (secondChanged && _ctrlVisible && !_isLive) setState(() {});
       }),
@@ -248,24 +283,13 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
 
     await _player.setVolume(100);
 
-    // Open media — VOD: seek to saved position after open completes
+    // Open media — VOD resume: start straight at the saved position
+    // (mpv `start`), then [_checkResume] makes sure it got there.
     if (!_isLive && widget.startPosition > 3.0) {
-      // Listen for first duration event which confirms media is loaded
-      late StreamSubscription<Duration> durSub;
-      durSub = _player.stream.duration.listen((dur) async {
-        if (dur.inSeconds > 0) {
-          durSub.cancel();
-          await Future.delayed(const Duration(milliseconds: 300));
-          if (mounted && !_playerDisposed) {
-            final seekTo = Duration(seconds: widget.startPosition.round());
-            await _player.seek(seekTo.clamp(Duration.zero, dur));
-          }
-        }
-      });
-      _subs.add(durSub);
+      _resumeAt = Duration(seconds: widget.startPosition.round());
     }
 
-    await _player.open(Media(widget.url));
+    await _player.open(Media(widget.url, start: _resumeAt));
     await PlatformUtils.enableWakelock();
 
     // ── Behavior tracking ─────────────────────────────────────────────────────
@@ -437,6 +461,11 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
   /// direction less than ~1 s apart form a run whose step accelerates.
   void _stepSeek(bool forward, {bool fixed = false}) {
     if (_isLive || _playerDisposed) return;
+    // Seeking before the resume landed: step from the resume point.
+    if (_resumeAt != null) {
+      _pendingSeek ??= _resumeAt;
+      _resumeAt = null;
+    }
     final now = DateTime.now();
     final gap = now.difference(_lastSeekStep);
     // Remote auto-repeat fires every ~50 ms: take one step per 150 ms.
@@ -488,6 +517,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
 
   void _seekTo(double frac) {
     if (_isLive) return;
+    _resumeAt = null; // the user picked a spot
     _player.seek(_dur * frac.clamp(0, 1));
   }
 
@@ -680,6 +710,8 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
   /// and near-complete content (handled by BehaviorService internally).
   Future<void> _saveCurrentPosition() async {
     if (_isLive || _dur.inSeconds < 30 || _pos == Duration.zero) return;
+    // Not there yet: keep the saved resume point.
+    if (_resumeAt != null) return;
     try {
       await BehaviorService.instance.savePosition(
         id: widget.id,
@@ -921,7 +953,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
         }
         _exitPlayer();
       },
-      child: Focus(
+      child: TvKeyRoot(
         focusNode: _rootFocus,
         autofocus: true,
         onKeyEvent: _handleGlobalKey,
@@ -2122,3 +2154,38 @@ class _TrackList<T> extends StatelessWidget {
     );
   }
 }
+
+/// The Movies / Series player's on-screen controls, for widget tests (the
+/// player itself needs a real media engine).
+@visibleForTesting
+Widget debugPlayerControls({
+  required FocusNode playFocusNode,
+  required VoidCallback onBack,
+  VoidCallback? onShowTracks,
+  VoidCallback? onToggleLock,
+}) => _ControlsOverlay(
+  playFocusNode: playFocusNode,
+  title: 'Movie',
+  isLive: false,
+  playing: true,
+  quality: 'HD',
+  isFavorite: false,
+  pos: const Duration(minutes: 10),
+  dur: const Duration(minutes: 90),
+  isSeeking: false,
+  seekVal: 0,
+  volume: 1,
+  onBack: onBack,
+  onTogglePlay: () {},
+  onToggleLock: onToggleLock ?? () {},
+  onToggleFav: null,
+  onShowTracks: onShowTracks ?? () {},
+  onSeekStart: (_) {},
+  onSeekChange: (_) {},
+  onSeekEnd: (_) {},
+  onVolumeChange: (_) {},
+  isVideoFill: false,
+  onToggleFit: () {},
+  onSeekBack: () {},
+  onSeekFwd: () {},
+);

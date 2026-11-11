@@ -708,11 +708,46 @@ class _EpgControlBar extends ConsumerStatefulWidget {
 class _EpgControlBarState extends ConsumerState<_EpgControlBar> {
   final _searchCtrl = TextEditingController();
   bool _searchOpen = false;
+  final _searchFieldFocus = FocusNode(debugLabel: 'channelSearchField');
+
+  /// Set when the box opens: the field (mounted only once the box has
+  /// grown wide enough) takes focus — and brings up the keyboard — as soon
+  /// as it exists. `autofocus` never fired: the search button had focus.
+  bool _focusFieldWhenBuilt = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _searchFieldFocus.addListener(_onFieldFocus);
+  }
+
+  void _onFieldFocus() {
+    if (mounted) setState(() {}); // focus ring follows the field
+  }
 
   @override
   void dispose() {
+    _searchFieldFocus.removeListener(_onFieldFocus);
+    _searchFieldFocus.dispose();
     _searchCtrl.dispose();
     super.dispose();
+  }
+
+  /// Retries each frame until the field exists (the box animates open
+  /// for 250 ms first), for up to ~1 s.
+  void _focusFieldSoon([int frame = 0]) {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || !_focusFieldWhenBuilt || !_searchOpen) return;
+      if (_searchFieldFocus.context == null) {
+        if (frame < 60) {
+          _focusFieldSoon(frame + 1);
+          WidgetsBinding.instance.scheduleFrame();
+        }
+        return;
+      }
+      _focusFieldWhenBuilt = false;
+      _searchFieldFocus.requestFocus();
+    });
   }
 
   void _goFirstChannelOrSelf(FocusNode self) {
@@ -791,7 +826,11 @@ class _EpgControlBarState extends ConsumerState<_EpgControlBar> {
       autoScroll: false,
       excludeChildFocus: false, // hosts the search TextField
       onActivate: () {
-        setState(() => _searchOpen = !_searchOpen);
+        setState(() {
+          _searchOpen = !_searchOpen;
+          _focusFieldWhenBuilt = _searchOpen;
+        });
+        if (_searchOpen) _focusFieldSoon();
         if (!_searchOpen) {
           _searchCtrl.clear();
           ref.read(liveSearchQueryProvider.notifier).state = '';
@@ -832,7 +871,10 @@ class _EpgControlBarState extends ConsumerState<_EpgControlBar> {
         // 1 pixel" stripes whenever the button was focused.
         foregroundDecoration: BoxDecoration(
           borderRadius: BorderRadius.circular(8),
-          border: _searchOpen
+          // Open: typing → accent ring; remote on the box → white ring.
+          border: _searchOpen && _searchFieldFocus.hasFocus
+              ? Border.all(color: AppTheme.primary, width: 1.5)
+              : _searchOpen && !focused
               ? Border.all(color: AppTheme.divider)
               : focused
               ? Border.all(
@@ -869,6 +911,7 @@ class _EpgControlBarState extends ConsumerState<_EpgControlBar> {
                         _goFirstChannelOrSelf(widget.searchFocusNode!),
                     child: TextField(
                       controller: _searchCtrl,
+                      focusNode: _searchFieldFocus,
                       autofocus: true,
                       onChanged: (v) =>
                           ref.read(liveSearchQueryProvider.notifier).state = v,

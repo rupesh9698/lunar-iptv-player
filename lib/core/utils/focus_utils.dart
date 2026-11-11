@@ -120,8 +120,8 @@ bool _popForEscape() {
   final nav = Navigator.maybeOf(ctx);
   if (nav == null) return false;
   final route = ModalRoute.of(ctx);
-  final decides = route != null &&
-      route.popDisposition == RoutePopDisposition.doNotPop;
+  final decides =
+      route != null && route.popDisposition == RoutePopDisposition.doNotPop;
   if (!nav.canPop() && !decides) return false;
   nav.maybePop();
   return true;
@@ -925,4 +925,36 @@ class TvNav {
       return KeyEventResult.ignored;
     };
   }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// TV KEY ROOT
+// Full-screen key handler that focus parks on while a player's controls are
+// hidden. It must never be a D-pad *target*: as one, its screen-sized rect
+// counted as the "nearest" node from most buttons, so Left from a top-bar
+// button jumped onto the invisible player (where Left then seeks) instead of
+// reaching the Back button. requestFocus() still works.
+// ─────────────────────────────────────────────────────────────────────────────
+class TvKeyRoot extends StatelessWidget {
+  final FocusNode focusNode;
+  final bool autofocus;
+  final FocusOnKeyEventCallback onKeyEvent;
+  final Widget child;
+
+  const TvKeyRoot({
+    super.key,
+    required this.focusNode,
+    required this.onKeyEvent,
+    required this.child,
+    this.autofocus = false,
+  });
+
+  @override
+  Widget build(BuildContext context) => Focus(
+    focusNode: focusNode,
+    autofocus: autofocus,
+    skipTraversal: true,
+    onKeyEvent: onKeyEvent,
+    child: child,
+  );
 }
