@@ -79,10 +79,13 @@ class ForYouSection extends StatelessWidget {
         ),
 
         // ── Card list ──────────────────────────────────────────────────────
+        // Room around the cards for the focus zoom: a scrolling list clips
+        // its children, so a zoomed card was cut off at the edges.
         SizedBox(
-          height: 140,
+          height: 140 + 16,
           child: ListView.builder(
             scrollDirection: Axis.horizontal,
+            padding: const EdgeInsets.fromLTRB(6, 8, 6, 8),
             itemCount: items.length,
             itemBuilder: (ctx, i) => Padding(
               padding: EdgeInsets.only(right: i < items.length - 1 ? 10 : 0),

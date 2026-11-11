@@ -85,10 +85,11 @@ class TimeOfDayStrip extends ConsumerWidget {
 
         // ── Channel chips ───────────────────────────────────────────────────
         SizedBox(
-          height: 64,
+          // Extra room above / below for the focus zoom (the list clips).
+          height: 64 + 8,
           child: ListView.builder(
             scrollDirection: Axis.horizontal,
-            padding: const EdgeInsets.only(left: 12, right: 4),
+            padding: const EdgeInsets.fromLTRB(12, 4, 4, 4),
             itemCount: channels.length,
             itemBuilder: (ctx, i) => Padding(
               padding: const EdgeInsets.only(right: 8, bottom: 4),

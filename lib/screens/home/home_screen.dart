@@ -701,6 +701,9 @@ class _RightPanel extends ConsumerWidget {
                 childAspectRatio: aspect,
                 shrinkWrap: true,
                 physics: const NeverScrollableScrollPhysics(),
+                // Doesn't scroll, so nothing needs clipping — and clipping
+                // cut the focused card's zoom off at the grid's edges.
+                clipBehavior: Clip.none,
                 children: [
                   // Live TV — always show, autofocus for TV remote
                   _NavCard(

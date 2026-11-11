@@ -78,10 +78,13 @@ class ContinueWatchingRow extends ConsumerWidget {
         ),
 
         // ── Horizontal card list ────────────────────────────────────────────
+        // Room around the cards for the focus zoom: a scrolling list clips
+        // its children, so a zoomed card was cut off at the edges.
         SizedBox(
-          height: 132,
+          height: 132 + 16,
           child: ListView.builder(
             scrollDirection: Axis.horizontal,
+            padding: const EdgeInsets.fromLTRB(6, 8, 6, 8),
             itemCount: items.length,
             itemBuilder: (ctx, i) => Padding(
               padding: EdgeInsets.only(right: i < items.length - 1 ? 12 : 0),
