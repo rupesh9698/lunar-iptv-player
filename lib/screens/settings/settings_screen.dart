@@ -73,12 +73,12 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
 
   @override
   Widget build(BuildContext context) {
-    // Same layout everywhere (sidebar + one section at a time). Narrow
-    // screens used to get one long scrolling page with no sidebar; there
-    // the sidebar now shrinks to an icon rail instead.
+    // Same layout everywhere (sidebar + one section at a time); screens
+    // under 900 px wide used to get one long scrolling page instead. The
+    // app is landscape-only, so even phones have room for the labels.
     final w = MediaQuery.sizeOf(context).width;
-    final rail = w < 720;
-    final sideW = rail ? 72.0 : (w < 1100 ? 184.0 : 210.0);
+    const rail = false;
+    final sideW = w < 900 ? 176.0 : (w < 1300 ? 200.0 : 220.0);
 
     return Scaffold(
       backgroundColor: AppTheme.background,

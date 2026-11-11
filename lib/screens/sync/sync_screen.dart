@@ -717,42 +717,30 @@ class _Cards extends StatelessWidget {
   Widget build(BuildContext context) {
     return LayoutBuilder(
       builder: (context, box) {
-        // Phones held upright: stack the cards.
-        final vertical = box.maxWidth < 560 && box.maxHeight > box.maxWidth;
-        final hPad = box.maxWidth < 600 ? 16.0 : 40.0;
-        final gap = box.maxWidth < 600 ? 12.0 : 24.0;
-        // Wide screens: keep cards a sensible shape instead of stretching.
-        final maxCardW = vertical
-            ? double.infinity
-            : math.min(360.0, (box.maxWidth - 2 * hPad) / items.length);
-        final cardH = vertical
-            ? double.infinity
-            : math.max(120.0, math.min(box.maxHeight - 32, maxCardW * 1.05));
+        // Landscape only (the app is locked to it). Phones get tighter
+        // spacing; big screens keep cards a sensible shape.
+        final hPad = box.maxWidth < 900 ? 24.0 : 40.0;
+        final gap = box.maxWidth < 900 ? 16.0 : 24.0;
+        final maxCardW = math.min(
+          360.0,
+          (box.maxWidth - 2 * hPad) / items.length,
+        );
+        final cardH = math.max(
+          120.0,
+          // Room for the active card's 6 % zoom above and below.
+          math.min((box.maxHeight - 20) / 1.1, maxCardW * 1.05),
+        );
 
         Widget card(int i) =>
             _SyncCard(
                   item: items[i],
                   isActive: i == active,
                   anyActive: active >= 0,
-                  horizontal: vertical,
                 )
                 .animate(delay: (90 * i).ms)
                 .fadeIn(duration: 380.ms)
                 .moveY(begin: 18, end: 0, curve: Curves.easeOutCubic);
 
-        if (vertical) {
-          return Padding(
-            padding: EdgeInsets.fromLTRB(hPad, 4, hPad, 16),
-            child: Column(
-              children: [
-                for (var i = 0; i < items.length; i++) ...[
-                  if (i > 0) SizedBox(height: gap),
-                  Expanded(child: card(i)),
-                ],
-              ],
-            ),
-          );
-        }
         return Padding(
           padding: EdgeInsets.fromLTRB(hPad, 0, hPad, 20),
           child: Center(
@@ -780,14 +768,10 @@ class _SyncCard extends StatelessWidget {
   final bool isActive;
   final bool anyActive;
 
-  /// Icon left, text right (stacked layout on upright phones).
-  final bool horizontal;
-
   const _SyncCard({
     required this.item,
     required this.isActive,
     required this.anyActive,
-    required this.horizontal,
   });
 
   @override
@@ -800,9 +784,9 @@ class _SyncCard extends StatelessWidget {
 
     // Zoom: the syncing card comes forward, the rest step back.
     final scale = isActive
-        ? (horizontal ? 1.03 : 1.06)
+        ? 1.06
         : anyActive
-        ? (horizontal ? 0.94 : 0.88)
+        ? 0.88
         : 1.0;
     final opacity = isActive || isDone || isFailed ? 1.0 : 0.55;
 
@@ -856,12 +840,8 @@ class _SyncCard extends StatelessWidget {
           ),
           child: LayoutBuilder(
             builder: (context, box) {
-              final base = horizontal
-                  ? math.min(box.maxHeight * 1.6, box.maxWidth * 0.8)
-                  : math.min(box.maxWidth, box.maxHeight);
-              final disc = horizontal
-                  ? (box.maxHeight * 0.5).clamp(44.0, 88.0)
-                  : (base * 0.36).clamp(44.0, 128.0);
+              final base = math.min(box.maxWidth, box.maxHeight);
+              final disc = (base * 0.36).clamp(44.0, 128.0);
               final labelSize = (base * 0.075).clamp(14.0, 24.0);
               final subSize = (base * 0.052).clamp(11.0, 16.0);
 
@@ -872,9 +852,7 @@ class _SyncCard extends StatelessWidget {
               );
               final texts = Column(
                 mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: horizontal
-                    ? CrossAxisAlignment.start
-                    : CrossAxisAlignment.center,
+                crossAxisAlignment: CrossAxisAlignment.center,
                 children: [
                   Text(
                     item.label,
@@ -894,9 +872,7 @@ class _SyncCard extends StatelessWidget {
                     child: Text(
                       statusText,
                       key: ValueKey(statusText),
-                      textAlign: horizontal
-                          ? TextAlign.start
-                          : TextAlign.center,
+                      textAlign: TextAlign.center,
                       maxLines: 2,
                       overflow: TextOverflow.ellipsis,
                       style: TextStyle(
@@ -916,19 +892,6 @@ class _SyncCard extends StatelessWidget {
                 ],
               );
 
-              if (horizontal) {
-                return Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 18),
-                  child: Row(
-                    children: [
-                      emblem,
-                      const SizedBox(width: 18),
-                      Expanded(child: texts),
-                      _Badge(status: status),
-                    ],
-                  ),
-                );
-              }
               return Stack(
                 children: [
                   Positioned(top: 14, right: 14, child: _Badge(status: status)),

@@ -251,26 +251,44 @@ class _DashboardBody extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     if (data.isEmpty) return const _EmptyState();
-    final w = MediaQuery.sizeOf(context).width;
-    final twoCols = w >= 1000;
+    // The app always runs in landscape: two columns from phones to TVs.
+    final size = MediaQuery.sizeOf(context);
+    final twoCols = size.width >= 620;
+    final gap = size.width < 900 ? 14.0 : 20.0;
+    // Chart rows: both panels share one height, scaled to the screen.
+    final rowH = (size.height * 0.55).clamp(230.0, 320.0);
 
     final insights = _insights(data);
     final change = data.weekChange;
 
-    Widget pair(Widget a, Widget? b) {
-      if (b == null) return a;
-      if (!twoCols) {
-        return Column(children: [a, const SizedBox(height: 20), b]);
+    /// Two panels side by side. With [height] both get exactly that height
+    /// (charts fill it); without, they match the taller one (lists).
+    Widget pair(Widget a, Widget? b, {double? height}) {
+      if (b == null) {
+        return height == null ? a : SizedBox(height: height, child: a);
       }
-      // (No IntrinsicHeight: the charts use LayoutBuilder internally.)
-      return Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
+      if (!twoCols) {
+        return Column(
+          children: [
+            height == null ? a : SizedBox(height: height, child: a),
+            SizedBox(height: gap),
+            height == null ? b : SizedBox(height: height, child: b),
+          ],
+        );
+      }
+      final row = Row(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Expanded(flex: 3, child: a),
-          const SizedBox(width: 20),
+          SizedBox(width: gap),
           Expanded(flex: 2, child: b),
         ],
       );
+      // Charts use LayoutBuilder (no intrinsic sizes): fixed height for
+      // them, IntrinsicHeight only for plain lists.
+      return height != null
+          ? SizedBox(height: height, child: row)
+          : IntrinsicHeight(child: row);
     }
 
     final hasTypes = data.byType.values.any((v) => v > 0);
@@ -282,8 +300,7 @@ class _DashboardBody extends StatelessWidget {
         // ── Headline numbers ──────────────────────────────────────────────
         LayoutBuilder(
           builder: (context, box) {
-            final perRow = box.maxWidth >= 900 ? 4 : 2;
-            const gap = 14.0;
+            final perRow = box.maxWidth >= 560 ? 4 : 2;
             final cardW = (box.maxWidth - gap * (perRow - 1)) / perRow;
             final cards = [
               _StatCard(
@@ -346,7 +363,7 @@ class _DashboardBody extends StatelessWidget {
 
         // ── Insights ──────────────────────────────────────────────────────
         if (insights.isNotEmpty) ...[
-          const SizedBox(height: 20),
+          SizedBox(height: gap),
           _Panel(
             title: 'Insights',
             icon: Icons.auto_awesome_rounded,
@@ -378,54 +395,58 @@ class _DashboardBody extends StatelessWidget {
           ).animate().fadeIn(delay: 120.ms, duration: 400.ms),
         ],
 
-        const SizedBox(height: 20),
+        SizedBox(height: gap),
 
         // ── Watch time over time + what you watch ─────────────────────────
         pair(
           _Panel(
             title: 'Watch time, last 14 days',
             icon: Icons.bar_chart_rounded,
-            child: SizedBox(height: 200, child: _DaysChart(days: data.last14)),
+            fill: true,
+            child: _DaysChart(days: data.last14),
           ),
           hasTypes
               ? _Panel(
                   title: 'What you watch',
                   icon: Icons.donut_large_rounded,
+                  fill: true,
                   child: _TypeDonut(byType: data.byType),
                 )
               : null,
+          height: rowH,
         ).animate().fadeIn(delay: 160.ms, duration: 450.ms),
 
-        if (hasHours) ...[
-          const SizedBox(height: 20),
+        if (hasHours || data.genres.isNotEmpty) ...[
+          SizedBox(height: gap),
           pair(
-            _Panel(
-              title: 'When you watch',
-              icon: Icons.schedule_rounded,
-              child: SizedBox(
-                height: 170,
-                child: _HoursChart(hours: data.byHour),
-              ),
-            ),
-            data.genres.isNotEmpty
+            hasHours
+                ? _Panel(
+                    title: 'When you watch',
+                    icon: Icons.schedule_rounded,
+                    fill: true,
+                    child: _HoursChart(hours: data.byHour),
+                  )
+                : _Panel(
+                    title: 'Your top genres',
+                    icon: Icons.local_movies_outlined,
+                    fill: true,
+                    child: _GenreBars(genres: data.genres),
+                  ),
+            hasHours && data.genres.isNotEmpty
                 ? _Panel(
                     title: 'Your top genres',
                     icon: Icons.local_movies_outlined,
+                    fill: true,
                     child: _GenreBars(genres: data.genres),
                   )
                 : null,
+            // Tall enough for every genre row.
+            height: math.max(rowH * 0.85, 76.0 + data.genres.length * 30),
           ).animate().fadeIn(delay: 200.ms, duration: 450.ms),
-        ] else if (data.genres.isNotEmpty) ...[
-          const SizedBox(height: 20),
-          _Panel(
-            title: 'Your top genres',
-            icon: Icons.local_movies_outlined,
-            child: _GenreBars(genres: data.genres),
-          ),
         ],
 
         if (data.topContent.isNotEmpty || data.channelsNow.isNotEmpty) ...[
-          const SizedBox(height: 20),
+          SizedBox(height: gap),
           pair(
             data.topContent.isNotEmpty
                 ? _Panel(
@@ -602,7 +623,15 @@ class _Panel extends StatelessWidget {
   final String title;
   final IconData icon;
   final Widget child;
-  const _Panel({required this.title, required this.icon, required this.child});
+
+  /// Child takes all the height the panel is given (charts).
+  final bool fill;
+  const _Panel({
+    required this.title,
+    required this.icon,
+    required this.child,
+    this.fill = false,
+  });
 
   @override
   Widget build(BuildContext context) => Container(
@@ -634,7 +663,7 @@ class _Panel extends StatelessWidget {
           ],
         ),
         const SizedBox(height: 14),
-        child,
+        fill ? Expanded(child: child) : child,
       ],
     ),
   );
@@ -855,6 +884,13 @@ class _HoursChart extends StatelessWidget {
   Widget build(BuildContext context) {
     final maxSecs = math.max(60, hours.reduce(math.max));
     final peak = hours.indexOf(hours.reduce(math.max));
+    return LayoutBuilder(
+      builder: (context, box) =>
+          _chart((box.maxWidth / 24 * 0.42).clamp(4.0, 14.0), maxSecs, peak),
+    );
+  }
+
+  Widget _chart(double barW, int maxSecs, int peak) {
     Color colorFor(int h) => h < 5 || h >= 21
         ? _seriesColor
         : h < 12
@@ -873,7 +909,7 @@ class _HoursChart extends StatelessWidget {
               barRods: [
                 BarChartRodData(
                   toY: hours[h].toDouble(),
-                  width: 6,
+                  width: barW,
                   borderRadius: BorderRadius.circular(3),
                   color: colorFor(h).withValues(alpha: h == peak ? 1 : 0.65),
                 ),
@@ -942,94 +978,110 @@ class _TypeDonut extends StatelessWidget {
       ('Series', byType['series'] ?? 0, _seriesColor),
     ].where((e) => e.$2 > 0).toList();
     final total = entries.fold(0, (a, e) => a + e.$2);
-    return Row(
-      children: [
-        SizedBox(
-          width: 130,
-          height: 130,
-          child: Stack(
-            alignment: Alignment.center,
-            children: [
-              PieChart(
-                PieChartData(
-                  sectionsSpace: 3,
-                  centerSpaceRadius: 42,
-                  startDegreeOffset: -90,
-                  sections: [
-                    for (final e in entries)
-                      PieChartSectionData(
-                        value: e.$2.toDouble(),
+    return LayoutBuilder(
+      builder: (context, box) {
+        // As big as the panel allows, legend beside it.
+        final d = math
+            .min(box.maxHeight, box.maxWidth * 0.48)
+            .clamp(90.0, 170.0);
+        final ring = d * 0.13;
+        final legend = Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            for (final e in entries)
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 5),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Container(
+                      width: 10,
+                      height: 10,
+                      decoration: BoxDecoration(
                         color: e.$3,
-                        radius: 18,
-                        showTitle: false,
+                        borderRadius: BorderRadius.circular(3),
                       ),
+                    ),
+                    const SizedBox(width: 8),
+                    SizedBox(
+                      width: 62,
+                      child: Text(
+                        e.$1,
+                        style: const TextStyle(
+                          color: AppTheme.textSecondary,
+                          fontSize: 13,
+                        ),
+                      ),
+                    ),
+                    Text(
+                      '${(e.$2 * 100 / total).round()}%',
+                      style: const TextStyle(
+                        color: AppTheme.textPrimary,
+                        fontSize: 13,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
                   ],
                 ),
               ),
-              Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(
-                    _fmt(total),
-                    style: const TextStyle(
-                      color: AppTheme.textPrimary,
-                      fontSize: 15,
-                      fontWeight: FontWeight.w800,
-                    ),
-                  ),
-                  const Text(
-                    'in total',
-                    style: TextStyle(color: AppTheme.textMuted, fontSize: 10),
-                  ),
-                ],
-              ),
-            ],
-          ),
-        ),
-        const SizedBox(width: 18),
-        Expanded(
-          child: Column(
+          ],
+        );
+        return Center(
+          child: Row(
             mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              for (final e in entries)
-                Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 6),
-                  child: Row(
-                    children: [
-                      Container(
-                        width: 10,
-                        height: 10,
-                        decoration: BoxDecoration(
-                          color: e.$3,
-                          borderRadius: BorderRadius.circular(3),
-                        ),
+              SizedBox(
+                width: d,
+                height: d,
+                child: Stack(
+                  alignment: Alignment.center,
+                  children: [
+                    PieChart(
+                      PieChartData(
+                        sectionsSpace: 3,
+                        centerSpaceRadius: d / 2 - ring,
+                        startDegreeOffset: -90,
+                        sections: [
+                          for (final e in entries)
+                            PieChartSectionData(
+                              value: e.$2.toDouble(),
+                              color: e.$3,
+                              radius: ring,
+                              showTitle: false,
+                            ),
+                        ],
                       ),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: Text(
-                          e.$1,
-                          style: const TextStyle(
-                            color: AppTheme.textSecondary,
-                            fontSize: 13,
+                    ),
+                    Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          _fmt(total),
+                          style: TextStyle(
+                            color: AppTheme.textPrimary,
+                            fontSize: (d * 0.11).clamp(12.0, 18.0),
+                            fontWeight: FontWeight.w800,
                           ),
                         ),
-                      ),
-                      Text(
-                        '${(e.$2 * 100 / total).round()}%',
-                        style: const TextStyle(
-                          color: AppTheme.textPrimary,
-                          fontSize: 13,
-                          fontWeight: FontWeight.w700,
+                        const Text(
+                          'in total',
+                          style: TextStyle(
+                            color: AppTheme.textMuted,
+                            fontSize: 10,
+                          ),
                         ),
-                      ),
-                    ],
-                  ),
+                      ],
+                    ),
+                  ],
                 ),
+              ),
+              SizedBox(width: (box.maxWidth * 0.06).clamp(14.0, 32.0)),
+              Flexible(child: legend),
             ],
           ),
-        ),
-      ],
+        );
+      },
     );
   }
 }
