@@ -68,7 +68,11 @@ void main() {
     await t.pump(const Duration(milliseconds: 50));
   }
 
-  Widget app({required String path, required Object extra, List<Override> o = const []}) {
+  Widget app({
+    required String path,
+    required Object extra,
+    List<Override> o = const [],
+  }) {
     final router = GoRouter(
       initialLocation: path,
       initialExtra: extra,
@@ -96,7 +100,9 @@ void main() {
     'rating': '7.1',
   });
 
-  testWidgets('movie: API details, Resume + Start Over, D-pad order', (t) async {
+  testWidgets('movie: API details, Resume + Start Over, D-pad order', (
+    t,
+  ) async {
     t.view.physicalSize = const Size(1280, 720);
     t.view.devicePixelRatio = 1.0;
     addTearDown(t.view.reset);
@@ -275,6 +281,9 @@ void main() {
   testWidgets('phone landscape: title stays below the Back button', (t) async {
     t.view.physicalSize = const Size(915, 412);
     t.view.devicePixelRatio = 1.0;
+    // Landscape phone: camera / nav-bar inset on the left.
+    t.view.padding = const FakeViewPadding(left: 48);
+    t.view.viewPadding = const FakeViewPadding(left: 48);
     addTearDown(t.view.reset);
     final movie = vod('11', 'server101 Chitralahari (2019)');
     await t.pumpWidget(
@@ -307,13 +316,26 @@ void main() {
     expect(t.takeException(), isNull);
     final back = t.getRect(find.byIcon(Icons.arrow_back_rounded));
     final title = t.getRect(find.text('server101 Chitralahari (2019)').first);
-    expect(title.top, greaterThanOrEqualTo(back.bottom),
-        reason: 'title must not run up under the Back button');
+    expect(
+      title.top,
+      greaterThanOrEqualTo(back.bottom),
+      reason: 'title must not run up under the Back button',
+    );
+    expect(
+      back.left,
+      lessThan(title.left),
+      reason: 'Back sits at the left edge, not pushed in by the inset',
+    );
+    // The poster card shows on phones too (no artwork → its placeholder).
+    final poster = t.getRect(find.byIcon(Icons.movie_outlined).first);
+    expect(poster.left, greaterThan(915 / 2));
     // Buttons are sized to their labels, not stretched across the row.
-    final play = t.getRect(find.ancestor(
-      of: find.text('Play'),
-      matching: find.byType(IntrinsicWidth),
-    ));
+    final play = t.getRect(
+      find.ancestor(
+        of: find.text('Play'),
+        matching: find.byType(IntrinsicWidth),
+      ),
+    );
     expect(play.width, lessThan(400));
   });
 }

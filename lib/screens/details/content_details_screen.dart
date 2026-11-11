@@ -80,7 +80,8 @@ class DetailsMissingScreen extends StatelessWidget {
     body: Center(
       child: TvFocusable(
         autofocus: true,
-        onActivate: () => context.canPop() ? context.pop() : context.go('/home'),
+        onActivate: () =>
+            context.canPop() ? context.pop() : context.go('/home'),
         builder: (focused, _) => _GlassPill(
           icon: Icons.arrow_back_rounded,
           label: 'Go back',
@@ -248,7 +249,8 @@ mixin _DetailsNav<T extends ConsumerStatefulWidget> on ConsumerState<T> {
     }
   }
 
-  void push(Map<String, dynamic> extra) => context.push('/player', extra: extra);
+  void push(Map<String, dynamic> extra) =>
+      context.push('/player', extra: extra);
 
   void download(String url) =>
       launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
@@ -511,10 +513,8 @@ class _SeriesDetailsScreenState extends ConsumerState<SeriesDetailsScreen>
     super.dispose();
   }
 
-  static List<String> _sortedKeys(Iterable<String> keys) =>
-      keys.toList()..sort(
-        (a, b) => (int.tryParse(a) ?? 0).compareTo(int.tryParse(b) ?? 0),
-      );
+  static List<String> _sortedKeys(Iterable<String> keys) => keys.toList()
+    ..sort((a, b) => (int.tryParse(a) ?? 0).compareTo(int.tryParse(b) ?? 0));
 
   /// Most recently watched, unfinished episode of this series.
   (Episode, _Resume)? _resumeEpisode(
@@ -607,7 +607,8 @@ class _SeriesDetailsScreenState extends ConsumerState<SeriesDetailsScreen>
           primary: true,
           progress: resume.$2.progress,
           caption: resume.$2.leftLabel,
-          onTap: () => _playEpisode(info!, resume.$1, start: resume.$2.position),
+          onTap: () =>
+              _playEpisode(info!, resume.$1, start: resume.$2.position),
         ),
         if (firstEp != null && firstEp.id != resume.$1.id)
           _Action(
@@ -648,8 +649,7 @@ class _SeriesDetailsScreenState extends ConsumerState<SeriesDetailsScreen>
       if (info != null)
         for (final l in info.seasons.values) ...[
           for (final e in l)
-            if (e.audioLanguage?.isNotEmpty == true)
-              _langName(e.audioLanguage),
+            if (e.audioLanguage?.isNotEmpty == true) _langName(e.audioLanguage),
         ],
     }..remove('');
     final service = ref.watch(xtreamServiceProvider);
@@ -1055,10 +1055,18 @@ class _DetailsPage extends StatelessWidget {
           ),
 
           // ── Back (always reachable, never scrolls away) ───────────────
+          // Lined up with the page's left edge. Only the top inset applies:
+          // on a phone in landscape the side inset (camera / nav bar) used
+          // to push Back well right of the title.
           Positioned(
             top: 12,
             left: narrow ? 8 : _pad(context) - 14,
-            child: SafeArea(child: _BackButton(nav: nav)),
+            child: SafeArea(
+              left: false,
+              right: false,
+              bottom: false,
+              child: _BackButton(nav: nav),
+            ),
           ),
         ],
       ),
@@ -1068,10 +1076,12 @@ class _DetailsPage extends StatelessWidget {
   // ── Wide (TV / desktop / tablet landscape) ──────────────────────────────
   Widget _wideHero(BuildContext context, Responsive r, double h) {
     final pad = _pad(context);
-    // Phones in landscape / small windows: tighter type, no poster card.
+    // Phones in landscape / small windows: tighter type, smaller poster.
     final short = r.height < 560;
-    final posterW = (h * 0.36).clamp(130.0, 250.0);
-    final showPoster = r.width >= 900 && !short;
+    final posterW = short
+        ? (r.height * 0.34).clamp(96.0, 150.0)
+        : (h * 0.36).clamp(130.0, 250.0);
+    final showPoster = r.width >= 640;
     // The hero grows with its content (at least the backdrop's height)
     // and always keeps room for the Back button above the text. It used
     // to be a fixed height with the text pinned to the bottom, so on a
@@ -1334,7 +1344,9 @@ class _DetailsPage extends StatelessWidget {
                           decoration: BoxDecoration(
                             borderRadius: BorderRadius.circular(10),
                             border: Border.all(
-                              color: focused ? Colors.white : Colors.transparent,
+                              color: focused
+                                  ? Colors.white
+                                  : Colors.transparent,
                               width: 2.5,
                             ),
                             color: AppTheme.surfaceVariant,
@@ -1550,140 +1562,146 @@ class _ActionButton extends StatelessWidget {
     final a = action;
     return Builder(
       builder: (ctx) => TvFocusable(
-      focusNode: focusNode,
-      autofocus: autofocus,
-      onActivate: a.onTap,
-      onArrowKey: onArrowKey,
-      // Not the default "centre the focused item": on a short screen that
-      // scrolled the page as it opened and pushed the title up under the
-      // Back button. The buttons live in the hero, so show the page from
-      // the top whenever that keeps the button in view.
-      autoScroll: false,
-      onFocusChange: (f) {
-        if (f) _revealHero(ctx);
-      },
-      builder: (focused, pressed) => _Hover(
-        builder: (hover) {
-          if (compact) {
-            return Container(
-              width: 84,
-              padding: const EdgeInsets.symmetric(vertical: 8),
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(12),
-                color: focused
-                    ? Colors.white
-                    : hover
-                    ? Colors.white.withValues(alpha: 0.12)
-                    : Colors.transparent,
-              ),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(
-                    a.icon,
-                    size: 24,
-                    color: a.active
-                        ? _accent
-                        : (focused ? Colors.black : Colors.white),
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    a.label,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      color: focused ? Colors.black : AppTheme.textSecondary,
-                      fontSize: 11,
-                      fontWeight: FontWeight.w600,
+        focusNode: focusNode,
+        autofocus: autofocus,
+        onActivate: a.onTap,
+        onArrowKey: onArrowKey,
+        // Not the default "centre the focused item": on a short screen that
+        // scrolled the page as it opened and pushed the title up under the
+        // Back button. The buttons live in the hero, so show the page from
+        // the top whenever that keeps the button in view.
+        autoScroll: false,
+        onFocusChange: (f) {
+          if (f) _revealHero(ctx);
+        },
+        builder: (focused, pressed) => _Hover(
+          builder: (hover) {
+            if (compact) {
+              return Container(
+                width: 84,
+                padding: const EdgeInsets.symmetric(vertical: 8),
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(12),
+                  color: focused
+                      ? Colors.white
+                      : hover
+                      ? Colors.white.withValues(alpha: 0.12)
+                      : Colors.transparent,
+                ),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(
+                      a.icon,
+                      size: 24,
+                      color: a.active
+                          ? _accent
+                          : (focused ? Colors.black : Colors.white),
                     ),
+                    const SizedBox(height: 4),
+                    Text(
+                      a.label,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        color: focused ? Colors.black : AppTheme.textSecondary,
+                        fontSize: 11,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ],
+                ),
+              );
+            }
+            final primary = a.primary;
+            final enabled = a.onTap != null;
+            // Primary: solid white. Others: glass pills that turn white when
+            // focused — one unmistakable "you are here".
+            final bg = primary || focused
+                ? Colors.white
+                : Colors.white.withValues(alpha: hover ? 0.22 : 0.14);
+            final fg = primary || focused ? Colors.black : Colors.white;
+            final iconColor = a.active ? _accent : fg;
+            final button = AnimatedScale(
+              scale: focused ? 1.07 : 1.0,
+              duration: const Duration(milliseconds: 140),
+              child: Container(
+                constraints: BoxConstraints(
+                  minWidth: expand ? double.infinity : 0,
+                  minHeight: dense ? 42 : 50,
+                ),
+                decoration: BoxDecoration(
+                  color: enabled ? bg : bg.withValues(alpha: 0.4),
+                  borderRadius: BorderRadius.circular(primary ? 10 : 26),
+                  border: Border.all(
+                    color: focused && primary ? _accent : Colors.transparent,
+                    width: 2.5,
                   ),
-                ],
-              ),
-            );
-          }
-          final primary = a.primary;
-          final enabled = a.onTap != null;
-          // Primary: solid white. Others: glass pills that turn white when
-          // focused — one unmistakable "you are here".
-          final bg = primary || focused
-              ? Colors.white
-              : Colors.white.withValues(alpha: hover ? 0.22 : 0.14);
-          final fg = primary || focused ? Colors.black : Colors.white;
-          final iconColor = a.active ? _accent : fg;
-          final button = AnimatedScale(
-            scale: focused ? 1.07 : 1.0,
-            duration: const Duration(milliseconds: 140),
-            child: Container(
-              constraints: BoxConstraints(
-                minWidth: expand ? double.infinity : 0,
-                minHeight: dense ? 42 : 50,
-              ),
-              decoration: BoxDecoration(
-                color: enabled ? bg : bg.withValues(alpha: 0.4),
-                borderRadius: BorderRadius.circular(primary ? 10 : 26),
-                border: Border.all(
-                  color: focused && primary ? _accent : Colors.transparent,
-                  width: 2.5,
+                ),
+                clipBehavior: Clip.antiAlias,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Padding(
+                      padding: EdgeInsets.symmetric(
+                        horizontal: primary
+                            ? (dense ? 20 : 26)
+                            : (dense ? 14 : 18),
+                        vertical: dense ? 8 : 11,
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Icon(
+                            a.icon,
+                            size: primary ? 28 : 21,
+                            color: iconColor,
+                          ),
+                          const SizedBox(width: 8),
+                          Flexible(
+                            child: Text(
+                              a.label,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                color: fg,
+                                fontSize: primary ? 16 : 14,
+                                fontWeight: FontWeight.w800,
+                              ),
+                            ),
+                          ),
+                          if (a.caption != null) ...[
+                            const SizedBox(width: 12),
+                            Text(
+                              a.caption!,
+                              style: TextStyle(
+                                color: fg.withValues(alpha: 0.55),
+                                fontSize: 12.5,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ],
+                        ],
+                      ),
+                    ),
+                    if (a.progress != null)
+                      LinearProgressIndicator(
+                        value: a.progress!.clamp(0.0, 1.0),
+                        minHeight: 4,
+                        backgroundColor: Colors.black12,
+                        color: _accent,
+                      ),
+                  ],
                 ),
               ),
-              clipBehavior: Clip.antiAlias,
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                mainAxisAlignment: MainAxisAlignment.center,
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  Padding(
-                    padding: EdgeInsets.symmetric(
-                      horizontal: primary ? (dense ? 20 : 26) : (dense ? 14 : 18),
-                      vertical: dense ? 8 : 11,
-                    ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Icon(a.icon, size: primary ? 28 : 21, color: iconColor),
-                        const SizedBox(width: 8),
-                        Flexible(
-                          child: Text(
-                            a.label,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: TextStyle(
-                              color: fg,
-                              fontSize: primary ? 16 : 14,
-                              fontWeight: FontWeight.w800,
-                            ),
-                          ),
-                        ),
-                        if (a.caption != null) ...[
-                          const SizedBox(width: 12),
-                          Text(
-                            a.caption!,
-                            style: TextStyle(
-                              color: fg.withValues(alpha: 0.55),
-                              fontSize: 12.5,
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
-                        ],
-                      ],
-                    ),
-                  ),
-                  if (a.progress != null)
-                    LinearProgressIndicator(
-                      value: a.progress!.clamp(0.0, 1.0),
-                      minHeight: 4,
-                      backgroundColor: Colors.black12,
-                      color: _accent,
-                    ),
-                ],
-              ),
-            ),
-          );
-          // In a row, as wide as the label — not the whole row.
-          return expand ? button : IntrinsicWidth(child: button);
-        },
-      ),
+            );
+            // In a row, as wide as the label — not the whole row.
+            return expand ? button : IntrinsicWidth(child: button);
+          },
+        ),
       ),
     );
   }
@@ -1862,9 +1880,7 @@ class _EpisodeRow extends StatelessWidget {
                               children: [
                                 Expanded(
                                   child: Text(
-                                    narrow
-                                        ? '${ep.episodeNum}. $title'
-                                        : title,
+                                    narrow ? '${ep.episodeNum}. $title' : title,
                                     maxLines: narrow ? 2 : 1,
                                     overflow: TextOverflow.ellipsis,
                                     style: const TextStyle(
@@ -2081,7 +2097,9 @@ class _RatingPill extends StatelessWidget {
   Widget build(BuildContext context) => Container(
     padding: EdgeInsets.symmetric(horizontal: small ? 6 : 9, vertical: 3),
     decoration: BoxDecoration(
-      color: small ? Colors.black.withValues(alpha: 0.7) : const Color(0x33FFC94D),
+      color: small
+          ? Colors.black.withValues(alpha: 0.7)
+          : const Color(0x33FFC94D),
       borderRadius: BorderRadius.circular(6),
     ),
     child: Row(

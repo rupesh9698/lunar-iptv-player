@@ -18,8 +18,7 @@ import '../../../providers/live_tv_provider.dart';
 /// visible row. Returns false when the list has no rows.
 /// With [selectedOnly] nothing happens (false) unless the playing channel
 /// is listed.
-typedef EpgEntryFocus =
-    bool Function({bool preferSelected, bool selectedOnly});
+typedef EpgEntryFocus = bool Function({bool preferSelected, bool selectedOnly});
 
 class EpgTimeline extends ConsumerStatefulWidget {
   final bool isFullscreen;
@@ -84,7 +83,9 @@ class _EpgTimelineState extends ConsumerState<EpgTimeline> {
 
   FocusNode _progNode(int index) {
     while (_progFocusNodes.length <= index) {
-      _progFocusNodes.add(FocusNode(debugLabel: 'epgProg${_progFocusNodes.length}'));
+      _progFocusNodes.add(
+        FocusNode(debugLabel: 'epgProg${_progFocusNodes.length}'),
+      );
     }
     return _progFocusNodes[index];
   }
@@ -188,8 +189,14 @@ class _EpgTimelineState extends ConsumerState<EpgTimeline> {
     }
     if (k == LogicalKeyboardKey.arrowLeft) {
       if (!_moveCursor(row, at, -1)) {
+        // Back out of the guide onto the row's favourite heart.
         _cursor.value = null;
-        _focusChannel(row);
+        final heart = _heartNode(row);
+        if (heart.context != null) {
+          heart.requestFocus();
+        } else {
+          _focusChannel(row);
+        }
       }
       return KeyEventResult.handled;
     }
@@ -219,6 +226,41 @@ class _EpgTimelineState extends ConsumerState<EpgTimeline> {
     return _channelFocusNodes[index];
   }
 
+  // Favourite heart per row: a D-pad stop between the channel and its
+  // programmes (channel → heart → guide).
+  final List<FocusNode> _heartFocusNodes = [];
+
+  FocusNode _heartNode(int index) {
+    while (_heartFocusNodes.length <= index) {
+      _heartFocusNodes.add(
+        FocusNode(debugLabel: 'epgHeart${_heartFocusNodes.length}'),
+      );
+    }
+    return _heartFocusNodes[index];
+  }
+
+  /// Keeps row [index] on screen with a row of context above / below.
+  /// The programme cells have no auto-scroll of their own, so Up / Down in
+  /// the guide used to walk off the bottom of the list.
+  void _keepRowInView(int index) {
+    if (!_leftCtrl.hasClients) return;
+    final pos = _leftCtrl.position;
+    final top = index * _rowH;
+    final margin = pos.viewportDimension > _rowH * 4 ? _rowH : 0.0;
+    double? target;
+    if (top - margin < pos.pixels) {
+      target = top - margin;
+    } else if (top + _rowH + margin > pos.pixels + pos.viewportDimension) {
+      target = top + _rowH + margin - pos.viewportDimension;
+    }
+    if (target == null) return;
+    _leftCtrl.animateTo(
+      target.clamp(0.0, pos.maxScrollExtent),
+      duration: const Duration(milliseconds: 160),
+      curve: Curves.easeOut,
+    );
+  }
+
   /// Moves remote focus to row [index]. If that row isn't built yet (it is
   /// beyond the ListView's cache extent — common when the D-pad is held
   /// down), first jump the list so the row gets built, then focus it on the
@@ -244,6 +286,7 @@ class _EpgTimelineState extends ConsumerState<EpgTimeline> {
     }
     if (node.context != null) {
       node.requestFocus();
+      if (prog) _keepRowInView(index);
       return;
     }
     if (_leftCtrl.hasClients) {
@@ -308,7 +351,11 @@ class _EpgTimelineState extends ConsumerState<EpgTimeline> {
     _rightCtrl.dispose();
     _horizCtrl.dispose();
     _clockTimer?.cancel();
-    for (final n in [..._channelFocusNodes, ..._progFocusNodes]) {
+    for (final n in [
+      ..._channelFocusNodes,
+      ..._progFocusNodes,
+      ..._heartFocusNodes,
+    ]) {
       n.dispose();
     }
     _cursor.dispose();
@@ -507,6 +554,7 @@ class _EpgTimelineState extends ConsumerState<EpgTimeline> {
                         return _ChannelCell(
                           key: ValueKey('ch_${ch.streamId}'),
                           focusNode: _channelNode(i),
+                          heartFocusNode: _heartNode(i),
                           channel: ch,
                           isSelected: selected?.streamId == ch.streamId,
                           isFavorite: favorites.contains(ch.streamId),
@@ -569,6 +617,7 @@ class _EpgTimelineState extends ConsumerState<EpgTimeline> {
                                   rowIndex: i,
                                   focusNode: _progNode(i),
                                   cursor: _cursor,
+                                  horizontal: _horizCtrl,
                                   onKey: (e) => _onProgKey(i, e),
                                   channel: ch,
                                   epg: epgCache[ch.streamId] ?? [],
@@ -939,9 +988,11 @@ class _ChannelCell extends StatefulWidget {
   final VoidCallback? onDownNext;
   final VoidCallback? onLeftToCategory;
   final VoidCallback? onRightToGuide;
+  final FocusNode? heartFocusNode;
 
   const _ChannelCell({
     this.onRightToGuide,
+    this.heartFocusNode,
     super.key,
     required this.channel,
     required this.isSelected,
@@ -962,12 +1013,15 @@ class _ChannelCell extends StatefulWidget {
 class _ChannelCellState extends State<_ChannelCell> with TvFocusMixin {
   // The favourite heart is its own D-pad stop: Right from the channel moves
   // onto it, OK toggles, Left goes back (it used to be pointer-only).
-  final FocusNode _heartFocus = FocusNode(debugLabel: 'epgHeart');
+  FocusNode? _ownHeart;
+  FocusNode get _heart =>
+      widget.heartFocusNode ??
+      (_ownHeart ??= FocusNode(debugLabel: 'epgHeart'));
   bool _heartFocused = false;
 
   @override
   void dispose() {
-    _heartFocus.dispose();
+    _ownHeart?.dispose();
     super.dispose();
   }
 
@@ -1047,13 +1101,8 @@ class _ChannelCellState extends State<_ChannelCell> with TvFocusMixin {
               onFocusChange: setTvFocused,
               onArrowKey: (key) {
                 if (key == LogicalKeyboardKey.arrowRight) {
-                  // Into the programmes (browse upcoming shows). The heart
-                  // stays a click target; hold OK toggles favourite.
-                  if (widget.onRightToGuide != null) {
-                    widget.onRightToGuide!();
-                  } else {
-                    _heartFocus.requestFocus();
-                  }
+                  // channel → heart → programmes.
+                  _heart.requestFocus();
                   return KeyEventResult.handled;
                 }
                 if (key == LogicalKeyboardKey.arrowLeft) {
@@ -1118,48 +1167,51 @@ class _ChannelCellState extends State<_ChannelCell> with TvFocusMixin {
             ),
           ),
           // ── Favourite heart (separate D-pad stop) ──────────────────────
-          Visibility(
-            visible: rowLit || widget.isFavorite,
-            maintainState: true,
-            maintainAnimation: true,
-            maintainSize: true,
-            maintainInteractivity: false,
-            child: TvFocusable(
-              focusNode: _heartFocus,
-              autoScroll: false,
-              onActivate: _toggleFavorite,
-              onFocusChange: (f) => setState(() => _heartFocused = f),
-              onArrowKey: (key) {
-                if (key == LogicalKeyboardKey.arrowLeft) {
-                  widget.focusNode?.requestFocus();
-                  return KeyEventResult.handled;
-                }
-                if (key == LogicalKeyboardKey.arrowRight) {
-                  return KeyEventResult.handled; // end of row
-                }
-                return _vertical(key);
-              },
-              builder: (_, _) => AnimatedContainer(
-                duration: const Duration(milliseconds: 120),
-                padding: const EdgeInsets.all(5),
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  color: heartRing
-                      ? Colors.white.withValues(alpha: 0.14)
-                      : Colors.transparent,
-                  border: Border.all(
-                    color: heartRing ? Colors.white : Colors.transparent,
-                    width: 1.5,
+          // Hidden (but still a D-pad stop) until the row is lit or the
+          // channel is a favourite.
+          IgnorePointer(
+            ignoring: !(rowLit || widget.isFavorite),
+            child: Opacity(
+              opacity: (rowLit || widget.isFavorite) ? 1 : 0,
+              child: TvFocusable(
+                focusNode: _heart,
+                autoScroll: false,
+                onActivate: _toggleFavorite,
+                onFocusChange: (f) => setState(() => _heartFocused = f),
+                onArrowKey: (key) {
+                  if (key == LogicalKeyboardKey.arrowLeft) {
+                    widget.focusNode?.requestFocus();
+                    return KeyEventResult.handled;
+                  }
+                  if (key == LogicalKeyboardKey.arrowRight) {
+                    // On into the programmes.
+                    widget.onRightToGuide?.call();
+                    return KeyEventResult.handled;
+                  }
+                  return _vertical(key);
+                },
+                builder: (_, _) => AnimatedContainer(
+                  duration: const Duration(milliseconds: 120),
+                  padding: const EdgeInsets.all(5),
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: heartRing
+                        ? Colors.white.withValues(alpha: 0.14)
+                        : Colors.transparent,
+                    border: Border.all(
+                      color: heartRing ? Colors.white : Colors.transparent,
+                      width: 1.5,
+                    ),
                   ),
-                ),
-                child: Icon(
-                  widget.isFavorite ? Icons.favorite : Icons.favorite_border,
-                  size: 15,
-                  color: widget.isFavorite
-                      ? AppTheme.error
-                      : heartRing
-                      ? Colors.white
-                      : AppTheme.textMuted,
+                  child: Icon(
+                    widget.isFavorite ? Icons.favorite : Icons.favorite_border,
+                    size: 15,
+                    color: widget.isFavorite
+                        ? AppTheme.error
+                        : heartRing
+                        ? Colors.white
+                        : AppTheme.textMuted,
+                  ),
                 ),
               ),
             ),
@@ -1283,6 +1335,7 @@ class _ProgramRow extends StatefulWidget {
   final int rowIndex;
   final FocusNode focusNode;
   final ValueListenable<_GuideCursor?> cursor;
+  final ScrollController? horizontal;
   final KeyEventResult Function(KeyEvent e) onKey;
   final LiveStream channel;
   final List<EpgListing> epg;
@@ -1301,6 +1354,7 @@ class _ProgramRow extends StatefulWidget {
     required this.rowIndex,
     required this.focusNode,
     required this.cursor,
+    this.horizontal,
     required this.onKey,
     required this.channel,
     required this.epg,
@@ -1345,7 +1399,8 @@ class _ProgramRowState extends State<_ProgramRow> {
 
   Widget _row(DateTime? at) {
     final slots = _resolveEpgOverlaps(widget.epg);
-    final hit = at != null &&
+    final hit =
+        at != null &&
         slots.any(
           (sl) =>
               !sl.listing.startTime.isAfter(at) && sl.effectiveEnd.isAfter(at),
@@ -1408,12 +1463,17 @@ class _ProgramRowState extends State<_ProgramRow> {
               ),
             )
           else
-            ...slots.map(
-              (slot) => _ShowBlock(
-                highlighted:
-                    at != null &&
-                    !slot.listing.startTime.isAfter(at) &&
-                    slot.effectiveEnd.isAfter(at),
+            ...slots.map((slot) {
+              final lit =
+                  at != null &&
+                  !slot.listing.startTime.isAfter(at) &&
+                  slot.effectiveEnd.isAfter(at);
+              return _ShowBlock(
+                highlighted: lit,
+                // The highlighted show sticks to the timeline's visible
+                // left edge, so its ring and title aren't hidden behind
+                // the channel column when it began before the view.
+                stickTo: lit ? widget.horizontal : null,
                 epg: slot.listing,
                 effectiveEnd: slot.effectiveEnd,
                 windowStart: widget.windowStart,
@@ -1421,8 +1481,8 @@ class _ProgramRowState extends State<_ProgramRow> {
                 pxPerHour: widget.pxPerHour,
                 now: widget.now,
                 onTap: widget.onTap,
-              ),
-            ),
+              );
+            }),
         ],
       ),
     );
@@ -1434,6 +1494,7 @@ class _ProgramRowState extends State<_ProgramRow> {
 // ─────────────────────────────────────────────────────────────────────────────
 class _ShowBlock extends StatefulWidget {
   final bool highlighted; // under the remote's programme cursor
+  final ScrollController? stickTo; // timeline scroll, for the sticky block
   final EpgListing epg;
   final DateTime effectiveEnd;
   final DateTime windowStart;
@@ -1444,6 +1505,7 @@ class _ShowBlock extends StatefulWidget {
 
   const _ShowBlock({
     this.highlighted = false,
+    this.stickTo,
     required this.epg,
     required this.effectiveEnd,
     required this.windowStart,
@@ -1494,102 +1556,120 @@ class _ShowBlockState extends State<_ShowBlock> {
         ? AppTheme.epgPast
         : AppTheme.epgFuture;
 
-    return Positioned(
-      left: leftPx + 1,
-      top: 3,
-      bottom: 3,
-      width: widthPx > 2 ? widthPx - 2 : widthPx,
-      child: MouseRegion(
-        onEnter: (_) => setState(() => _hovering = true),
-        onExit: (_) => setState(() => _hovering = false),
-        child: GestureDetector(
-          onTap: widget.onTap,
-          child: AnimatedContainer(
-            duration: const Duration(milliseconds: 150),
-            decoration: BoxDecoration(
+    final block = MouseRegion(
+      onEnter: (_) => setState(() => _hovering = true),
+      onExit: (_) => setState(() => _hovering = false),
+      child: GestureDetector(
+        onTap: widget.onTap,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 150),
+          decoration: BoxDecoration(
+            color: widget.highlighted
+                ? AppTheme.selectedItem
+                : _hovering
+                ? AppTheme.surfaceVariant
+                : bgColor,
+            borderRadius: BorderRadius.circular(4),
+            border: Border.all(
               color: widget.highlighted
-                  ? AppTheme.selectedItem
-                  : _hovering
-                  ? AppTheme.surfaceVariant
-                  : bgColor,
-              borderRadius: BorderRadius.circular(4),
-              border: Border.all(
-                color: widget.highlighted
-                    ? Colors.white
-                    : isCurrent
-                    ? AppTheme.primary.withValues(alpha: 0.6)
-                    : AppTheme.epgBorder,
-                width: widget.highlighted ? 2.5 : (isCurrent ? 1.5 : 0.5),
+                  ? Colors.white
+                  : isCurrent
+                  ? AppTheme.primary.withValues(alpha: 0.6)
+                  : AppTheme.epgBorder,
+              width: widget.highlighted ? 2.5 : (isCurrent ? 1.5 : 0.5),
+            ),
+          ),
+          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Row(
+                children: [
+                  if (isCurrent)
+                    Padding(
+                      padding: const EdgeInsets.only(right: 4),
+                      child: Icon(
+                        Icons.play_arrow,
+                        size: 10,
+                        color: AppTheme.primary,
+                      ),
+                    ),
+                  Expanded(
+                    child: Text(
+                      widget.epg.decodedTitle.isEmpty
+                          ? 'Unknown'
+                          : widget.epg.decodedTitle,
+                      style: TextStyle(
+                        color: isPast
+                            ? AppTheme.textMuted
+                            : isCurrent
+                            ? AppTheme.textPrimary
+                            : AppTheme.textSecondary,
+                        fontSize: 11,
+                        fontWeight: isCurrent
+                            ? FontWeight.w600
+                            : FontWeight.w400,
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                ],
               ),
-            ),
-            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Row(
-                  children: [
-                    if (isCurrent)
-                      Padding(
-                        padding: const EdgeInsets.only(right: 4),
-                        child: Icon(
-                          Icons.play_arrow,
-                          size: 10,
-                          color: AppTheme.primary,
-                        ),
-                      ),
-                    Expanded(
-                      child: Text(
-                        widget.epg.decodedTitle.isEmpty
-                            ? 'Unknown'
-                            : widget.epg.decodedTitle,
-                        style: TextStyle(
-                          color: isPast
-                              ? AppTheme.textMuted
-                              : isCurrent
-                              ? AppTheme.textPrimary
-                              : AppTheme.textSecondary,
-                          fontSize: 11,
-                          fontWeight: isCurrent
-                              ? FontWeight.w600
-                              : FontWeight.w400,
-                        ),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ),
-                  ],
+              if (widthPx > 80) ...[
+                const SizedBox(height: 2),
+                Text(
+                  '${DateFormat('HH:mm').format(start)}'
+                  ' – ${DateFormat('HH:mm').format(end)}',
+                  style: const TextStyle(
+                    color: AppTheme.textMuted,
+                    fontSize: 9,
+                  ),
                 ),
-                if (widthPx > 80) ...[
-                  const SizedBox(height: 2),
-                  Text(
-                    '${DateFormat('HH:mm').format(start)}'
-                    ' – ${DateFormat('HH:mm').format(end)}',
-                    style: const TextStyle(
-                      color: AppTheme.textMuted,
-                      fontSize: 9,
-                    ),
-                  ),
-                ],
-                if (isCurrent) ...[
-                  const SizedBox(height: 3),
-                  ClipRRect(
-                    borderRadius: BorderRadius.circular(2),
-                    child: LinearProgressIndicator(
-                      value: widget.epg.progress,
-                      minHeight: 2,
-                      backgroundColor: AppTheme.primary.withValues(alpha: 0.2),
-                      valueColor: const AlwaysStoppedAnimation<Color>(
-                        AppTheme.primary,
-                      ),
-                    ),
-                  ),
-                ],
               ],
-            ),
+              if (isCurrent) ...[
+                const SizedBox(height: 3),
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(2),
+                  child: LinearProgressIndicator(
+                    value: widget.epg.progress,
+                    minHeight: 2,
+                    backgroundColor: AppTheme.primary.withValues(alpha: 0.2),
+                    valueColor: const AlwaysStoppedAnimation<Color>(
+                      AppTheme.primary,
+                    ),
+                  ),
+                ),
+              ],
+            ],
           ),
         ),
       ),
+    );
+
+    Widget place(double l, double w) => Positioned(
+      left: l + 1,
+      top: 3,
+      bottom: 3,
+      width: w > 2 ? w - 2 : w,
+      child: block,
+    );
+
+    final stick = widget.stickTo;
+    if (stick == null) return place(leftPx, widthPx);
+    return AnimatedBuilder(
+      animation: stick,
+      builder: (_, _) {
+        final view = stick.hasClients ? stick.offset : 0.0;
+        final right = leftPx + widthPx;
+        // Started before the visible part: start the block at the view's
+        // left edge (keeping at least 60 px of it on screen).
+        if (view <= leftPx || view >= right - 60) {
+          return place(leftPx, widthPx);
+        }
+        return place(view, right - view);
+      },
     );
   }
 }

@@ -149,12 +149,19 @@ void main() {
 
   group('Perf.decodeWidth', () {
     test('posters are decoded near display size, never full-size', () {
-      // A 140 px tile at 2x density → 280 px decode.
-      expect(Perf.decodeWidth(140, 2), 280);
+      // A 140 px tile at 2x density → 280 px, rounded up to 320.
+      expect(Perf.decodeWidth(140, 2), 320);
       // Huge layouts are capped (desktop default cap 600).
       expect(Perf.decodeWidth(2000, 3), lessThanOrEqualTo(600));
       // Tiny logos still get a sane minimum.
-      expect(Perf.decodeWidth(10, 1), 48);
+      expect(Perf.decodeWidth(10, 1), 64);
+    });
+
+    test('a tile a few px smaller keeps the same decode (no reload)', () {
+      // Focus borders used to shrink tiles by 2 px → new cache key →
+      // the poster re-loaded and flickered.
+      expect(Perf.decodeWidth(138, 2), Perf.decodeWidth(140, 2));
+      expect(Perf.decodeWidth(155, 1), Perf.decodeWidth(157, 1));
     });
   });
 }

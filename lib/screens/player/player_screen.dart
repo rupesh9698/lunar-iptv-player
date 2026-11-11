@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -80,7 +81,6 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
   double _seekVal = 0.0;
 
   // ── Double-tap ──────────────────────────────────────────────────────
-  Offset _lastTap = Offset.zero;
   bool _showSkipLeft = false;
   bool _showSkipRight = false;
   Timer? _skipHideTimer;
@@ -101,6 +101,21 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
   // Touch: press and hold the left / right third to rewind / fast-forward
   // in growing steps (like holding the remote's Left / Right).
   Timer? _holdSeekTimer;
+
+  // Touch taps are read from raw pointer events (see _onPointerDown):
+  // the old GestureDetector's tap / double-tap / long-press / drag
+  // recognisers fought each other, so gestures worked only sometimes.
+  int? _touchPointer;
+  Offset _downPos = Offset.zero;
+  bool _downMoved = false;
+  Timer? _holdArmTimer;
+  Timer? _singleTapTimer;
+  DateTime? _prevTapAt;
+  Offset _prevTapPos = Offset.zero;
+  // After a double-tap on a side, further single taps on that side keep
+  // seeking 10 s each (tap-tap-tap = 30 s), like YouTube / Prime.
+  int _tapSeekDir = 0;
+  DateTime _tapSeekUntil = DateTime(0);
 
   // ── Gesture (volume / brightness) ───────────────────────────────────
   double _volume = 1.0;
@@ -128,6 +143,8 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
   @override
   void dispose() {
     _holdSeekTimer?.cancel();
+    _holdArmTimer?.cancel();
+    _singleTapTimer?.cancel();
     _seekCommitTimer?.cancel();
     _skipHideTimer?.cancel();
     _finalSaveAndRefresh(); // any other exit path (e.g. route replaced)
@@ -408,7 +425,9 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
     final now = DateTime.now();
     final gap = now.difference(_lastSeekStep);
     // Remote auto-repeat fires every ~50 ms: take one step per 150 ms.
-    if (gap < const Duration(milliseconds: 150) &&
+    // (Not for taps: every quick tap counts.)
+    if (!fixed &&
+        gap < const Duration(milliseconds: 150) &&
         _seekDir == (forward ? 1 : -1)) {
       return;
     }
@@ -457,29 +476,111 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
     _player.seek(_dur * frac.clamp(0, 1));
   }
 
-  // ── Double tap ───────────────────────────────────────────────────────
-  void _onDoubleTap() {
-    if (_locked) return;
-    final w = MediaQuery.of(context).size.width;
-    // Live streams can't seek: no skip bubbles, only the centre (pause).
-    if (!_isLive && _lastTap.dx < w / 3) {
-      _stepSeek(false, fixed: true);
-    } else if (!_isLive && _lastTap.dx > w * 2 / 3) {
-      _stepSeek(true, fixed: true);
-    } else if (_isLive && (_lastTap.dx < w / 3 || _lastTap.dx > w * 2 / 3)) {
+  // ── Touch: taps, double taps and holds ──────────────────────────────
+  static const _doubleTapWindow = Duration(milliseconds: 280);
+  static const _holdDelay = Duration(milliseconds: 380);
+  static const _tapSeekWindow = Duration(milliseconds: 800);
+
+  /// -1 left third, 0 centre, 1 right third.
+  int _zone(double x) {
+    final w = MediaQuery.sizeOf(context).width;
+    return x < w / 3 ? -1 : (x > w * 2 / 3 ? 1 : 0);
+  }
+
+  void _onPointerDown(PointerDownEvent e) {
+    if (_touchPointer != null) return; // second finger: ignore
+    if (e.kind == PointerDeviceKind.mouse && e.buttons != kPrimaryButton) {
       return;
-    } else {
-      _togglePlay();
+    }
+    _touchPointer = e.pointer;
+    _downPos = e.localPosition;
+    _downMoved = false;
+    _holdArmTimer?.cancel();
+    final z = _zone(e.localPosition.dx);
+    if (!_locked && !_isLive && z != 0) {
+      _holdArmTimer = Timer(_holdDelay, () {
+        if (!_downMoved && _touchPointer != null) _onHoldStart(z > 0);
+      });
     }
   }
 
+  void _onPointerMove(PointerMoveEvent e) {
+    if (e.pointer != _touchPointer || _downMoved) return;
+    if ((e.localPosition - _downPos).distance > kTouchSlop) {
+      _downMoved = true; // a swipe (volume / brightness), not a tap
+      if (_holdSeekTimer == null) _holdArmTimer?.cancel();
+    }
+  }
+
+  void _onPointerUp(PointerUpEvent e) {
+    if (e.pointer != _touchPointer) return;
+    _touchPointer = null;
+    _holdArmTimer?.cancel();
+    if (_holdSeekTimer != null) {
+      _onHoldEnd();
+      return;
+    }
+    if (!_downMoved) _onTapAt(e.localPosition);
+  }
+
+  void _onPointerCancel(PointerCancelEvent e) {
+    if (e.pointer != _touchPointer) return;
+    _touchPointer = null;
+    _holdArmTimer?.cancel();
+    _onHoldEnd();
+  }
+
+  void _onTapAt(Offset p) {
+    if (_locked) return;
+    final now = DateTime.now();
+    final z = _zone(p.dx);
+    // Taps right after a double-tap seek keep seeking that way.
+    if (z != 0 && z == _tapSeekDir && now.isBefore(_tapSeekUntil)) {
+      _singleTapTimer?.cancel();
+      _prevTapAt = null;
+      _stepSeek(z > 0, fixed: true);
+      _tapSeekUntil = now.add(_tapSeekWindow);
+      return;
+    }
+    final isDouble =
+        _prevTapAt != null &&
+        now.difference(_prevTapAt!) < _doubleTapWindow &&
+        (p - _prevTapPos).distance < kDoubleTapSlop;
+    if (isDouble) {
+      _singleTapTimer?.cancel();
+      _prevTapAt = null;
+      _onDoubleTap(z);
+      return;
+    }
+    // Maybe the first of a double tap: wait briefly before toggling the
+    // controls, so a double tap doesn't also flash them.
+    _prevTapAt = now;
+    _prevTapPos = p;
+    _singleTapTimer?.cancel();
+    _singleTapTimer = Timer(_doubleTapWindow, () {
+      if (mounted) _toggleControls();
+    });
+  }
+
+  void _onDoubleTap(int zone) {
+    if (_locked) return;
+    if (zone == 0) {
+      _togglePlay();
+      return;
+    }
+    // Live streams can't seek: no skip bubbles.
+    if (_isLive) return;
+    _stepSeek(zone > 0, fixed: true);
+    _tapSeekDir = zone;
+    _tapSeekUntil = DateTime.now().add(_tapSeekWindow);
+  }
+
   // ── Touch: hold a side to seek continuously ─────────────────────────
-  void _onHoldStart(LongPressStartDetails d) {
+  void _onHoldStart(bool fwd) {
     if (_locked || _isLive) return;
-    final w = MediaQuery.sizeOf(context).width;
-    final x = d.localPosition.dx;
-    if (x > w / 3 && x < w * 2 / 3) return; // centre: nothing
-    final fwd = x >= w * 2 / 3;
+    _singleTapTimer?.cancel();
+    _prevTapAt = null;
+    HapticFeedback.selectionClick();
     _stepSeek(fwd);
     _holdSeekTimer?.cancel();
     _holdSeekTimer = Timer.periodic(
@@ -501,7 +602,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
   }
 
   void _onDragUpdate(DragUpdateDetails d) {
-    if (_locked || _playerDisposed) return;
+    if (_locked || _playerDisposed || _holdSeekTimer != null) return;
     final delta = -d.delta.dy / (MediaQuery.of(context).size.height * 0.5);
     if (_dragIsLeft) {
       // Brightness only works on mobile (ScreenBrightness plugin limitation)
@@ -845,17 +946,20 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
               // ── Gesture layer ─────────────────────────────────────────
               if (_error.isEmpty && !_isReconnecting && !_playerDisposed)
                 Positioned.fill(
-                  child: GestureDetector(
+                  child: Listener(
                     behavior: HitTestBehavior.opaque,
-                    onTapDown: (d) => _lastTap = d.localPosition,
-                    onTap: _toggleControls,
-                    onDoubleTap: _onDoubleTap,
-                    onLongPressStart: _onHoldStart,
-                    onLongPressEnd: (_) => _onHoldEnd(),
-                    onLongPressCancel: _onHoldEnd,
-                    onVerticalDragStart: _onDragStart,
-                    onVerticalDragUpdate: _onDragUpdate,
-                    onVerticalDragEnd: _onDragEnd,
+                    onPointerDown: _onPointerDown,
+                    onPointerMove: _onPointerMove,
+                    onPointerUp: _onPointerUp,
+                    onPointerCancel: _onPointerCancel,
+                    // Only swipes go through a recogniser now; taps and
+                    // holds are read from the pointer events above.
+                    child: GestureDetector(
+                      behavior: HitTestBehavior.opaque,
+                      onVerticalDragStart: _onDragStart,
+                      onVerticalDragUpdate: _onDragUpdate,
+                      onVerticalDragEnd: _onDragEnd,
+                    ),
                   ),
                 ),
 
@@ -1130,60 +1234,74 @@ class _ControlsOverlay extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      decoration: BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.topCenter,
-          end: Alignment.bottomCenter,
-          colors: [
-            Colors.black.withValues(alpha: 0.80),
-            Colors.transparent,
-            Colors.transparent,
-            Colors.black.withValues(alpha: 0.85),
-          ],
-          stops: const [0.0, 0.18, 0.78, 1.0],
+    return Stack(
+      fit: StackFit.expand,
+      children: [
+        // The shading must not take touches: as a hit-testable box it sat
+        // over the whole video and swallowed every tap, double tap and
+        // hold while the controls were showing.
+        IgnorePointer(
+          child: DecoratedBox(
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topCenter,
+                end: Alignment.bottomCenter,
+                colors: [
+                  Colors.black.withValues(alpha: 0.80),
+                  Colors.transparent,
+                  Colors.transparent,
+                  Colors.black.withValues(alpha: 0.85),
+                ],
+                stops: const [0.0, 0.18, 0.78, 1.0],
+              ),
+            ),
+          ),
         ),
-      ),
-      child: SafeArea(
-        child: Column(
-          children: [
-            _TopBar(
-              title: title,
-              isLive: isLive,
-              quality: quality,
-              isFavorite: isFavorite,
-              onBack: onBack,
-              onLock: onToggleLock,
-              onFav: onToggleFav,
-              onTracks: onShowTracks,
-            ),
-            const Spacer(),
-            _CenterPlay(
-              playing: playing,
-              onTap: onTogglePlay,
-              focusNode: playFocusNode,
-            ),
-            const Spacer(),
-            _BottomBar(
-              isLive: isLive,
-              playing: playing,
-              pos: pos,
-              dur: dur,
-              volume: volume,
-              isSeeking: isSeeking,
-              seekVal: seekVal,
-              onTogglePlay: onTogglePlay,
-              onSeekStart: onSeekStart,
-              onSeekChange: onSeekChange,
-              onSeekEnd: onSeekEnd,
-              onVolumeChange: onVolumeChange,
-              isVideoFill: isVideoFill,
-              onToggleFit: onToggleFit,
-              onSeekBack: onSeekBack,
-              onSeekFwd: onSeekFwd,
-            ),
-          ],
-        ),
+        _controls(),
+      ],
+    );
+  }
+
+  Widget _controls() {
+    return SafeArea(
+      child: Column(
+        children: [
+          _TopBar(
+            title: title,
+            isLive: isLive,
+            quality: quality,
+            isFavorite: isFavorite,
+            onBack: onBack,
+            onLock: onToggleLock,
+            onFav: onToggleFav,
+            onTracks: onShowTracks,
+          ),
+          const Spacer(),
+          _CenterPlay(
+            playing: playing,
+            onTap: onTogglePlay,
+            focusNode: playFocusNode,
+          ),
+          const Spacer(),
+          _BottomBar(
+            isLive: isLive,
+            playing: playing,
+            pos: pos,
+            dur: dur,
+            volume: volume,
+            isSeeking: isSeeking,
+            seekVal: seekVal,
+            onTogglePlay: onTogglePlay,
+            onSeekStart: onSeekStart,
+            onSeekChange: onSeekChange,
+            onSeekEnd: onSeekEnd,
+            onVolumeChange: onVolumeChange,
+            isVideoFill: isVideoFill,
+            onToggleFit: onToggleFit,
+            onSeekBack: onSeekBack,
+            onSeekFwd: onSeekFwd,
+          ),
+        ],
       ),
     );
   }

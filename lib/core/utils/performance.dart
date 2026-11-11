@@ -84,8 +84,11 @@ class Perf {
   /// 2000×3000 = 24 MB decoded) are what exhausted memory on TVs.
   static int decodeWidth(double logicalWidth, double devicePixelRatio) {
     final cap = enabled ? 360 : 600;
-    final px = (logicalWidth * devicePixelRatio).round();
-    return px.clamp(48, cap);
+    // Rounded up to a 64 px step: the decode width is part of the image's
+    // cache key, so a tile that changed size by a pixel or two (a focus
+    // border, a scrollbar) used to re-decode its image and flicker.
+    final px = ((logicalWidth * devicePixelRatio) / 64).ceil() * 64;
+    return px.clamp(64, cap);
   }
 
   /// Whether decorative staggered list animations should run.

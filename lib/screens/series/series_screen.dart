@@ -17,6 +17,7 @@ import '../../models/xtream_models.dart';
 import '../../providers/app_providers.dart';
 import '../../providers/series_provider.dart';
 import '../../services/cache_service.dart';
+import '../../widgets/poster_focus_frame.dart';
 import '../../widgets/app_network_image.dart';
 import '../details/content_details_screen.dart';
 
@@ -700,7 +701,9 @@ class _SeriesSidebarTileState extends State<_SeriesSidebarTile>
                 : Colors.transparent,
             borderRadius: BorderRadius.circular(8),
             // Focus ring shows on the selected tile too.
-            border: focused ? Border.all(color: Colors.white, width: 2.5) : null,
+            border: focused
+                ? Border.all(color: Colors.white, width: 2.5)
+                : null,
           ),
           child: Row(
             children: [
@@ -1026,80 +1029,49 @@ class _SeriesPosterCardState extends ConsumerState<_SeriesPosterCard>
           }
           return KeyEventResult.ignored;
         },
-        builder: (focused, pressed) => AnimatedContainer(
-          duration: const Duration(milliseconds: 150),
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(10),
-            border: Border.all(
-              // Focus (white) wins over "last opened" (blue).
-              color: focused
-                  ? Colors.white
-                  : isSelected
-                  ? AppTheme.primary
-                  : isTvHovered
-                  ? AppTheme.primary.withValues(alpha: 0.4)
-                  : Colors.transparent,
-              width: (isSelected || focused) ? 2.5 : 1.5,
-            ),
-            boxShadow: (isSelected || focused)
-                ? [
-                    BoxShadow(
-                      color: AppTheme.primary.withValues(alpha: 0.25),
-                      blurRadius: 8,
-                      spreadRadius: 1,
-                    ),
-                  ]
-                : null,
-          ),
-          child: AnimatedScale(
-            scale: pressed
-                ? 0.96
-                : (isTvHovered || focused)
-                ? 1.02
-                : 1.0,
-            duration: const Duration(milliseconds: 150),
-            child: ClipRRect(
-              borderRadius: BorderRadius.circular(10),
-              child: Stack(
-                fit: StackFit.expand,
-                children: [
-                  PosterImage(
-                    url: widget.series.cover,
-                    rating: widget.series.ratingValue > 0
-                        ? widget.series.ratingValue
-                        : null,
-                  ),
-                  Positioned(
-                    bottom: 0,
-                    left: 0,
-                    right: 0,
-                    child: Container(
-                      padding: const EdgeInsets.fromLTRB(6, 16, 6, 6),
-                      decoration: BoxDecoration(
-                        gradient: LinearGradient(
-                          begin: Alignment.topCenter,
-                          end: Alignment.bottomCenter,
-                          colors: [
-                            Colors.transparent,
-                            Colors.black.withValues(alpha: 0.9),
-                          ],
-                        ),
-                      ),
-                      child: Text(
-                        widget.series.name,
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 10,
-                          fontWeight: FontWeight.w500,
-                        ),
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ),
-                  ),
-                ],
+        builder: (focused, pressed) => PosterFocusFrame(
+          focused: focused,
+          pressed: pressed,
+          hovered: isTvHovered,
+          selected: isSelected,
+          child: Stack(
+            fit: StackFit.expand,
+            children: [
+              PosterImage(
+                url: widget.series.cover,
+                rating: widget.series.ratingValue > 0
+                    ? widget.series.ratingValue
+                    : null,
               ),
-            ),
+              Positioned(
+                bottom: 0,
+                left: 0,
+                right: 0,
+                child: Container(
+                  padding: const EdgeInsets.fromLTRB(6, 16, 6, 6),
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      begin: Alignment.topCenter,
+                      end: Alignment.bottomCenter,
+                      colors: [
+                        Colors.transparent,
+                        Colors.black.withValues(alpha: 0.9),
+                      ],
+                    ),
+                  ),
+                  child: Text(
+                    widget.series.name,
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 10,
+                      fontWeight: FontWeight.w500,
+                    ),
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+              ),
+            ],
           ),
         ),
       ),
