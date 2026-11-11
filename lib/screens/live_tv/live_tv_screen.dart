@@ -16,6 +16,7 @@ import '../../providers/live_tv_provider.dart';
 import '../../services/cache_service.dart';
 import '../../services/m3u_service.dart';
 import '../../services/storage_service.dart';
+import '../player/widgets/player_lock_overlay.dart';
 import 'widgets/epg_timeline.dart';
 import 'widgets/live_category_sidebar.dart';
 import 'widgets/live_preview_area.dart';
@@ -180,8 +181,7 @@ class _LiveTVScreenState extends ConsumerState<LiveTVScreen> {
     }
     final playing = ref.read(selectedChannelProvider) != null;
     if (playing) {
-      if (_epgEntry?.call(preferSelected: true, selectedOnly: true) ??
-          false) {
+      if (_epgEntry?.call(preferSelected: true, selectedOnly: true) ?? false) {
         return;
       }
       // Channel not in the list (after a few tries, while it loads) →
@@ -210,65 +210,60 @@ class _LiveTVScreenState extends ConsumerState<LiveTVScreen> {
   // Category/Channel list internal scrolling is handled by their own
   // FocusScope key handlers + per-item onArrowKey (see those widgets).
   void _wireCrossPanelNav() {
-    TvNav.wire(
-      backBtnFocus,
-      TvNav.handler(down: categorySearchFocus),
-    );
+    TvNav.wire(backBtnFocus, TvNav.handler(down: categorySearchFocus));
 
     TvNav.wire(
       categorySearchFocus,
       TvNav.handler(
-      up: backBtnFocus,
-      onDown: () =>
-          (firstCategoryItemFocus ?? categorySearchFocus).requestFocus(),
-      onRight: () => _enterChannels(preferSelected: true),
+        up: backBtnFocus,
+        onDown: () =>
+            (firstCategoryItemFocus ?? categorySearchFocus).requestFocus(),
+        onRight: () => _enterChannels(preferSelected: true),
       ),
     );
 
     TvNav.wire(
       channelSearchFocus,
       TvNav.handler(
-      up: backBtnFocus,
-      onDown: () {
-        if (!_enterChannels()) channelSearchFocus.requestFocus();
-      },
-      onLeft: () =>
-          _categoryEntry()?.requestFocus(),
-      right: refreshEpgFocus,
+        up: backBtnFocus,
+        onDown: () {
+          if (!_enterChannels()) channelSearchFocus.requestFocus();
+        },
+        onLeft: () => _categoryEntry()?.requestFocus(),
+        right: refreshEpgFocus,
       ),
     );
 
     TvNav.wire(
       refreshEpgFocus,
       TvNav.handler(
-      up: backBtnFocus,
-      onDown: () {
-        if (!_enterChannels()) refreshEpgFocus.requestFocus();
-      },
-      left: channelSearchFocus,
-      right: epgFullscreenFocus,
+        up: backBtnFocus,
+        onDown: () {
+          if (!_enterChannels()) refreshEpgFocus.requestFocus();
+        },
+        left: channelSearchFocus,
+        right: epgFullscreenFocus,
       ),
     );
 
     TvNav.wire(
       epgFullscreenFocus,
       TvNav.handler(
-      up: backBtnFocus,
-      onDown: () {
-        if (!_enterChannels()) epgFullscreenFocus.requestFocus();
-      },
-      left: refreshEpgFocus,
+        up: backBtnFocus,
+        onDown: () {
+          if (!_enterChannels()) epgFullscreenFocus.requestFocus();
+        },
+        left: refreshEpgFocus,
       ),
     );
 
     TvNav.wire(
       miniPlayPauseFocus,
       TvNav.handler(
-      up: backBtnFocus,
-      down: channelSearchFocus,
-      onLeft: () =>
-          _categoryEntry()?.requestFocus(),
-      right: channelSearchFocus,
+        up: backBtnFocus,
+        down: channelSearchFocus,
+        onLeft: () => _categoryEntry()?.requestFocus(),
+        right: channelSearchFocus,
       ),
     );
   }
@@ -539,6 +534,21 @@ class _LiveTVScreenState extends ConsumerState<LiveTVScreen> {
   /// the focused widget (it never takes focus itself, so it can't steal the
   /// remote's focus the way the old KeyboardListener did).
   KeyEventResult _handleKeyEvent(KeyEvent event) {
+    // Locked full-screen player (normally handled by the player itself;
+    // this catches keys that arrive while focus is elsewhere).
+    if (ref.read(livePlayerMaximizedProvider) &&
+        ref.read(livePlayerLockedProvider)) {
+      switch (PlayerLockOverlay.keyAction(event)) {
+        case LockedKeyAction.unlock:
+          ref.read(livePlayerLockedProvider.notifier).state = false;
+          return KeyEventResult.handled;
+        case LockedKeyAction.hint:
+          ref.read(livePlayerLockHintProvider.notifier).state++;
+          return KeyEventResult.handled;
+        case LockedKeyAction.pass:
+          return KeyEventResult.ignored;
+      }
+    }
     if (event is! KeyDownEvent) return KeyEventResult.ignored;
     final key = event.logicalKey;
 
@@ -799,6 +809,16 @@ class _LiveTVScreenState extends ConsumerState<LiveTVScreen> {
         canPop: false,
         onPopInvokedWithResult: (didPop, _) async {
           if (didPop) return;
+          if (isMaximized && ref.read(livePlayerLockedProvider)) {
+            // Locked: Back unlocks on TV / desktop; phones only show how
+            // (the lock button unlocks there).
+            if (PlayerLockOverlay.backUnlocks()) {
+              ref.read(livePlayerLockedProvider.notifier).state = false;
+            } else {
+              ref.read(livePlayerLockHintProvider.notifier).state++;
+            }
+            return;
+          }
           if (isMaximized) {
             ref.read(livePlayerMaximizedProvider.notifier).state = false;
             return;
@@ -848,12 +868,7 @@ class _LiveTVScreenState extends ConsumerState<LiveTVScreen> {
               return Stack(
                 children: [
                   // ── Layer 1: Main layout ──────────────────────────────
-                  _buildLayoutBody(
-                    isMaximized,
-                    epgVisible,
-                    sidebarW,
-                    previewH,
-                  ),
+                  _buildLayoutBody(isMaximized, epgVisible, sidebarW, previewH),
 
                   // ── Layer 2: Inline player ────────────────────────────
                   // Stays at the SAME position in the widget tree always
@@ -873,8 +888,7 @@ class _LiveTVScreenState extends ConsumerState<LiveTVScreen> {
                           isMaximized: isMaximized,
                           onMinimizedFocus: _focusPlayingRow,
                           playPauseFocusNode: miniPlayPauseFocus,
-                          categoryEntryFocus: () =>
-                              _categoryEntry(),
+                          categoryEntryFocus: () => _categoryEntry(),
                           channelSearchFocus: channelSearchFocus,
                           backFocusNode: backBtnFocus,
                           onMaximize: () =>
@@ -919,52 +933,52 @@ class _LiveTVScreenState extends ConsumerState<LiveTVScreen> {
     return ExcludeFocus(
       excluding: isMaximized,
       child: Column(
-      children: [
-        _DesktopTopBar(
-          epgVisible: epgVisible,
-          backFocusNode: backBtnFocus,
-          onToggleEpg: () =>
-              ref.read(epgPanelVisibleProvider.notifier).state = !epgVisible,
-        ),
-        Expanded(
-          child: Row(
-            children: [
-              // ── WRAPPED HERE: Category Sidebar ─────────────────────
-              FocusScope(
-                node: _categoryPanelFocus,
-                child: LiveCategorySidebar(
-                  width: sidebarW,
-                  searchFocusNode: categorySearchFocus,
-                  channelListEntryFocus: () => firstChannelItemFocus,
-                  onEnterChannels: () => _enterChannels(preferSelected: true),
-                  onFirstItemFocusReady: (node) =>
-                      firstCategoryItemFocus = node,
-                  onSelectedItemFocusReady: (node) =>
-                      selectedCategoryItemFocus = node,
-                  onEntryReady: (f) => _sidebarEntry = f,
-                ),
-              ),
-              _ResizeDivider(
-                axis: Axis.vertical,
-                isActive: _draggingCategory,
-                onDragStart: () => setState(() => _draggingCategory = true),
-                onDragEnd: () => setState(() => _draggingCategory = false),
-                onDelta: (dx) {
-                  final v = (_effectiveSidebarW + dx).clamp(150.0, 340.0);
-                  ref.read(categorySidebarWidthProvider.notifier).state = v;
-                },
-              ),
-              Expanded(
-                child: FocusScope(
-                  node: _channelPanelFocus,
-                  child: _buildMainContent(epgVisible, previewH),
-                ),
-              ),
-            ],
+        children: [
+          _DesktopTopBar(
+            epgVisible: epgVisible,
+            backFocusNode: backBtnFocus,
+            onToggleEpg: () =>
+                ref.read(epgPanelVisibleProvider.notifier).state = !epgVisible,
           ),
-        ),
-      ],
-    ),
+          Expanded(
+            child: Row(
+              children: [
+                // ── WRAPPED HERE: Category Sidebar ─────────────────────
+                FocusScope(
+                  node: _categoryPanelFocus,
+                  child: LiveCategorySidebar(
+                    width: sidebarW,
+                    searchFocusNode: categorySearchFocus,
+                    channelListEntryFocus: () => firstChannelItemFocus,
+                    onEnterChannels: () => _enterChannels(preferSelected: true),
+                    onFirstItemFocusReady: (node) =>
+                        firstCategoryItemFocus = node,
+                    onSelectedItemFocusReady: (node) =>
+                        selectedCategoryItemFocus = node,
+                    onEntryReady: (f) => _sidebarEntry = f,
+                  ),
+                ),
+                _ResizeDivider(
+                  axis: Axis.vertical,
+                  isActive: _draggingCategory,
+                  onDragStart: () => setState(() => _draggingCategory = true),
+                  onDragEnd: () => setState(() => _draggingCategory = false),
+                  onDelta: (dx) {
+                    final v = (_effectiveSidebarW + dx).clamp(150.0, 340.0);
+                    ref.read(categorySidebarWidthProvider.notifier).state = v;
+                  },
+                ),
+                Expanded(
+                  child: FocusScope(
+                    node: _channelPanelFocus,
+                    child: _buildMainContent(epgVisible, previewH),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
     );
   }
 
@@ -983,8 +997,7 @@ class _LiveTVScreenState extends ConsumerState<LiveTVScreen> {
         refreshFocusNode: refreshEpgFocus,
         fullscreenFocusNode: epgFullscreenFocus,
         upFocus: backBtnFocus,
-        categoryEntryFocus: () =>
-            _categoryEntry(),
+        categoryEntryFocus: () => _categoryEntry(),
         onFirstItemFocusReady: (node) => firstChannelItemFocus = node,
         onEntryReady: (f) => _epgEntry = f,
       );
@@ -1018,8 +1031,7 @@ class _LiveTVScreenState extends ConsumerState<LiveTVScreen> {
             refreshFocusNode: refreshEpgFocus,
             fullscreenFocusNode: epgFullscreenFocus,
             upFocus: backBtnFocus,
-            categoryEntryFocus: () =>
-                _categoryEntry(),
+            categoryEntryFocus: () => _categoryEntry(),
             onFirstItemFocusReady: (node) => firstChannelItemFocus = node,
             onEntryReady: (f) => _epgEntry = f,
           ),

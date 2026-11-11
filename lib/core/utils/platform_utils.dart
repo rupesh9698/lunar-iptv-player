@@ -41,8 +41,7 @@ class PlatformUtils {
   static bool get supportsLocalAuth => !isWeb && !isLinux;
 
   /// screen_brightness: no Linux / Web plugin
-  static bool get supportsScreenBrightness =>
-      isMobile || isMacOS || isWindows;
+  static bool get supportsScreenBrightness => isMobile || isMacOS || isWindows;
 
   /// volume_controller: Android & iOS only
   static bool get supportsVolumeControl => isMobile;
@@ -119,6 +118,9 @@ class PlatformUtils {
 
   // ── Android TV Detection ──────────────────────────────────────────
   static bool _isAndroidTV = false;
+
+  @visibleForTesting
+  static set debugIsTV(bool value) => _isAndroidTV = value;
 
   /// Detects Android TV / Google TV / Fire TV via the package-manager
   /// system features. Must be awaited once at startup (see main.dart)

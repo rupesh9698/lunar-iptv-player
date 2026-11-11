@@ -49,21 +49,23 @@ class LastWatchedLiveNotifier extends StateNotifier<_LastWatched> {
   final String playlistId;
 
   LastWatchedLiveNotifier({required this.playlistId})
-      : super(_load(playlistId));
+    : super(_load(playlistId));
 
   static _LastWatched _load(String pid) => (
-  categoryId:
-  StorageService.instance.getSetting('last_live_cat_$pid') as String?,
-  channelId:
-  StorageService.instance.getSetting('last_live_ch_$pid') as String?,
+    categoryId:
+        StorageService.instance.getSetting('last_live_cat_$pid') as String?,
+    channelId:
+        StorageService.instance.getSetting('last_live_ch_$pid') as String?,
   );
 
   /// Saves only when rememberPosition setting is enabled.
   Future<void> save({String? categoryId, String? channelId}) async {
-    final remember = StorageService.instance.getSetting(
-      AppConstants.rememberPositionKey,
-      true,
-    ) as bool;
+    final remember =
+        StorageService.instance.getSetting(
+              AppConstants.rememberPositionKey,
+              true,
+            )
+            as bool;
     if (!remember) return;
 
     await StorageService.instance.setSetting(
@@ -494,6 +496,13 @@ final recentlyViewedStreamsProvider = Provider<AsyncValue<List<LiveStream>>>((
 
 // ── Inline Player Maximize State ──────────────────────────────────────────────
 final livePlayerMaximizedProvider = StateProvider<bool>((ref) => false);
+
+/// Full-screen Live TV player is locked: touches and keys are ignored until
+/// it is unlocked (Back on TV, Esc / click on desktop, the lock on phones).
+final livePlayerLockedProvider = StateProvider<bool>((ref) => false);
+
+/// Bumped to flash the "how to unlock" hint on the locked Live TV player.
+final livePlayerLockHintProvider = StateProvider<int>((ref) => 0);
 
 // ── Parental Locked Live Categories ──────────────────────────────────────────
 final parentalLockedLiveCategoriesProvider =

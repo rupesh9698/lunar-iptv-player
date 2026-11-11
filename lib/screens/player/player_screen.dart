@@ -20,6 +20,7 @@ import '../../providers/app_providers.dart';
 import '../../providers/behavior_providers.dart';
 import '../../providers/live_tv_provider.dart';
 import '../../services/web_proxy_client.dart';
+import 'widgets/player_lock_overlay.dart';
 
 class PlayerScreen extends ConsumerStatefulWidget {
   final String title;
@@ -68,6 +69,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
   // ── Controls UI ─────────────────────────────────────────────────────
   bool _ctrlVisible = true;
   bool _locked = false;
+  int _lockNudge = 0; // bumped to flash the "how to unlock" hint
   Timer? _hideTimer;
 
   // ── TV remote focus ─────────────────────────────────────────────────
@@ -381,6 +383,24 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
         if (mounted && _playFocus.context != null) _playFocus.requestFocus();
       });
     }
+  }
+
+  /// Lock: hide the controls and ignore touches and keys until unlocked.
+  /// Focus goes back to the player so it still sees Back / Esc (the lock
+  /// overlay itself never takes remote focus).
+  void _lock() {
+    _hideTimer?.cancel();
+    setState(() {
+      _locked = true;
+      _ctrlVisible = false;
+    });
+    _rootFocus.requestFocus();
+  }
+
+  void _unlock() {
+    if (!_locked) return;
+    setState(() => _locked = false);
+    _showControls(focusPlay: true);
   }
 
   void _toggleControls() {
@@ -727,6 +747,18 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
   /// specific focusable widget: media transport keys, channel up/down
   /// (live only), and Escape/Back to exit the player.
   KeyEventResult _handleGlobalKey(FocusNode node, KeyEvent event) {
+    if (_locked) {
+      switch (PlayerLockOverlay.keyAction(event)) {
+        case LockedKeyAction.unlock:
+          _unlock();
+          return KeyEventResult.handled;
+        case LockedKeyAction.hint:
+          setState(() => _lockNudge++);
+          return KeyEventResult.handled;
+        case LockedKeyAction.pass:
+          return KeyEventResult.ignored;
+      }
+    }
     if (event is KeyUpEvent) return KeyEventResult.ignored;
     final key = event.logicalKey;
     final isDown = event is KeyDownEvent;
@@ -805,7 +837,6 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
     if (key == LogicalKeyboardKey.escape ||
         key == LogicalKeyboardKey.goBack ||
         key == LogicalKeyboardKey.browserBack) {
-      if (_locked) return KeyEventResult.ignored; // let lock UI handle it
       // Controls showing → Back just hides them; next Back leaves.
       if (_ctrlVisible && _error.isEmpty) {
         _hideTimer?.cancel();
@@ -815,8 +846,6 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
       _exitPlayer();
       return KeyEventResult.handled;
     }
-
-    if (_locked) return KeyEventResult.ignored;
 
     if (key == LogicalKeyboardKey.mediaPlayPause ||
         key == LogicalKeyboardKey.mediaPlay ||
@@ -885,6 +914,15 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
       canPop: false,
       onPopInvokedWithResult: (didPop, _) {
         if (didPop) return;
+        if (_locked) {
+          // TV / desktop: Back unlocks. Phones: only the lock button does.
+          if (PlayerLockOverlay.backUnlocks()) {
+            _unlock();
+          } else {
+            setState(() => _lockNudge++);
+          }
+          return;
+        }
         // System back (gesture / back button): dismiss controls first.
         if (_ctrlVisible && !_locked && _error.isEmpty) {
           _hideTimer?.cancel();
@@ -987,7 +1025,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
                         volume: _volume,
                         onBack: _exitPlayer,
                         onTogglePlay: _togglePlay,
-                        onToggleLock: () => setState(() => _locked = true),
+                        onToggleLock: _lock,
                         onToggleFav: _isLive ? _toggleFavorite : null,
                         onShowTracks: _showTracks,
                         onSeekStart: (v) => setState(() {
@@ -1015,11 +1053,11 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
 
               // ── Lock overlay ──────────────────────────────────────────
               if (_locked)
-                _LockOverlay(
-                  onUnlock: () {
-                    setState(() => _locked = false);
-                    _showControls(focusPlay: true);
-                  },
+                Positioned.fill(
+                  child: PlayerLockOverlay(
+                    onUnlock: _unlock,
+                    nudge: _lockNudge,
+                  ),
                 ),
 
               // ── Skip indicators ───────────────────────────────────────
@@ -1590,47 +1628,8 @@ class _BottomBar extends StatelessWidget {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// LOCK, SKIP, GESTURE overlays
+// SKIP, GESTURE overlays
 // ─────────────────────────────────────────────────────────────────────────────
-class _LockOverlay extends StatelessWidget {
-  final VoidCallback onUnlock;
-  const _LockOverlay({required this.onUnlock});
-
-  @override
-  Widget build(BuildContext context) {
-    return SafeArea(
-      child: Align(
-        alignment: Alignment.centerRight,
-        child: Padding(
-          padding: const EdgeInsets.only(right: 16),
-          child: TvFocusable(
-            autofocus: true,
-            autoScroll: false,
-            onActivate: onUnlock,
-            builder: (focused, _) => AnimatedContainer(
-              duration: const Duration(milliseconds: 150),
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: Colors.black.withValues(alpha: 0.55),
-                shape: BoxShape.circle,
-                border: Border.all(
-                  color: focused ? AppTheme.primary : Colors.white30,
-                  width: focused ? 2.5 : 1.5,
-                ),
-              ),
-              child: const Icon(
-                Icons.lock_rounded,
-                color: Colors.white,
-                size: 22,
-              ),
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
 class _SkipIndicator extends StatelessWidget {
   final int seconds;
   const _SkipIndicator({required this.seconds});

@@ -17,6 +17,7 @@ import '../../../providers/live_player_provider.dart';
 import '../../../providers/live_tv_provider.dart';
 import '../../../services/web_proxy_client.dart';
 import '../../player/widgets/player_channel_guide.dart';
+import '../../player/widgets/player_lock_overlay.dart';
 
 /// Inline player for Live TV.
 /// Compact mode: video (16:9) + info pane.
@@ -53,7 +54,10 @@ class LiveInlinePlayer extends ConsumerStatefulWidget {
 class _LiveInlinePlayerState extends ConsumerState<LiveInlinePlayer> {
   bool _ctrlVisible = true;
   Timer? _hideTimer;
-  bool _locked = false;
+
+  /// Locked full screen (shared with the Live TV screen, whose system-back
+  /// handler must not minimize a locked player).
+  bool get _locked => ref.read(livePlayerLockedProvider);
   // Video is always "fit to screen" (BoxFit.contain); the fill/fit toggle
   // was removed.
   static const bool _videoFill = false;
@@ -83,6 +87,7 @@ class _LiveInlinePlayerState extends ConsumerState<LiveInlinePlayer> {
   // TV info bar buttons (top-left minimize, top-right favourite).
   final FocusNode _maxMinimizeFocus = FocusNode(debugLabel: 'liveMaxMin');
   final FocusNode _maxFavFocus = FocusNode(debugLabel: 'liveMaxFav');
+  final FocusNode _maxLockFocus = FocusNode(debugLabel: 'liveMaxLock');
 
   /// Where remote focus goes when the full-screen player opens: on TV the
   /// player itself (so OK opens the guide and Left/Right zap), elsewhere
@@ -95,6 +100,17 @@ class _LiveInlinePlayerState extends ConsumerState<LiveInlinePlayer> {
     widget.playPauseFocusNode?.addListener(_onMiniPlayFocus);
     _resetHideTimer();
     if (widget.isMaximized) _focusAfterFrame(_maxEntryFocus);
+    if (!widget.isMaximized) _clearLockSoon();
+  }
+
+  /// Only full screen can be locked: a stale lock is cleared (after the
+  /// frame, as providers can't change while widgets build).
+  void _clearLockSoon() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted && _locked) {
+        ref.read(livePlayerLockedProvider.notifier).state = false;
+      }
+    });
   }
 
   @override
@@ -116,6 +132,7 @@ class _LiveInlinePlayerState extends ConsumerState<LiveInlinePlayer> {
           _showChannelGuide = true;
         });
       } else {
+        _clearLockSoon();
         setState(() {
           _ctrlVisible = true;
           _showChannelGuide = false;
@@ -141,6 +158,7 @@ class _LiveInlinePlayerState extends ConsumerState<LiveInlinePlayer> {
     _maxMinimizeFocus.dispose();
     if (widget.isMaximized) PlatformUtils.setDesktopFullScreen(false);
     _maxFavFocus.dispose();
+    _maxLockFocus.dispose();
     super.dispose();
   }
 
@@ -202,23 +220,36 @@ class _LiveInlinePlayerState extends ConsumerState<LiveInlinePlayer> {
     });
   }
 
-  /// Lock (touch): close the TV Guide and controls and ignore taps until
-  /// unlocked. The guide used to stay open — and usable — on top of the
-  /// lock, so locking from the guide did nothing.
+  /// Lock: close the TV Guide and controls and ignore touches and keys
+  /// until unlocked (see [PlayerLockOverlay]). Focus goes to the player
+  /// root so it still sees Back / Esc; the lock overlay never takes it.
   void _lock() {
     _hideTimer?.cancel();
+    ref.read(livePlayerLockedProvider.notifier).state = true;
     setState(() {
-      _locked = true;
       _showChannelGuide = false;
       _ctrlVisible = false;
     });
+    _maxRootFocus.requestFocus();
   }
 
   void _unlock() {
-    setState(() => _locked = false);
-    _maxRootFocus.requestFocus();
-    _resetHideTimer();
+    if (!_locked) return;
+    ref.read(livePlayerLockedProvider.notifier).state = false;
+    // The rest happens in [_onLockChanged] (the Live TV screen's Back
+    // handler can unlock too).
   }
+
+  /// After unlocking: a brief info bar as confirmation; focus stays on the
+  /// player so the remote zaps / opens the guide as usual.
+  void _onLockChanged(bool? was, bool now) {
+    if (was == true && !now && widget.isMaximized && mounted) {
+      _maxRootFocus.requestFocus();
+      _resetHideTimer();
+    }
+  }
+
+  void _lockHint() => ref.read(livePlayerLockHintProvider.notifier).state++;
 
   void _openGuide() {
     if (_locked) return;
@@ -268,12 +299,16 @@ class _LiveInlinePlayerState extends ConsumerState<LiveInlinePlayer> {
     final isDown = event is KeyDownEvent;
 
     if (_locked) {
-      // Locked: only OK (unlock) does anything.
-      if (_isOk(k)) {
-        if (isDown) _unlock();
-        return KeyEventResult.handled;
+      switch (PlayerLockOverlay.keyAction(event)) {
+        case LockedKeyAction.unlock:
+          _unlock();
+          return KeyEventResult.handled;
+        case LockedKeyAction.hint:
+          _lockHint();
+          return KeyEventResult.handled;
+        case LockedKeyAction.pass:
+          return KeyEventResult.ignored;
       }
-      return KeyEventResult.ignored;
     }
 
     if (k == LogicalKeyboardKey.keyG) {
@@ -332,12 +367,19 @@ class _LiveInlinePlayerState extends ConsumerState<LiveInlinePlayer> {
     if (_tv &&
         (k == LogicalKeyboardKey.arrowLeft ||
             k == LogicalKeyboardKey.arrowRight)) {
-      // Info bar has exactly two buttons: Minimize (left) ↔ Favourite.
+      // Info bar buttons, left to right: Minimize · Favourite · Lock.
       if (isDown) {
-        final target = k == LogicalKeyboardKey.arrowLeft
-            ? _maxMinimizeFocus
-            : _maxFavFocus;
-        if (target.context != null) target.requestFocus();
+        final row = [
+          _maxMinimizeFocus,
+          _maxFavFocus,
+          _maxLockFocus,
+        ].where((n) => n.context != null).toList();
+        final at = row.indexWhere((n) => n.hasFocus);
+        final to = (at + (k == LogicalKeyboardKey.arrowLeft ? -1 : 1)).clamp(
+          0,
+          row.length - 1,
+        );
+        if (row.isNotEmpty) row[to].requestFocus();
       }
       return KeyEventResult.handled;
     }
@@ -449,6 +491,7 @@ class _LiveInlinePlayerState extends ConsumerState<LiveInlinePlayer> {
 
   @override
   Widget build(BuildContext context) {
+    ref.listen<bool>(livePlayerLockedProvider, _onLockChanged);
     final ps = ref.watch(livePlayerProvider);
     final channel = ref.watch(selectedChannelProvider);
     final epgCache = ref.watch(epgCacheProvider);
@@ -551,6 +594,7 @@ class _LiveInlinePlayerState extends ConsumerState<LiveInlinePlayer> {
     EpgListing? next,
     VideoController? ctrl,
   ) {
+    final locked = ref.watch(livePlayerLockedProvider);
     return Focus(
       focusNode: _maxRootFocus,
       autofocus: !_showChannelGuide,
@@ -569,7 +613,7 @@ class _LiveInlinePlayerState extends ConsumerState<LiveInlinePlayer> {
                       videoFill: _videoFill,
                       ctrlVisible: _ctrlVisible,
                       // Click / tap = OK: toggles the TV Guide.
-                      onTap: _locked
+                      onTap: locked
                           ? () {}
                           : (_showChannelGuide ? _closeGuide : _openGuide),
                       // No double-tap: live can't rewind / fast-forward
@@ -599,7 +643,7 @@ class _LiveInlinePlayerState extends ConsumerState<LiveInlinePlayer> {
             // Controls overlay
             // (Shown together with the TV Guide: Minimize / Favourite / Lock
             // stay reachable while the guide is open.)
-            if (!_locked && ps.error.isEmpty && !ps.isReconnecting)
+            if (!locked && ps.error.isEmpty && !ps.isReconnecting)
               AnimatedOpacity(
                 opacity: _ctrlVisible ? 1.0 : 0.0,
                 duration: const Duration(milliseconds: 250),
@@ -620,7 +664,9 @@ class _LiveInlinePlayerState extends ConsumerState<LiveInlinePlayer> {
                             showHint: !_showChannelGuide,
                             minimizeFocus: _maxMinimizeFocus,
                             favoriteFocus: _maxFavFocus,
+                            lockFocus: _maxLockFocus,
                             onMinimize: widget.onMinimize,
+                            onLock: _lock,
                             onToggleFav: channel != null
                                 ? () => ref
                                       .read(
@@ -658,7 +704,13 @@ class _LiveInlinePlayerState extends ConsumerState<LiveInlinePlayer> {
               ),
 
             // Lock overlay
-            if (_locked) _LockOverlay(onUnlock: _unlock),
+            if (locked)
+              Positioned.fill(
+                child: PlayerLockOverlay(
+                  onUnlock: _unlock,
+                  nudge: ref.watch(livePlayerLockHintProvider),
+                ),
+              ),
 
             // Volume / Brightness
             if (_showVol)
@@ -693,7 +745,7 @@ class _LiveInlinePlayerState extends ConsumerState<LiveInlinePlayer> {
               ),
 
             // Channel Guide panel
-            if (_showChannelGuide && !_locked)
+            if (_showChannelGuide && !locked)
               Positioned(
                 bottom: 0,
                 left: 0,
@@ -1380,36 +1432,6 @@ class _ReconnectOverlay extends StatelessWidget {
   );
 }
 
-class _LockOverlay extends StatelessWidget {
-  final VoidCallback onUnlock;
-  const _LockOverlay({required this.onUnlock});
-
-  @override
-  Widget build(BuildContext context) => SafeArea(
-    child: Align(
-      alignment: Alignment.centerRight,
-      child: TvFocusable(
-        autofocus: true,
-        autoScroll: false,
-        onActivate: onUnlock,
-        builder: (focused, _) => Container(
-          margin: const EdgeInsets.only(right: 16),
-          padding: const EdgeInsets.all(12),
-          decoration: BoxDecoration(
-            color: Colors.black.withValues(alpha: 0.55),
-            shape: BoxShape.circle,
-            border: Border.all(
-              color: focused ? Colors.white : Colors.white30,
-              width: focused ? 2.5 : 1.5,
-            ),
-          ),
-          child: const Icon(Icons.lock_rounded, color: Colors.white, size: 22),
-        ),
-      ),
-    ),
-  );
-}
-
 class _GestureOverlay extends StatelessWidget {
   final IconData icon;
   final double value;
@@ -1574,7 +1596,8 @@ class _ChannelSwitchOverlay extends StatelessWidget {
 
 // ─────────────────────────────────────────────────────────────────────────────
 // TV INFO BAR — the only overlay on Android TV in full screen.
-// Top-left: Minimize · title / LIVE / now & next · top-right: Favourite.
+// Top-left: Minimize · title / LIVE / now & next · top-right: Favourite,
+// Lock.
 // No play/pause, prev/next, guide, volume or fit buttons: the remote has
 // dedicated keys (◀ ▶ channels, OK guide, volume keys).
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1586,8 +1609,10 @@ class _TvInfoBar extends StatelessWidget {
   final bool isFavorite;
   final FocusNode minimizeFocus;
   final FocusNode favoriteFocus;
+  final FocusNode lockFocus;
   final VoidCallback onMinimize;
   final VoidCallback? onToggleFav;
+  final VoidCallback onLock;
 
   const _TvInfoBar({
     required this.channel,
@@ -1597,8 +1622,10 @@ class _TvInfoBar extends StatelessWidget {
     required this.isFavorite,
     required this.minimizeFocus,
     required this.favoriteFocus,
+    required this.lockFocus,
     required this.onMinimize,
     required this.onToggleFav,
+    required this.onLock,
     this.showHint = true,
   });
 
@@ -1716,6 +1743,16 @@ class _TvInfoBar extends StatelessWidget {
                           : 'Add to Favorites',
                       onTap: onToggleFav,
                     ),
+                  const SizedBox(width: 10),
+                  TvIconButton(
+                    focusNode: lockFocus,
+                    icon: Icons.lock_outline,
+                    color: Colors.white,
+                    size: 24,
+                    circle: true,
+                    tooltip: 'Lock (BACK unlocks)',
+                    onTap: onLock,
+                  ),
                 ],
               ),
             ),
