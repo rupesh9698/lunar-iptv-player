@@ -1068,48 +1068,60 @@ class _DetailsPage extends StatelessWidget {
   // ── Wide (TV / desktop / tablet landscape) ──────────────────────────────
   Widget _wideHero(BuildContext context, Responsive r, double h) {
     final pad = _pad(context);
+    // Phones in landscape / small windows: tighter type, no poster card.
+    final short = r.height < 560;
     final posterW = (h * 0.36).clamp(130.0, 250.0);
-    final showPoster = r.width >= 900;
-    return SizedBox(
-      height: h,
-      child: Stack(
+    final showPoster = r.width >= 900 && !short;
+    // The hero grows with its content (at least the backdrop's height)
+    // and always keeps room for the Back button above the text. It used
+    // to be a fixed height with the text pinned to the bottom, so on a
+    // short screen the text ran up under the Back button.
+    return Container(
+      constraints: BoxConstraints(minHeight: h),
+      alignment: Alignment.bottomLeft,
+      padding: EdgeInsets.fromLTRB(pad, short ? 68 : 84, pad, short ? 16 : 24),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.end,
         children: [
-          if (showPoster)
-            Positioned(
-              right: pad,
-              bottom: 28,
-              child: _Poster(url: poster, width: posterW),
-            ),
-          Positioned(
-            left: pad,
-            right: showPoster ? posterW + pad * 2 : r.width * 0.2,
-            bottom: 24,
-            child: _HeroInfo(
-              kind: kind,
-              title: title,
-              originalTitle: originalTitle,
-              rating: rating,
-              meta: meta,
-              badges: badges,
-              genres: genres,
-              synopsis: synopsis,
-              big: true,
-              actions: Wrap(
-                spacing: 12,
-                runSpacing: 12,
-                crossAxisAlignment: WrapCrossAlignment.center,
-                children: [
-                  for (var i = 0; i < actions.length; i++)
-                    _ActionButton(
-                      action: actions[i],
-                      focusNode: nav.actionNode(i),
-                      autofocus: i == 0,
-                      onArrowKey: nav.actionArrows(i),
-                    ),
-                ],
+          Expanded(
+            child: Padding(
+              padding: EdgeInsets.only(
+                right: showPoster ? pad : r.width * (short ? 0.08 : 0.18),
+              ),
+              child: _HeroInfo(
+                kind: kind,
+                title: title,
+                originalTitle: originalTitle,
+                rating: rating,
+                meta: meta,
+                badges: badges,
+                genres: genres,
+                synopsis: synopsis,
+                big: true,
+                short: short,
+                actions: Wrap(
+                  spacing: short ? 10 : 12,
+                  runSpacing: short ? 10 : 12,
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  children: [
+                    for (var i = 0; i < actions.length; i++)
+                      _ActionButton(
+                        action: actions[i],
+                        focusNode: nav.actionNode(i),
+                        autofocus: i == 0,
+                        onArrowKey: nav.actionArrows(i),
+                        dense: short,
+                      ),
+                  ],
+                ),
               ),
             ),
           ),
+          if (showPoster)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 4),
+              child: _Poster(url: poster, width: posterW),
+            ),
         ],
       ),
     );
@@ -1386,9 +1398,11 @@ class _HeroInfo extends StatelessWidget {
   final String? genres;
   final String? synopsis;
   final bool big;
+  final bool short; // short screen (phone landscape): compact type
   final Widget actions;
 
   const _HeroInfo({
+    this.short = false,
     required this.kind,
     required this.title,
     required this.originalTitle,
@@ -1434,7 +1448,7 @@ class _HeroInfo extends StatelessWidget {
           overflow: TextOverflow.ellipsis,
           style: TextStyle(
             color: Colors.white,
-            fontSize: big ? 40 : 22,
+            fontSize: big ? (short ? 28 : 40) : 22,
             fontWeight: FontWeight.w900,
             height: 1.08,
             letterSpacing: big ? -0.8 : -0.3,
@@ -1457,7 +1471,7 @@ class _HeroInfo extends StatelessWidget {
               ),
             ),
           ),
-        const SizedBox(height: 12),
+        SizedBox(height: short ? 8 : 12),
         Wrap(
           spacing: 12,
           runSpacing: 8,
@@ -1495,17 +1509,17 @@ class _HeroInfo extends StatelessWidget {
             constraints: const BoxConstraints(maxWidth: 640),
             child: Text(
               synopsis!.trim(),
-              maxLines: 3,
+              maxLines: short ? 2 : 3,
               overflow: TextOverflow.ellipsis,
               style: TextStyle(
                 color: Colors.white.withValues(alpha: 0.8),
-                fontSize: 14.5,
+                fontSize: short ? 13.5 : 14.5,
                 height: 1.55,
               ),
             ),
           ),
         ],
-        if (big) const SizedBox(height: 22),
+        if (big) SizedBox(height: short ? 14 : 22),
         actions,
       ],
     );
@@ -1519,8 +1533,10 @@ class _ActionButton extends StatelessWidget {
   final KeyEventResult Function(LogicalKeyboardKey) onArrowKey;
   final bool compact; // icon above label (phone action row)
   final bool expand;
+  final bool dense; // short screens: smaller buttons
 
   const _ActionButton({
+    this.dense = false,
     required this.action,
     required this.focusNode,
     required this.autofocus,
@@ -1532,11 +1548,20 @@ class _ActionButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final a = action;
-    return TvFocusable(
+    return Builder(
+      builder: (ctx) => TvFocusable(
       focusNode: focusNode,
       autofocus: autofocus,
       onActivate: a.onTap,
       onArrowKey: onArrowKey,
+      // Not the default "centre the focused item": on a short screen that
+      // scrolled the page as it opened and pushed the title up under the
+      // Back button. The buttons live in the hero, so show the page from
+      // the top whenever that keeps the button in view.
+      autoScroll: false,
+      onFocusChange: (f) {
+        if (f) _revealHero(ctx);
+      },
       builder: (focused, pressed) => _Hover(
         builder: (hover) {
           if (compact) {
@@ -1585,13 +1610,13 @@ class _ActionButton extends StatelessWidget {
               : Colors.white.withValues(alpha: hover ? 0.22 : 0.14);
           final fg = primary || focused ? Colors.black : Colors.white;
           final iconColor = a.active ? _accent : fg;
-          return AnimatedScale(
+          final button = AnimatedScale(
             scale: focused ? 1.07 : 1.0,
             duration: const Duration(milliseconds: 140),
             child: Container(
               constraints: BoxConstraints(
                 minWidth: expand ? double.infinity : 0,
-                minHeight: 50,
+                minHeight: dense ? 42 : 50,
               ),
               decoration: BoxDecoration(
                 color: enabled ? bg : bg.withValues(alpha: 0.4),
@@ -1609,8 +1634,8 @@ class _ActionButton extends StatelessWidget {
                 children: [
                   Padding(
                     padding: EdgeInsets.symmetric(
-                      horizontal: primary ? 26 : 18,
-                      vertical: 11,
+                      horizontal: primary ? (dense ? 20 : 26) : (dense ? 14 : 18),
+                      vertical: dense ? 8 : 11,
                     ),
                     child: Row(
                       mainAxisSize: MainAxisSize.min,
@@ -1655,9 +1680,39 @@ class _ActionButton extends StatelessWidget {
               ),
             ),
           );
+          // In a row, as wide as the label — not the whole row.
+          return expand ? button : IntrinsicWidth(child: button);
         },
       ),
+      ),
     );
+  }
+
+  /// Scroll to the very top if the button is then still fully on screen;
+  /// otherwise just far enough to show it.
+  static void _revealHero(BuildContext ctx) {
+    final pos = Scrollable.maybeOf(ctx)?.position;
+    final box = ctx.findRenderObject() as RenderBox?;
+    if (pos == null || box == null || !box.attached) return;
+    final viewport = pos.context.notificationContext?.findRenderObject();
+    if (viewport is! RenderBox) return;
+    final topInView = box.localToGlobal(Offset.zero, ancestor: viewport).dy;
+    final bottomAtTop = topInView + pos.pixels + box.size.height;
+    if (bottomAtTop + 16 <= pos.viewportDimension) {
+      if (pos.pixels > 0) {
+        pos.animateTo(
+          0,
+          duration: const Duration(milliseconds: 250),
+          curve: Curves.easeOut,
+        );
+      }
+    } else {
+      Scrollable.ensureVisible(
+        ctx,
+        alignment: 0.85,
+        duration: const Duration(milliseconds: 250),
+      );
+    }
   }
 }
 

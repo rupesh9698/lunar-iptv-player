@@ -218,8 +218,8 @@ void main() {
     expect(find.text('Resume S2:E1'), findsOneWidget);
     expect(find.text('From S1:E1'), findsOneWidget);
     // Opened on the season being watched.
-    expect(find.text('S2 Chapter 1'), findsOneWidget);
-    expect(find.text('Episode 1 plot'), findsOneWidget);
+    expect(find.text('S2 Chapter 1', skipOffstage: false), findsOneWidget);
+    expect(find.text('Episode 1 plot', skipOffstage: false), findsOneWidget);
 
     // Buttons: Resume S2:E1, From S1:E1, Favourite.
     expect(focused(), 'detailsAction0');
@@ -270,5 +270,50 @@ void main() {
     expect(find.text('Play'), findsOneWidget);
     expect(find.text('Favourite'), findsOneWidget);
     expect(t.takeException(), isNull);
+  });
+
+  testWidgets('phone landscape: title stays below the Back button', (t) async {
+    t.view.physicalSize = const Size(915, 412);
+    t.view.devicePixelRatio = 1.0;
+    addTearDown(t.view.reset);
+    final movie = vod('11', 'server101 Chitralahari (2019)');
+    await t.pumpWidget(
+      app(
+        path: '/movie-details',
+        extra: movie,
+        o: [
+          vodInfoProvider.overrideWith(
+            (ref, id) async => VodInfo.fromJson({
+              'info': {
+                'name': 'server101 Chitralahari (2019)',
+                'releasedate': '2019-04-12',
+                'genre': 'Drama, Romance',
+                'rating': '6.8',
+                'duration_secs': 7140,
+                'plot':
+                    'Vijay is a down-on-luck mechanical engineer who is '
+                    'looking for that big break in life. Both his personal '
+                    'and professional lives are a mess; will he ever catch '
+                    'a break?',
+                'video': {'height': 720},
+              },
+            }),
+          ),
+          vodAllStreamsProvider.overrideWith((ref) async => [movie]),
+        ],
+      ),
+    );
+    await t.pumpAndSettle();
+    expect(t.takeException(), isNull);
+    final back = t.getRect(find.byIcon(Icons.arrow_back_rounded));
+    final title = t.getRect(find.text('server101 Chitralahari (2019)').first);
+    expect(title.top, greaterThanOrEqualTo(back.bottom),
+        reason: 'title must not run up under the Back button');
+    // Buttons are sized to their labels, not stretched across the row.
+    final play = t.getRect(find.ancestor(
+      of: find.text('Play'),
+      matching: find.byType(IntrinsicWidth),
+    ));
+    expect(play.width, lessThan(400));
   });
 }
