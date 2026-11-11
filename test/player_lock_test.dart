@@ -8,8 +8,10 @@ import 'package:hive_flutter/hive_flutter.dart';
 import 'package:lunar_iptv_player/core/utils/platform_utils.dart';
 import 'package:lunar_iptv_player/models/xtream_models.dart';
 import 'package:lunar_iptv_player/providers/app_providers.dart';
+import 'package:lunar_iptv_player/providers/live_player_provider.dart';
 import 'package:lunar_iptv_player/providers/live_tv_provider.dart';
 import 'package:lunar_iptv_player/screens/live_tv/widgets/live_preview_area.dart';
+import 'package:lunar_iptv_player/screens/player/widgets/player_loading_ring.dart';
 import 'package:lunar_iptv_player/screens/player/widgets/player_lock_overlay.dart';
 import 'package:lunar_iptv_player/services/storage_service.dart';
 
@@ -20,6 +22,13 @@ class _FakeEpg extends EpgCacheNotifier {
 
   @override
   Future<void> loadEpg(String streamId, {bool force = false}) async {}
+}
+
+/// A live player that is still buffering.
+class _Buffering extends LivePlayerNotifier {
+  _Buffering() {
+    state = const LivePlayerState(isBuffering: true, isPlaying: true);
+  }
 }
 
 KeyDownEvent _down(LogicalKeyboardKey k) => KeyDownEvent(
@@ -253,6 +262,40 @@ void main() {
       expect(container.read(livePlayerLockedProvider), isFalse);
       expect(find.text('Screen locked · press BACK to unlock'), findsNothing);
 
+      await t.pumpWidget(const SizedBox());
+    });
+
+    testWidgets('buffering: a big ring in the centre, no text', (t) async {
+      t.view.physicalSize = const Size(1280, 720);
+      t.view.devicePixelRatio = 1.0;
+      addTearDown(t.view.reset);
+      final ch = LiveStream.fromJson({'stream_id': '1', 'name': 'One'});
+      await t.pumpWidget(
+        ProviderScope(
+          overrides: [
+            livePlayerProvider.overrideWith((ref) => _Buffering()),
+            filteredLiveStreamsProvider.overrideWithValue(
+              AsyncValue.data([ch]),
+            ),
+            epgCacheProvider.overrideWith((ref) => _FakeEpg(ref)),
+            selectedChannelProvider.overrideWith((ref) => ch),
+            xtreamServiceProvider.overrideWithValue(null),
+          ],
+          child: MaterialApp(
+            home: LiveInlinePlayer(
+              isMaximized: true,
+              onMaximize: () {},
+              onMinimize: () {},
+            ),
+          ),
+        ),
+      );
+      await t.pump();
+      expect(find.textContaining('Buffering'), findsNothing);
+      final ring = find.byType(PlayerLoadingRing);
+      expect(ring, findsOneWidget);
+      expect(t.getCenter(ring), const Offset(640, 360));
+      expect(t.getSize(ring).width, PlayerLoadingRing.ringSize);
       await t.pumpWidget(const SizedBox());
     });
   });

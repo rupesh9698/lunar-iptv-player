@@ -20,6 +20,7 @@ import '../../providers/app_providers.dart';
 import '../../providers/behavior_providers.dart';
 import '../../providers/live_tv_provider.dart';
 import '../../services/web_proxy_client.dart';
+import 'widgets/player_loading_ring.dart';
 import 'widgets/player_lock_overlay.dart';
 
 class PlayerScreen extends ConsumerStatefulWidget {
@@ -57,7 +58,6 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
   String _error = '';
   Duration _pos = Duration.zero;
   Duration _dur = Duration.zero;
-  Duration _buf = Duration.zero;
   String _quality = '';
 
   // ── Reconnect (live streams) ────────────────────────────────────────
@@ -217,12 +217,6 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
       }),
       _player.stream.duration.listen((v) {
         if (mounted) setState(() => _dur = v);
-      }),
-      _player.stream.buffer.listen((v) {
-        final changed = v.inSeconds != _buf.inSeconds;
-        _buf = v;
-        // Only the buffering badge shows this value.
-        if (changed && _buffering && mounted) setState(() {});
       }),
       _player.stream.videoParams.listen((v) {
         if (!mounted) return;
@@ -716,11 +710,6 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
   }
 
   // ── Buffer percentage (VOD only) ──────────────────────────────────────
-  String _bufferPct() {
-    if (_dur.inMilliseconds <= 0) return '';
-    return '${(_buf.inMilliseconds / _dur.inMilliseconds * 100).round()}%';
-  }
-
   // ── Favorites (live channels) ─────────────────────────────────────────
   bool get _isFavorite =>
       ref.watch(liveFavoritesNotifierProvider).contains(widget.id);
@@ -954,16 +943,11 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
                       controls: NoVideoControls,
                     ),
 
-              // ── Buffering indicator (subtle — over video) ────────────
+              // ── Loading: a ring in the middle of the screen — around
+              // the play / pause button when the controls are up (both
+              // sit at the exact centre of the safe area).
               if (_buffering && _error.isEmpty && !_isReconnecting)
-                Positioned(
-                  bottom: _isLive ? 20 : 90,
-                  right: 20,
-                  child: _BufferingBadge(
-                    isLive: _isLive,
-                    bufPct: _isLive ? null : _bufferPct(),
-                  ),
-                ),
+                const SafeArea(child: Center(child: PlayerLoadingRing())),
 
               // ── Reconnecting overlay ──────────────────────────────────
               if (_isReconnecting)
@@ -1106,48 +1090,6 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
             ],
           ),
         ),
-      ),
-    );
-  }
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// BUFFERING BADGE (shows over video, not blocking)
-// ─────────────────────────────────────────────────────────────────────────────
-class _BufferingBadge extends StatelessWidget {
-  final bool isLive;
-  final String? bufPct;
-  const _BufferingBadge({required this.isLive, this.bufPct});
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-      decoration: BoxDecoration(
-        color: Colors.black.withValues(alpha: 0.65),
-        borderRadius: BorderRadius.circular(8),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          const SizedBox(
-            width: 14,
-            height: 14,
-            child: CircularProgressIndicator(
-              color: Colors.white,
-              strokeWidth: 1.5,
-            ),
-          ),
-          const SizedBox(width: 8),
-          Text(
-            isLive
-                ? 'Buffering...'
-                : bufPct != null
-                ? 'Buffering $bufPct'
-                : 'Buffering...',
-            style: const TextStyle(color: Colors.white, fontSize: 12),
-          ),
-        ],
       ),
     );
   }
@@ -1302,6 +1244,25 @@ class _ControlsOverlay extends StatelessWidget {
 
   Widget _controls() {
     return SafeArea(
+      child: Stack(
+        children: [
+          Positioned.fill(child: _bars()),
+          // Play / pause at the exact centre, where the loading ring
+          // (drawn by the player) goes around it.
+          Center(
+            child: _CenterPlay(
+              playing: playing,
+              onTap: onTogglePlay,
+              focusNode: playFocusNode,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _bars() {
+    return SizedBox.expand(
       child: Column(
         children: [
           _TopBar(
@@ -1313,12 +1274,6 @@ class _ControlsOverlay extends StatelessWidget {
             onLock: onToggleLock,
             onFav: onToggleFav,
             onTracks: onShowTracks,
-          ),
-          const Spacer(),
-          _CenterPlay(
-            playing: playing,
-            onTap: onTogglePlay,
-            focusNode: playFocusNode,
           ),
           const Spacer(),
           _BottomBar(
@@ -1505,8 +1460,8 @@ class _CenterPlayState extends State<_CenterPlay> {
       onActivate: widget.onTap,
       builder: (focused, _) => AnimatedContainer(
         duration: const Duration(milliseconds: 200),
-        width: 60,
-        height: 60,
+        width: PlayerLoadingRing.playButtonSize,
+        height: PlayerLoadingRing.playButtonSize,
         decoration: BoxDecoration(
           color: Colors.white.withValues(alpha: 0.18),
           shape: BoxShape.circle,

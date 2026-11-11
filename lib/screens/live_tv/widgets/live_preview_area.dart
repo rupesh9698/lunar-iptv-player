@@ -17,6 +17,7 @@ import '../../../providers/live_player_provider.dart';
 import '../../../providers/live_tv_provider.dart';
 import '../../../services/web_proxy_client.dart';
 import '../../player/widgets/player_channel_guide.dart';
+import '../../player/widgets/player_loading_ring.dart';
 import '../../player/widgets/player_lock_overlay.dart';
 
 /// Inline player for Live TV.
@@ -626,9 +627,9 @@ class _LiveInlinePlayerState extends ConsumerState<LiveInlinePlayer> {
                     ),
             ),
 
-            // Buffering
+            // Loading: a ring in the middle of the screen.
             if (ps.isBuffering && ps.error.isEmpty && !ps.isReconnecting)
-              const Positioned(bottom: 80, right: 20, child: _BufferingBadge()),
+              const SafeArea(child: Center(child: PlayerLoadingRing())),
 
             // Reconnect
             if (ps.isReconnecting)
@@ -843,19 +844,9 @@ class _VideoArea extends StatelessWidget {
               onVerticalDragEnd: onDragEnd,
             ),
           ),
-          // Mini player: small spinner while (re)buffering.
-          // Mini player: centred spinner while (re)buffering.
+          // Mini player: centred loading ring while (re)buffering.
           if (centerSpinner && ps.isBuffering)
-            const Center(
-              child: SizedBox(
-                width: 30,
-                height: 30,
-                child: CircularProgressIndicator(
-                  color: Colors.white,
-                  strokeWidth: 2.5,
-                ),
-              ),
-            ),
+            const Center(child: PlayerLoadingRing(size: 44, strokeWidth: 3)),
         ],
       ),
     );
@@ -1349,37 +1340,6 @@ class _Label extends StatelessWidget {
       fontSize: 9,
       fontWeight: FontWeight.w700,
       letterSpacing: 1,
-    ),
-  );
-}
-
-class _BufferingBadge extends StatelessWidget {
-  const _BufferingBadge();
-
-  @override
-  Widget build(BuildContext context) => Container(
-    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-    decoration: BoxDecoration(
-      color: Colors.black.withValues(alpha: 0.65),
-      borderRadius: BorderRadius.circular(8),
-    ),
-    child: const Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        SizedBox(
-          width: 14,
-          height: 14,
-          child: CircularProgressIndicator(
-            color: Colors.white,
-            strokeWidth: 1.5,
-          ),
-        ),
-        SizedBox(width: 8),
-        Text(
-          'Buffering...',
-          style: TextStyle(color: Colors.white, fontSize: 12),
-        ),
-      ],
     ),
   );
 }
