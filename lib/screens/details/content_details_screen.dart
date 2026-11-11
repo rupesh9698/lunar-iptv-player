@@ -180,31 +180,41 @@ mixin _DetailsNav<T extends ConsumerStatefulWidget> on ConsumerState<T> {
     };
   }
 
+  /// The buttons form one sequence (Resume → Start Over → Favourite →
+  /// Download → Trailer): Down / Right go to the next one, Up / Left to
+  /// the previous. Down from the last leaves for the episodes / More Like
+  /// This, Up from the first goes to Back. (Down used to jump straight
+  /// from Resume to More Like This, skipping the other buttons.)
   KeyEventResult Function(LogicalKeyboardKey) actionArrows(int i) {
-    final row = !narrowLayout || i >= stackedActions;
+    final prev = i > 0 ? actionNode(i - 1) : null;
+    final next = i + 1 < actionCount ? actionNode(i + 1) : null;
     return arrows(
-      up: () {
-        if (!row || !narrowLayout) {
-          return i > 0 && narrowLayout ? actionNode(i - 1) : backFocus;
-        }
-        return stackedActions > 0 ? actionNode(stackedActions - 1) : backFocus;
-      },
-      down: () {
-        if (narrowLayout && !row) {
-          return i + 1 < actionCount ? actionNode(i + 1) : belowActions;
-        }
-        return belowActions;
-      },
-      left: () {
-        if (narrowLayout && !row) return null;
-        final first = narrowLayout ? stackedActions : 0;
-        return i > first ? actionNode(i - 1) : null;
-      },
-      right: () {
-        if (narrowLayout && !row) return null;
-        return i + 1 < actionCount ? actionNode(i + 1) : null;
-      },
+      up: () => prev ?? backFocus,
+      down: () => next ?? belowActions,
+      left: () => prev,
+      right: () => next,
     );
+  }
+
+  /// Last button — what the section below goes Up to.
+  FocusNode get lastAction =>
+      actionCount > 0 ? actionNode(actionCount - 1) : backFocus;
+
+  /// Puts remote focus on the first button once the page is up, in case
+  /// autofocus lost the race (e.g. focus still on the previous page).
+  void focusFirstAction([int tries = 0]) {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final scope = FocusScope.of(context);
+      final inPage = scope.hasFocus && scope.focusedChild != null;
+      if (inPage && FocusManager.instance.primaryFocus != scope) return;
+      final first = actionCount > 0 ? actionNode(0) : backFocus;
+      if (first.context != null) {
+        first.requestFocus();
+      } else if (tries < 20) {
+        focusFirstAction(tries + 1);
+      }
+    });
   }
 
   KeyEventResult Function(LogicalKeyboardKey) get backArrows => arrows(
@@ -251,7 +261,13 @@ class _MovieDetailsScreenState extends ConsumerState<MovieDetailsScreen>
   FocusNode? get belowActions => similarCount > 0 ? similarNode(0) : null;
 
   @override
-  FocusNode? get aboveSimilar => actionCount > 0 ? actionNode(0) : backFocus;
+  FocusNode? get aboveSimilar => lastAction;
+
+  @override
+  void initState() {
+    super.initState();
+    focusFirstAction();
+  }
 
   @override
   void dispose() {
@@ -446,10 +462,16 @@ class _SeriesDetailsScreenState extends ConsumerState<SeriesDetailsScreen>
   FocusNode? get aboveSimilar =>
       (_epCount > 0 ? _epNode(_epCount - 1) : null) ??
       _seasonEntry ??
-      (actionCount > 0 ? actionNode(0) : backFocus);
+      lastAction;
 
   FocusNode get _aboveEpisodes =>
-      _seasonEntry ?? (actionCount > 0 ? actionNode(0) : backFocus);
+      _seasonEntry ?? lastAction;
+
+  @override
+  void initState() {
+    super.initState();
+    focusFirstAction();
+  }
 
   @override
   void dispose() {
@@ -746,7 +768,7 @@ class _SeriesDetailsScreenState extends ConsumerState<SeriesDetailsScreen>
               focusNode: _seasonNode(k),
               onActivate: () => setState(() => _season = k),
               onArrowKey: arrows(
-                up: () => actionCount > 0 ? actionNode(0) : backFocus,
+                up: () => lastAction,
                 down: () => _epCount > 0
                     ? _epNode(0)
                     : (similarCount > 0 ? similarNode(0) : null),

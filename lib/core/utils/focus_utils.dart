@@ -91,6 +91,14 @@ class TvBackKeyGuard extends StatelessWidget {
         }
         if (!isBackKey(event.logicalKey)) return KeyEventResult.ignored;
         if (event is KeyDownEvent) {
+          // Keyboard Esc has no system meaning on Windows / macOS / Linux /
+          // web, so an Esc nobody handled goes back a page here (closing
+          // Movies / Series / details) — unless this is the first page.
+          if (event.logicalKey == LogicalKeyboardKey.escape &&
+              _popForEscape()) {
+            _downReachedRoot = false; // swallow its key-up too
+            return KeyEventResult.handled;
+          }
           _downReachedRoot = true; // nobody below handled it → system back
           return KeyEventResult.ignored;
         }
@@ -102,6 +110,21 @@ class TvBackKeyGuard extends StatelessWidget {
       child: child,
     );
   }
+}
+
+/// Pops the page that holds the focus if it can go back (or has a
+/// PopScope that decides, like Movies → Home). Returns whether it acted.
+bool _popForEscape() {
+  final ctx = FocusManager.instance.primaryFocus?.context;
+  if (ctx == null) return false;
+  final nav = Navigator.maybeOf(ctx);
+  if (nav == null) return false;
+  final route = ModalRoute.of(ctx);
+  final decides = route != null &&
+      route.popDisposition == RoutePopDisposition.doNotPop;
+  if (!nav.canPop() && !decides) return false;
+  nav.maybePop();
+  return true;
 }
 
 bool _isActivationKey(LogicalKeyboardKey k) =>

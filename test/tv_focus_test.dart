@@ -326,6 +326,34 @@ void main() {
       expect(closedBy, 'cancel');
     });
 
+    testWidgets('keyboard Esc closes a page nobody handles it on', (
+      tester,
+    ) async {
+      TvKeyTracker.install();
+      final nav = GlobalKey<NavigatorState>();
+      await tester.pumpWidget(
+        MaterialApp(
+          navigatorKey: nav,
+          builder: (context, child) => TvBackKeyGuard(child: child!),
+          home: const SizedBox.expand(),
+        ),
+      );
+      nav.currentState!.push(
+        MaterialPageRoute<void>(
+          builder: (_) => const Focus(
+            autofocus: true,
+            child: Text('Details'),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('Details'), findsOneWidget);
+      expect(await tester.sendKeyDownEvent(LogicalKeyboardKey.escape), isTrue);
+      expect(await tester.sendKeyUpEvent(LogicalKeyboardKey.escape), isTrue);
+      await tester.pumpAndSettle();
+      expect(find.text('Details'), findsNothing);
+    });
+
     testWidgets('unhandled Back passes through to the system', (tester) async {
       TvKeyTracker.install();
       await tester.pumpWidget(app(screenHandlesBack: false));

@@ -142,9 +142,16 @@ void main() {
     expect(find.text('Kannada'), findsOneWidget);
     expect(find.text('2h 54m'), findsOneWidget);
 
+    // Buttons: Resume, Start Over, Favourite (no server → no Download).
     expect(focused(), 'detailsAction0', reason: 'Resume has initial focus');
     await key(t, LogicalKeyboardKey.arrowRight);
     expect(focused(), 'detailsAction1');
+    await key(t, LogicalKeyboardKey.arrowLeft);
+    expect(focused(), 'detailsAction0');
+    await key(t, LogicalKeyboardKey.arrowDown);
+    expect(focused(), 'detailsAction1', reason: 'Down walks the buttons');
+    await key(t, LogicalKeyboardKey.arrowDown);
+    expect(focused(), 'detailsAction2');
     await key(t, LogicalKeyboardKey.arrowDown);
     await t.pumpAndSettle();
     expect(focused(), 'detailsSimilar0', reason: 'scrolls past About to it');
@@ -152,6 +159,10 @@ void main() {
     expect(find.text('KGF'), findsOneWidget);
     await key(t, LogicalKeyboardKey.arrowRight);
     expect(focused(), 'detailsSimilar1');
+    await key(t, LogicalKeyboardKey.arrowUp);
+    await t.pumpAndSettle();
+    expect(focused(), 'detailsAction2', reason: 'back to the last button');
+    await key(t, LogicalKeyboardKey.arrowUp);
     await key(t, LogicalKeyboardKey.arrowUp);
     expect(focused(), 'detailsAction0');
     await key(t, LogicalKeyboardKey.arrowUp);
@@ -210,7 +221,12 @@ void main() {
     expect(find.text('1. S2 Chapter 1'), findsOneWidget);
     expect(find.text('Episode 1 plot'), findsOneWidget);
 
+    // Buttons: Resume S2:E1, From S1:E1, Favourite.
     expect(focused(), 'detailsAction0');
+    await key(t, LogicalKeyboardKey.arrowDown);
+    expect(focused(), 'detailsAction1');
+    await key(t, LogicalKeyboardKey.arrowDown);
+    expect(focused(), 'detailsAction2');
     await key(t, LogicalKeyboardKey.arrowDown);
     expect(focused(), 'season2', reason: 'Down lands on the selected season');
     await key(t, LogicalKeyboardKey.arrowDown);
@@ -228,7 +244,7 @@ void main() {
     expect(find.text('1. S1 Chapter 1'), findsOneWidget, reason: 'season 1');
     await key(t, LogicalKeyboardKey.arrowUp);
     await t.pumpAndSettle();
-    expect(focused(), 'detailsAction0');
+    expect(focused(), 'detailsAction2');
   });
 
   testWidgets('phone layout renders without overflow', (t) async {
