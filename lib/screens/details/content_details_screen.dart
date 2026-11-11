@@ -861,6 +861,9 @@ class _SimilarItem {
   });
 }
 
+/// Vertical space kept around zoomable posters so the zoom isn't clipped.
+const double _zoomRoom = 14;
+
 double _pad(BuildContext context) {
   final w = Responsive.of(context).width;
   return w < 640 ? 16 : (w < 1280 ? 32 : 48);
@@ -1188,10 +1191,15 @@ class _DetailsPage extends StatelessWidget {
   Widget _similarRow(BuildContext context, bool narrow) {
     final w = narrow ? 108.0 : 138.0;
     return SizedBox(
-      height: w * 1.5 + 34,
+      // Room above and below for the 1.06 focus zoom — the list clips its
+      // children, so a zoomed poster was cut off at the top.
+      height: w * 1.5 + 34 + 2 * _zoomRoom,
       child: ListView.builder(
         scrollDirection: Axis.horizontal,
-        padding: EdgeInsets.symmetric(horizontal: _pad(context) - 6),
+        padding: EdgeInsets.symmetric(
+          horizontal: _pad(context) - 6,
+          vertical: _zoomRoom,
+        ),
         itemCount: similar.length,
         itemBuilder: (_, i) {
           final it = similar[i];
