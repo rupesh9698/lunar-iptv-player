@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_animate/flutter_animate.dart';
@@ -7,6 +8,7 @@ import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 
 import '../../core/theme/app_theme.dart';
+import '../../core/utils/performance.dart';
 import '../../providers/app_providers.dart';
 import '../../services/cache_service.dart';
 import '../../services/m3u_service.dart';
@@ -16,12 +18,24 @@ enum _FetchStatus { idle, loading, done, failed }
 class _SyncItem {
   final String label;
   final IconData icon;
+
+  /// Card accent (ring, glow, background tint while it syncs).
+  final Color accent;
   _FetchStatus status = _FetchStatus.idle;
+
+  /// Result line ("14,890 channels", "Synced 3h ago") or, while loading,
+  /// progress ("Retrying, 1 of 3").
   String? subtitle;
   String? errorMessage;
 
-  _SyncItem(this.label, this.icon);
+  _SyncItem(this.label, this.icon, this.accent);
 }
+
+const _liveAccent = Color(0xFFFF5A7A);
+const _moviesAccent = Color(0xFF4F8DFF);
+const _seriesAccent = Color(0xFFB57BFF);
+
+final _count = NumberFormat.decimalPattern();
 
 class SyncScreen extends ConsumerStatefulWidget {
   final bool isManualRefresh;
@@ -33,32 +47,21 @@ class SyncScreen extends ConsumerStatefulWidget {
 
 class _SyncScreenState extends ConsumerState<SyncScreen> {
   List<_SyncItem> _items = [
-    _SyncItem('Live TV', Icons.tv_outlined),
-    _SyncItem('Movies', Icons.video_library_outlined),
-    _SyncItem('Series', Icons.theaters_outlined),
+    _SyncItem('Live TV', Icons.live_tv_rounded, _liveAccent),
+    _SyncItem('Movies', Icons.movie_creation_outlined, _moviesAccent),
+    _SyncItem('Series', Icons.video_library_outlined, _seriesAccent),
   ];
 
-  String _statusMsg = 'Preparing sync...';
   bool _hasAnyFailure = false;
-  Timer? _clockTimer;
-  DateTime _now = DateTime.now();
+  bool _finished = false;
+  int _active = -1;
 
   static const int _maxRetries = 3;
 
   @override
   void initState() {
     super.initState();
-    _clockTimer = Timer.periodic(
-      const Duration(seconds: 1),
-      (_) => setState(() => _now = DateTime.now()),
-    );
     WidgetsBinding.instance.addPostFrameCallback((_) => _runSync());
-  }
-
-  @override
-  void dispose() {
-    _clockTimer?.cancel();
-    super.dispose();
   }
 
   // Strong retry with timeout
@@ -83,9 +86,9 @@ class _SyncScreenState extends ConsumerState<SyncScreen> {
         }
 
         final delay = Duration(milliseconds: 700 * attempt);
-        if (mounted) {
+        if (mounted && _active >= 0) {
           setState(() {
-            _statusMsg = '$operationName... (Retry $attempt/$maxRetries)';
+            _items[_active].subtitle = 'Retrying, $attempt of $maxRetries';
           });
         }
         await Future.delayed(delay);
@@ -109,14 +112,13 @@ class _SyncScreenState extends ConsumerState<SyncScreen> {
     // ── Guard: skip sync if data exists AND is fresh AND not manual ──────────
     // This prevents the double-sync-on-restart bug.
     if (!widget.isManualRefresh) {
-      final hasData =
-          cache.liveStreamsNonEmpty() ?? false;
+      final hasData = cache.liveStreamsNonEmpty() ?? false;
       final isFresh = playlist.isM3u
           ? hasData // M3U: any cached data = fresh (no daily expiry)
           : hasData && !cache.isLiveStale(); // Xtream: check 24h expiry
 
       if (isFresh) {
-        // Data is ready — go straight to home without showing sync screen
+        // Data is ready: go straight to home without showing sync screen
         if (mounted) context.go('/home');
         return;
       }
@@ -125,11 +127,13 @@ class _SyncScreenState extends ConsumerState<SyncScreen> {
     if (playlist.isM3u) {
       // ── M3U sync ────────────────────────────────────────────────────────
       setState(() {
-        _items = [_SyncItem('Live TV (M3U)', Icons.subscriptions_outlined)];
+        _items = [
+          _SyncItem('Live TV', Icons.playlist_play_rounded, _liveAccent),
+        ];
       });
 
       if (widget.isManualRefresh || cache.isLiveStale()) {
-        await _step(0, 'Fetching M3U playlist...', () async {
+        await _step(0, () async {
           final m3uUrl = playlist.m3uUrl!;
           final (cats, streams) = await M3uService.fetchAndParse(m3uUrl);
           await cache.saveLiveCategories(cats);
@@ -140,7 +144,8 @@ class _SyncScreenState extends ConsumerState<SyncScreen> {
             hasSeries: false,
           );
           _items[0].subtitle =
-              '${streams.length} channels · ${cats.length} categories';
+              '${_count.format(streams.length)} channels\n'
+              '${_count.format(cats.length)} categories';
         });
       } else {
         _markDone(0);
@@ -150,14 +155,6 @@ class _SyncScreenState extends ConsumerState<SyncScreen> {
       ref.invalidate(liveAllStreamsProvider);
     } else {
       // ── Xtream sync ─────────────────────────────────────────────────────
-      setState(() {
-        _items = [
-          _SyncItem('Live TV', Icons.tv_outlined),
-          _SyncItem('Movies', Icons.video_library_outlined),
-          _SyncItem('Series', Icons.theaters_outlined),
-        ];
-      });
-
       final service = ref.read(xtreamServiceProvider);
       if (service == null) {
         if (mounted) context.go('/home');
@@ -168,7 +165,7 @@ class _SyncScreenState extends ConsumerState<SyncScreen> {
 
       // Live TV
       if (widget.isManualRefresh || cache.isLiveStale()) {
-        await _step(0, 'Fetching Live TV channels...', () async {
+        await _step(0, () async {
           final cats = await _withRetry(
             () => service.getLiveCategories(),
             operationName: 'Live TV Categories',
@@ -179,7 +176,7 @@ class _SyncScreenState extends ConsumerState<SyncScreen> {
           );
           await cache.saveLiveCategories(cats);
           await cache.saveLiveStreams(ch);
-          _items[0].subtitle = '${ch.length} channels';
+          _items[0].subtitle = '${_count.format(ch.length)} channels';
           hasLive = ch.isNotEmpty;
         });
       } else {
@@ -189,7 +186,7 @@ class _SyncScreenState extends ConsumerState<SyncScreen> {
 
       // Movies
       if (widget.isManualRefresh || cache.isVodStale()) {
-        await _step(1, 'Fetching Movies library...', () async {
+        await _step(1, () async {
           final cats = await _withRetry(
             () => service.getVodCategories(),
             operationName: 'Movies Categories',
@@ -200,7 +197,7 @@ class _SyncScreenState extends ConsumerState<SyncScreen> {
           );
           await cache.saveVodCategories(cats);
           await cache.saveVodStreams(streams);
-          _items[1].subtitle = '${streams.length} movies';
+          _items[1].subtitle = '${_count.format(streams.length)} movies';
           hasVod = streams.isNotEmpty;
         });
       } else {
@@ -210,7 +207,7 @@ class _SyncScreenState extends ConsumerState<SyncScreen> {
 
       // Series
       if (widget.isManualRefresh || cache.isSeriesStale()) {
-        await _step(2, 'Fetching Series library...', () async {
+        await _step(2, () async {
           final cats = await _withRetry(
             () => service.getSeriesCategories(),
             operationName: 'Series Categories',
@@ -221,13 +218,12 @@ class _SyncScreenState extends ConsumerState<SyncScreen> {
           );
           await cache.saveSeriesCategories(cats);
           await cache.saveSeriesList(series);
-          _items[2].subtitle = '${series.length} series';
+          _items[2].subtitle = '${_count.format(series.length)} series';
           hasSeries = series.isNotEmpty;
         });
       } else {
         _markDone(2);
-        hasSeries =
-            cache.seriesListNonEmpty() ?? true;
+        hasSeries = cache.seriesListNonEmpty() ?? true;
       }
 
       await cache.saveContentFlags(
@@ -246,12 +242,14 @@ class _SyncScreenState extends ConsumerState<SyncScreen> {
 
     ref.read(cacheLastSyncProvider.notifier).state = DateTime.now();
 
-    final msg = _hasAnyFailure
-        ? 'Sync completed with some issues'
-        : 'All done! Launching Lunar IPTV Player...';
-    if (mounted) setState(() => _statusMsg = msg);
+    if (mounted) {
+      setState(() {
+        _finished = true;
+        _active = -1;
+      });
+    }
 
-    await Future.delayed(const Duration(milliseconds: 900));
+    await Future.delayed(const Duration(milliseconds: 1100));
     if (mounted) context.go('/home');
   }
 
@@ -277,17 +275,14 @@ class _SyncScreenState extends ConsumerState<SyncScreen> {
     return '${d.inDays}d ago';
   }
 
-  Future<void> _step(
-    int idx,
-    String loadingMsg,
-    Future<void> Function() work,
-  ) async {
+  Future<void> _step(int idx, Future<void> Function() work) async {
     if (!mounted) return;
 
     setState(() {
+      _active = idx;
       _items[idx].status = _FetchStatus.loading;
+      _items[idx].subtitle = null;
       _items[idx].errorMessage = null;
-      _statusMsg = loadingMsg;
     });
 
     try {
@@ -299,7 +294,7 @@ class _SyncScreenState extends ConsumerState<SyncScreen> {
       if (mounted) {
         setState(() {
           _items[idx].status = _FetchStatus.failed;
-          _items[idx].subtitle = 'Failed';
+          _items[idx].subtitle = "Couldn't sync this time";
           _items[idx].errorMessage = e.toString();
           _hasAnyFailure = true;
         });
@@ -308,86 +303,105 @@ class _SyncScreenState extends ConsumerState<SyncScreen> {
   }
 
   @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: AppTheme.background,
-      body: SafeArea(
-        child: Column(
-          children: [
-            _TopBar(now: _now),
-            Expanded(child: _Cards(items: _items)),
-            _BottomBar(message: _statusMsg),
-          ],
-        ),
-      ),
-    );
-  }
+  Widget build(BuildContext context) => _SyncView(
+    items: _items,
+    active: _active,
+    finished: _finished,
+    hasAnyFailure: _hasAnyFailure,
+  );
 }
 
-// ──────────────────────────────────────────────────────────────
-// Top Bar (Unchanged with minor animation)
-class _TopBar extends StatelessWidget {
-  final DateTime now;
-  const _TopBar({required this.now});
+/// Sync screen with fake progress, for previews / widget tests.
+/// [states]: one of 'idle', 'loading', 'done', 'failed' per card.
+@visibleForTesting
+Widget debugSyncPreview(
+  List<String> states, {
+  List<String?> subtitles = const [],
+  bool finished = false,
+}) {
+  final items = [
+    _SyncItem('Live TV', Icons.live_tv_rounded, _liveAccent),
+    _SyncItem('Movies', Icons.movie_creation_outlined, _moviesAccent),
+    _SyncItem('Series', Icons.video_library_outlined, _seriesAccent),
+  ];
+  for (var i = 0; i < states.length; i++) {
+    items[i].status = _FetchStatus.values.byName(states[i]);
+    if (i < subtitles.length) items[i].subtitle = subtitles[i];
+  }
+  return _SyncView(
+    items: items,
+    active: states.indexOf('loading'),
+    finished: finished,
+    hasAnyFailure: states.contains('failed'),
+  );
+}
+
+class _SyncView extends StatelessWidget {
+  final List<_SyncItem> items;
+  final int active;
+  final bool finished;
+  final bool hasAnyFailure;
+
+  const _SyncView({
+    required this.items,
+    required this.active,
+    required this.finished,
+    required this.hasAnyFailure,
+  });
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 20),
-      child: Row(
+    final accent = active >= 0
+        ? items[active].accent
+        : finished
+        ? (hasAnyFailure ? AppTheme.warning : AppTheme.success)
+        : AppTheme.primary;
+
+    final String title;
+    final String subtitle;
+    if (finished) {
+      title = hasAnyFailure ? 'Almost there' : 'All set';
+      subtitle = hasAnyFailure
+          ? "Some parts didn't sync. Opening what we have"
+          : 'Opening your library';
+    } else if (active >= 0) {
+      title = 'Updating your library';
+      subtitle = items.length > 1
+          ? 'Step ${active + 1} of ${items.length} · ${items[active].label}'
+          : 'Getting your channels';
+    } else {
+      title = 'Updating your library';
+      subtitle = 'Getting ready';
+    }
+
+    return Scaffold(
+      backgroundColor: AppTheme.background,
+      body: Stack(
         children: [
-          Row(
-            children: [
-              SizedBox(
-                width: 40,
-                height: 40,
-                child: Image.asset(
-                  'assets/images/logo.png',
-                  fit: BoxFit.contain,
-                ),
-              ),
-              const SizedBox(width: 8),
-              const Text(
-                'Lunar IPTV Player',
-                style: TextStyle(
-                  color: AppTheme.textPrimary,
-                  fontSize: 18,
-                  fontWeight: FontWeight.w800,
-                  letterSpacing: 1.5,
-                ),
-              ),
-            ],
-          ),
-          const Spacer(),
-          const Text(
-            'Fetching Data',
-            style: TextStyle(
-              color: AppTheme.textPrimary,
-              fontSize: 20,
-              fontWeight: FontWeight.w600,
+          // Soft glow in the colour of whatever is syncing. Static paint;
+          // it only animates when the step changes.
+          Positioned.fill(child: _Backdrop(color: accent)),
+          SafeArea(
+            child: LayoutBuilder(
+              builder: (context, box) {
+                final short = box.maxHeight < 420;
+                return Column(
+                  children: [
+                    const _TopBar(),
+                    _Headline(
+                      title: title,
+                      subtitle: subtitle,
+                      compact: short,
+                      steps: items.map((i) => i.status).toList(),
+                      accents: items.map((i) => i.accent).toList(),
+                    ),
+                    Expanded(
+                      child: _Cards(items: items, active: active),
+                    ),
+                  ],
+                );
+              },
             ),
-          ),
-          const Spacer(),
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.end,
-            children: [
-              Text(
-                DateFormat('hh:mm a').format(now),
-                style: const TextStyle(
-                  color: AppTheme.textPrimary,
-                  fontSize: 26,
-                  fontWeight: FontWeight.w700,
-                ),
-              ),
-              Text(
-                DateFormat('EEE\ndd MMM').format(now),
-                style: const TextStyle(
-                  color: AppTheme.textSecondary,
-                  fontSize: 12,
-                ),
-                textAlign: TextAlign.right,
-              ),
-            ],
           ),
         ],
       ),
@@ -396,240 +410,705 @@ class _TopBar extends StatelessWidget {
 }
 
 // ──────────────────────────────────────────────────────────────
-// Cards with improved animations
-class _Cards extends StatelessWidget {
-  final List<_SyncItem> items;
-  const _Cards({required this.items});
+// Backdrop
+class _Backdrop extends StatelessWidget {
+  final Color color;
+  const _Backdrop({required this.color});
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 24),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: items
-            .asMap()
-            .entries
-            .map(
-              (e) => Expanded(
-            child: Padding(
-              padding: EdgeInsets.only(
-                left: e.key == 0 ? 0 : 8,
-                right: e.key == items.length - 1 ? 0 : 8,
-              ),
-              child: _SyncCard(item: e.value),
+    return RepaintBoundary(
+      child: TweenAnimationBuilder<Color?>(
+        tween: ColorTween(end: color),
+        duration: const Duration(milliseconds: 700),
+        builder: (context, c, _) => DecoratedBox(
+          decoration: BoxDecoration(
+            gradient: RadialGradient(
+              center: const Alignment(0, 0.15),
+              radius: 1.1,
+              colors: [
+                (c ?? color).withValues(alpha: 0.13),
+                AppTheme.background.withValues(alpha: 0),
+              ],
             ),
           ),
-        )
-            .toList(),
+        ),
       ),
+    );
+  }
+}
+
+// ──────────────────────────────────────────────────────────────
+// Top bar: logo · name · clock (the clock ticks on its own, so the rest
+// of the screen never rebuilds once a second)
+class _TopBar extends StatelessWidget {
+  const _TopBar();
+
+  @override
+  Widget build(BuildContext context) {
+    final w = MediaQuery.sizeOf(context).width;
+    final pad = w < 600 ? 16.0 : 32.0;
+    return Padding(
+      padding: EdgeInsets.fromLTRB(pad, 14, pad, 0),
+      child: Row(
+        children: [
+          SizedBox(
+            width: 34,
+            height: 34,
+            child: Image.asset('assets/images/logo.png', fit: BoxFit.contain),
+          ),
+          const SizedBox(width: 10),
+          const Expanded(
+            child: Text(
+              'Lunar IPTV Player',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                color: AppTheme.textPrimary,
+                fontSize: 16,
+                fontWeight: FontWeight.w800,
+                letterSpacing: 1.2,
+              ),
+            ),
+          ),
+          const SizedBox(width: 12),
+          const _Clock(),
+        ],
+      ),
+    );
+  }
+}
+
+class _Clock extends StatefulWidget {
+  const _Clock();
+
+  @override
+  State<_Clock> createState() => _ClockState();
+}
+
+class _ClockState extends State<_Clock> {
+  DateTime _now = DateTime.now();
+  Timer? _timer;
+
+  @override
+  void initState() {
+    super.initState();
+    // Minute-precision clock: one rebuild a minute, aligned to the minute.
+    _timer = Timer(Duration(seconds: 60 - _now.second), () {
+      _tick();
+      _timer = Timer.periodic(const Duration(minutes: 1), (_) => _tick());
+    });
+  }
+
+  void _tick() {
+    if (mounted) setState(() => _now = DateTime.now());
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.end,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Text(
+          DateFormat('hh:mm a').format(_now),
+          style: const TextStyle(
+            color: AppTheme.textPrimary,
+            fontSize: 20,
+            fontWeight: FontWeight.w700,
+            fontFeatures: [FontFeature.tabularFigures()],
+          ),
+        ),
+        Text(
+          DateFormat('EEE, d MMM').format(_now),
+          style: const TextStyle(color: AppTheme.textSecondary, fontSize: 12),
+        ),
+      ],
+    );
+  }
+}
+
+// ──────────────────────────────────────────────────────────────
+// Headline + step bar
+class _Headline extends StatelessWidget {
+  final String title;
+  final String subtitle;
+  final bool compact;
+  final List<_FetchStatus> steps;
+  final List<Color> accents;
+
+  const _Headline({
+    required this.title,
+    required this.subtitle,
+    required this.compact,
+    required this.steps,
+    required this.accents,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final w = MediaQuery.sizeOf(context).width;
+    final titleSize = (w * 0.032).clamp(20.0, 34.0);
+    return Padding(
+      padding: EdgeInsets.fromLTRB(24, compact ? 4 : 12, 24, compact ? 6 : 18),
+      child: Column(
+        children: [
+          AnimatedSwitcher(
+            duration: const Duration(milliseconds: 350),
+            child: Text(
+              title,
+              key: ValueKey(title),
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                color: AppTheme.textPrimary,
+                fontSize: compact ? titleSize * 0.8 : titleSize,
+                fontWeight: FontWeight.w800,
+                letterSpacing: 0.2,
+              ),
+            ),
+          ),
+          SizedBox(height: compact ? 2 : 6),
+          AnimatedSwitcher(
+            duration: const Duration(milliseconds: 300),
+            child: Text(
+              subtitle,
+              key: ValueKey(subtitle),
+              textAlign: TextAlign.center,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                color: AppTheme.textSecondary,
+                fontSize: compact ? 12 : 14,
+              ),
+            ),
+          ),
+          SizedBox(height: compact ? 8 : 14),
+          // One segment per step, coloured as it completes.
+          SizedBox(
+            width: math.min(w * 0.5, 420),
+            height: 5,
+            child: Row(
+              children: [
+                for (var i = 0; i < steps.length; i++) ...[
+                  if (i > 0) const SizedBox(width: 6),
+                  Expanded(
+                    child: _Segment(status: steps[i], accent: accents[i]),
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _Segment extends StatelessWidget {
+  final _FetchStatus status;
+  final Color accent;
+  const _Segment({required this.status, required this.accent});
+
+  @override
+  Widget build(BuildContext context) {
+    final fill = switch (status) {
+      _FetchStatus.done => 1.0,
+      _FetchStatus.failed => 1.0,
+      _FetchStatus.loading => 0.5,
+      _FetchStatus.idle => 0.0,
+    };
+    final color = switch (status) {
+      _FetchStatus.done => AppTheme.success,
+      _FetchStatus.failed => AppTheme.error,
+      _ => accent,
+    };
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(3),
+      child: Stack(
+        fit: StackFit.expand,
+        children: [
+          ColoredBox(color: Colors.white.withValues(alpha: 0.08)),
+          if (status == _FetchStatus.loading)
+            _Sweep(color: color)
+          else
+            TweenAnimationBuilder<double>(
+              tween: Tween(end: fill),
+              duration: const Duration(milliseconds: 600),
+              curve: Curves.easeOutCubic,
+              builder: (context, v, _) => FractionallySizedBox(
+                alignment: Alignment.centerLeft,
+                widthFactor: v,
+                child: ColoredBox(color: color),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+/// A light band sliding along the active step (transform only, cheap).
+class _Sweep extends StatefulWidget {
+  final Color color;
+  const _Sweep({required this.color});
+
+  @override
+  State<_Sweep> createState() => _SweepState();
+}
+
+class _SweepState extends State<_Sweep> with SingleTickerProviderStateMixin {
+  late final AnimationController _ctrl = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 1400),
+  )..repeat();
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Stack(
+      fit: StackFit.expand,
+      children: [
+        ColoredBox(color: widget.color.withValues(alpha: 0.35)),
+        SlideTransition(
+          position: Tween(
+            begin: const Offset(-1, 0),
+            end: const Offset(1.7, 0),
+          ).animate(CurvedAnimation(parent: _ctrl, curve: Curves.easeInOut)),
+          child: FractionallySizedBox(
+            widthFactor: 0.6,
+            alignment: Alignment.centerLeft,
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  colors: [
+                    widget.color.withValues(alpha: 0),
+                    widget.color,
+                    widget.color.withValues(alpha: 0),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+// ──────────────────────────────────────────────────────────────
+// Cards: the one syncing zooms in, the others step back.
+class _Cards extends StatelessWidget {
+  final List<_SyncItem> items;
+  final int active;
+  const _Cards({required this.items, required this.active});
+
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (context, box) {
+        // Phones held upright: stack the cards.
+        final vertical = box.maxWidth < 560 && box.maxHeight > box.maxWidth;
+        final hPad = box.maxWidth < 600 ? 16.0 : 40.0;
+        final gap = box.maxWidth < 600 ? 12.0 : 24.0;
+        // Wide screens: keep cards a sensible shape instead of stretching.
+        final maxCardW = vertical
+            ? double.infinity
+            : math.min(360.0, (box.maxWidth - 2 * hPad) / items.length);
+        final cardH = vertical
+            ? double.infinity
+            : math.max(120.0, math.min(box.maxHeight - 32, maxCardW * 1.05));
+
+        Widget card(int i) =>
+            _SyncCard(
+                  item: items[i],
+                  isActive: i == active,
+                  anyActive: active >= 0,
+                  horizontal: vertical,
+                )
+                .animate(delay: (90 * i).ms)
+                .fadeIn(duration: 380.ms)
+                .moveY(begin: 18, end: 0, curve: Curves.easeOutCubic);
+
+        if (vertical) {
+          return Padding(
+            padding: EdgeInsets.fromLTRB(hPad, 4, hPad, 16),
+            child: Column(
+              children: [
+                for (var i = 0; i < items.length; i++) ...[
+                  if (i > 0) SizedBox(height: gap),
+                  Expanded(child: card(i)),
+                ],
+              ],
+            ),
+          );
+        }
+        return Padding(
+          padding: EdgeInsets.fromLTRB(hPad, 0, hPad, 20),
+          child: Center(
+            child: SizedBox(
+              height: cardH,
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  for (var i = 0; i < items.length; i++) ...[
+                    if (i > 0) SizedBox(width: gap),
+                    SizedBox(width: maxCardW - gap, child: card(i)),
+                  ],
+                ],
+              ),
+            ),
+          ),
+        );
+      },
     );
   }
 }
 
 class _SyncCard extends StatelessWidget {
   final _SyncItem item;
-  const _SyncCard({required this.item});
+  final bool isActive;
+  final bool anyActive;
+
+  /// Icon left, text right (stacked layout on upright phones).
+  final bool horizontal;
+
+  const _SyncCard({
+    required this.item,
+    required this.isActive,
+    required this.anyActive,
+    required this.horizontal,
+  });
 
   @override
   Widget build(BuildContext context) {
-    final isLoading = item.status == _FetchStatus.loading;
-    final isDone    = item.status == _FetchStatus.done;
-    final isFailed  = item.status == _FetchStatus.failed;
+    final low = Perf.enabled;
+    final status = item.status;
+    final isDone = status == _FetchStatus.done;
+    final isFailed = status == _FetchStatus.failed;
+    final idle = status == _FetchStatus.idle;
 
-    final borderColor = isDone
-        ? AppTheme.success.withValues(alpha: 0.4)
+    // Zoom: the syncing card comes forward, the rest step back.
+    final scale = isActive
+        ? (horizontal ? 1.03 : 1.06)
+        : anyActive
+        ? (horizontal ? 0.94 : 0.88)
+        : 1.0;
+    final opacity = isActive || isDone || isFailed ? 1.0 : 0.55;
+
+    final borderColor = isActive
+        ? item.accent.withValues(alpha: 0.85)
+        : isDone
+        ? AppTheme.success.withValues(alpha: 0.45)
         : isFailed
-        ? AppTheme.error.withValues(alpha: 0.4)
-        : isLoading
-        ? AppTheme.primary.withValues(alpha: 0.4)
+        ? AppTheme.error.withValues(alpha: 0.55)
         : AppTheme.divider;
 
-    return AnimatedContainer(
-      duration: const Duration(milliseconds: 400),
-      curve: Curves.easeOutCubic,
-      clipBehavior: Clip.hardEdge,
-      decoration: BoxDecoration(
-        color: isLoading
-            ? AppTheme.surface
-            : AppTheme.surface.withValues(alpha: 0.6),
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: borderColor, width: isLoading ? 2 : 1),
-        boxShadow: isLoading
-            ? [
-          BoxShadow(
-            color: AppTheme.primary.withValues(alpha: 0.15),
-            blurRadius: 30,
-            spreadRadius: 2,
-          ),
-        ]
-            : null,
-      ),
-      child: LayoutBuilder(
-        builder: (context, constraints) {
-          // Responsive icon size — shrinks on small screens / TVs at 720p
-          final availH   = constraints.maxHeight;
-          final iconSize = (availH * 0.22).clamp(28.0, 48.0);
-          final ringSize = (availH * 0.32).clamp(56.0, 100.0);
-          final spinSize = ringSize + 12;
+    final statusText = switch (status) {
+      _FetchStatus.loading => item.subtitle ?? 'Syncing…',
+      _FetchStatus.idle => 'Waiting',
+      _ => item.subtitle ?? (isDone ? 'Done' : "Couldn't sync this time"),
+    };
 
-          return Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              // ── Status badge row ──────────────────────────────────────
-              Padding(
-                padding: const EdgeInsets.fromLTRB(12, 12, 12, 0),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.end,
-                  children: [
-                    if (isDone)
-                      const Icon(Icons.check_circle,
-                          color: AppTheme.success, size: 22)
-                          .animate()
-                          .scale(duration: 400.ms),
-                    if (isFailed)
-                      const Icon(Icons.error,
-                          color: AppTheme.error, size: 22),
-                    if (!isDone && !isFailed) const SizedBox(height: 22),
-                  ],
+    return AnimatedScale(
+      scale: scale,
+      duration: const Duration(milliseconds: 450),
+      curve: Curves.easeOutBack,
+      child: AnimatedOpacity(
+        opacity: opacity,
+        duration: const Duration(milliseconds: 350),
+        child: Container(
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(22),
+            gradient: LinearGradient(
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+              colors: [
+                Color.alphaBlend(
+                  item.accent.withValues(alpha: isActive ? 0.16 : 0.05),
+                  AppTheme.surface,
                 ),
-              ),
-
-              const Spacer(),
-
-              // ── Icon + spinner ────────────────────────────────────────
-              SizedBox(
-                width: spinSize,
-                height: spinSize,
-                child: Stack(
-                  alignment: Alignment.center,
-                  children: [
-                    Container(
-                      width: ringSize,
-                      height: ringSize,
-                      decoration: BoxDecoration(
-                        shape: BoxShape.circle,
-                        color: AppTheme.surfaceVariant,
-                        border: Border.all(
-                          color: isDone
-                              ? AppTheme.success.withValues(alpha: 0.3)
-                              : AppTheme.divider,
-                          width: 2.5,
-                        ),
-                      ),
-                      child: Icon(
-                        item.icon,
-                        size: iconSize,
-                        color: isDone || isLoading
-                            ? AppTheme.textPrimary
-                            : AppTheme.textMuted,
-                      ),
+                AppTheme.surface.withValues(alpha: 0.9),
+              ],
+            ),
+            border: Border.all(color: borderColor, width: isActive ? 2 : 1),
+            // A still glow (no animated blur: that was what made the
+            // spinner stutter on TV boxes). Skipped in performance mode.
+            boxShadow: isActive && !low
+                ? [
+                    BoxShadow(
+                      color: item.accent.withValues(alpha: 0.22),
+                      blurRadius: 28,
+                      spreadRadius: 1,
                     ),
-                    if (isLoading)
-                      SizedBox(
-                        width: spinSize,
-                        height: spinSize,
-                        child: CircularProgressIndicator(
-                          strokeWidth: 3.5,
-                          strokeCap: StrokeCap.round,
-                          valueColor: const AlwaysStoppedAnimation(
-                              AppTheme.primary),
-                        ),
-                      )
-                          .animate(onPlay: (c) => c.repeat())
-                          .rotate(
-                        duration: 1200.ms,
-                        curve: Curves.linear,
-                      ),
-                  ],
-                ),
-              ),
+                  ]
+                : null,
+          ),
+          child: LayoutBuilder(
+            builder: (context, box) {
+              final base = horizontal
+                  ? math.min(box.maxHeight * 1.6, box.maxWidth * 0.8)
+                  : math.min(box.maxWidth, box.maxHeight);
+              final disc = horizontal
+                  ? (box.maxHeight * 0.5).clamp(44.0, 88.0)
+                  : (base * 0.36).clamp(44.0, 128.0);
+              final labelSize = (base * 0.075).clamp(14.0, 24.0);
+              final subSize = (base * 0.052).clamp(11.0, 16.0);
 
-              const Spacer(),
-
-              // ── Label ─────────────────────────────────────────────────
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 8),
-                child: Text(
-                  item.label,
-                  textAlign: TextAlign.center,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    color: isDone || isLoading
-                        ? AppTheme.textPrimary
-                        : AppTheme.textMuted,
-                    fontSize: 14,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-              ),
-
-              // ── Subtitle / count ──────────────────────────────────────
-              if (item.subtitle != null) ...[
-                const SizedBox(height: 4),
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 8),
-                  child: Text(
-                    item.subtitle!,
-                    textAlign: TextAlign.center,
-                    maxLines: 2,
+              final emblem = _Emblem(
+                item: item,
+                size: disc,
+                spinning: status == _FetchStatus.loading,
+              );
+              final texts = Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: horizontal
+                    ? CrossAxisAlignment.start
+                    : CrossAxisAlignment.center,
+                children: [
+                  Text(
+                    item.label,
+                    maxLines: 1,
                     overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                      color: AppTheme.textSecondary,
-                      fontSize: 11.5,
-                    ),
-                  ),
-                ),
-              ],
-
-              // ── Error hint ────────────────────────────────────────────
-              if (isFailed && item.errorMessage != null) ...[
-                const SizedBox(height: 4),
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 8),
-                  child: Text(
-                    'Tap to retry later',
-                    textAlign: TextAlign.center,
                     style: TextStyle(
-                      color: AppTheme.error.withValues(alpha: 0.8),
-                      fontSize: 10,
+                      color: idle
+                          ? AppTheme.textSecondary
+                          : AppTheme.textPrimary,
+                      fontSize: labelSize,
+                      fontWeight: FontWeight.w700,
                     ),
                   ),
-                ),
-              ],
+                  const SizedBox(height: 4),
+                  AnimatedSwitcher(
+                    duration: const Duration(milliseconds: 250),
+                    child: Text(
+                      statusText,
+                      key: ValueKey(statusText),
+                      textAlign: horizontal
+                          ? TextAlign.start
+                          : TextAlign.center,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        color: isFailed
+                            ? AppTheme.error.withValues(alpha: 0.9)
+                            : isActive
+                            ? item.accent
+                            : AppTheme.textSecondary,
+                        fontSize: subSize,
+                        fontWeight: isActive
+                            ? FontWeight.w600
+                            : FontWeight.w500,
+                        height: 1.3,
+                      ),
+                    ),
+                  ),
+                ],
+              );
 
-              const SizedBox(height: 14),
-            ],
-          );
-        },
-      ),
-    ).animate().fadeIn(duration: 400.ms).slideY(begin: 0.1);
-  }
-}
-
-// ──────────────────────────────────────────────────────────────
-class _BottomBar extends StatelessWidget {
-  final String message;
-  const _BottomBar({required this.message});
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(32, 0, 32, 32),
-      child: AnimatedSwitcher(
-        duration: const Duration(milliseconds: 400),
-        child: Text(
-          message,
-          key: ValueKey(message),
-          style: const TextStyle(
-            color: AppTheme.textSecondary,
-            fontSize: 14.5,
-            fontWeight: FontWeight.w500,
+              if (horizontal) {
+                return Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 18),
+                  child: Row(
+                    children: [
+                      emblem,
+                      const SizedBox(width: 18),
+                      Expanded(child: texts),
+                      _Badge(status: status),
+                    ],
+                  ),
+                );
+              }
+              return Stack(
+                children: [
+                  Positioned(top: 14, right: 14, child: _Badge(status: status)),
+                  Center(
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 12),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          emblem,
+                          SizedBox(height: base * 0.08),
+                          texts,
+                        ],
+                      ),
+                    ),
+                  ),
+                ],
+              );
+            },
           ),
-          textAlign: TextAlign.center,
         ),
       ),
     );
   }
+}
+
+class _Badge extends StatelessWidget {
+  final _FetchStatus status;
+  const _Badge({required this.status});
+
+  @override
+  Widget build(BuildContext context) {
+    final icon = switch (status) {
+      _FetchStatus.done => const Icon(
+        Icons.check_circle_rounded,
+        color: AppTheme.success,
+        size: 24,
+      ),
+      _FetchStatus.failed => const Icon(
+        Icons.error_rounded,
+        color: AppTheme.error,
+        size: 24,
+      ),
+      _ => null,
+    };
+    return AnimatedSwitcher(
+      duration: const Duration(milliseconds: 300),
+      transitionBuilder: (c, a) => ScaleTransition(scale: a, child: c),
+      child: icon ?? const SizedBox(width: 24, height: 24),
+    );
+  }
+}
+
+/// Icon disc with the loading ring around it.
+class _Emblem extends StatelessWidget {
+  final _SyncItem item;
+  final double size;
+  final bool spinning;
+  const _Emblem({
+    required this.item,
+    required this.size,
+    required this.spinning,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final done = item.status == _FetchStatus.done;
+    final idle = item.status == _FetchStatus.idle;
+    final ring = size * 1.22;
+    return SizedBox(
+      width: ring,
+      height: ring,
+      child: Stack(
+        alignment: Alignment.center,
+        children: [
+          Container(
+            width: size,
+            height: size,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: Color.alphaBlend(
+                item.accent.withValues(alpha: idle ? 0.04 : 0.14),
+                AppTheme.surfaceVariant,
+              ),
+              border: Border.all(
+                color: done
+                    ? AppTheme.success.withValues(alpha: 0.45)
+                    : item.accent.withValues(alpha: idle ? 0.15 : 0.35),
+                width: 2,
+              ),
+            ),
+            child: Icon(
+              item.icon,
+              size: size * 0.46,
+              color: idle ? AppTheme.textMuted : AppTheme.textPrimary,
+            ),
+          ),
+          if (spinning)
+            _Spinner(size: ring, color: item.accent, stroke: size * 0.06),
+        ],
+      ),
+    );
+  }
+}
+
+/// Loading ring that stays smooth on weak TV boxes: the comet-shaped arc
+/// is painted once and only *rotated* every frame (a transform, no
+/// repaint), unlike CircularProgressIndicator, which repaints its arc each
+/// frame (and was also wrapped in a second rotation here).
+class _Spinner extends StatefulWidget {
+  final double size;
+  final Color color;
+  final double stroke;
+  const _Spinner({
+    required this.size,
+    required this.color,
+    required this.stroke,
+  });
+
+  @override
+  State<_Spinner> createState() => _SpinnerState();
+}
+
+class _SpinnerState extends State<_Spinner>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _ctrl = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 1100),
+  )..repeat();
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return RotationTransition(
+      turns: _ctrl,
+      child: RepaintBoundary(
+        child: CustomPaint(
+          size: Size.square(widget.size),
+          painter: _CometArcPainter(
+            color: widget.color,
+            stroke: widget.stroke.clamp(3.0, 6.0),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _CometArcPainter extends CustomPainter {
+  final Color color;
+  final double stroke;
+  const _CometArcPainter({required this.color, required this.stroke});
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final rect = Offset.zero & size;
+    final arcRect = rect.deflate(stroke / 2);
+    const sweep = math.pi * 1.5;
+    final paint = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = stroke
+      ..strokeCap = StrokeCap.butt
+      ..shader = SweepGradient(
+        startAngle: 0,
+        endAngle: sweep,
+        colors: [color.withValues(alpha: 0), color],
+      ).createShader(rect);
+    canvas.drawArc(arcRect, 0, sweep, false, paint);
+    // Rounded, bright head of the comet.
+    final r = arcRect.width / 2;
+    final head = rect.center + Offset(math.cos(sweep), math.sin(sweep)) * r;
+    canvas.drawCircle(head, stroke / 2, Paint()..color = color);
+  }
+
+  @override
+  bool shouldRepaint(_CometArcPainter old) =>
+      old.color != color || old.stroke != stroke;
 }

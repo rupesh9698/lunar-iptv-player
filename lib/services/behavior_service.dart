@@ -1,5 +1,7 @@
+import 'dart:async';
 import 'dart:convert';
 
+import 'package:flutter/foundation.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 
 /// All AI behavior data, isolated per playlist.
@@ -13,6 +15,22 @@ class BehaviorService {
   Box? _box;
   String _playlistId = 'default';
   final Map<String, DateTime> _activeTimers = {};
+  final Map<String, String> _activeTypes = {};
+  Timer? _flushTimer;
+
+  /// Bumped on every write (watch time, positions, views...). The stats
+  /// screen listens to this so it updates live, no restart needed.
+  final ValueNotifier<int> changes = ValueNotifier(0);
+
+  /// Bumped only when the user's *taste* changes (a viewing session ended,
+  /// something was opened, history cleared). Recommendations follow this
+  /// one, so they aren't recomputed every few seconds during playback.
+  final ValueNotifier<int> tasteChanges = ValueNotifier(0);
+
+  void _changed({bool taste = false}) {
+    changes.value++;
+    if (taste) tasteChanges.value++;
+  }
 
   Future<void> init() async {
     _box = await Hive.openBox(_boxName);
@@ -38,6 +56,7 @@ class BehaviorService {
     if (name.isNotEmpty) {
       await _box!.put(_k('content_name_$id'), name);
     }
+    _changed(taste: true);
   }
 
   int getWatchCount(String id) {
@@ -95,6 +114,7 @@ class BehaviorService {
 
     await _box!.put(_k('watch_pos_$id'), jsonEncode(data));
     await _box!.put(_k('content_name_$id'), title);
+    _changed();
     await _prunePositions();
   }
 
@@ -159,6 +179,7 @@ class BehaviorService {
     for (final key in toDelete) {
       await _box!.delete(key);
     }
+    _changed(taste: true);
   }
 
   // ── Category Taps ─────────────────────────────────────────────────────────
@@ -187,6 +208,7 @@ class BehaviorService {
     if (name.isNotEmpty) {
       await _box!.put(_k('content_name_$channelId'), name);
     }
+    _changed();
   }
 
   List<String> getHourlyTopChannels({int topN = 10}) {
@@ -218,6 +240,22 @@ class BehaviorService {
     if (_box == null) return;
     final key = _k('genre_freq_$genre');
     await _box!.put(key, (_box!.get(key, defaultValue: 0) as int) + 1);
+    _changed(taste: true);
+  }
+
+  /// Genres with how often each was opened, most first.
+  List<MapEntry<String, int>> getGenreCounts({int topN = 6}) {
+    if (_box == null) return [];
+    final prefix = _k('genre_freq_');
+    final counts = <String, int>{};
+    for (final key in _box!.keys) {
+      if (!key.toString().startsWith(prefix)) continue;
+      counts[key.toString().substring(prefix.length)] =
+          _box!.get(key, defaultValue: 0) as int;
+    }
+    return (counts.entries.toList()..sort((a, b) => b.value.compareTo(a.value)))
+        .take(topN)
+        .toList();
   }
 
   List<String> getTopGenres({int topN = 5}) {
@@ -237,32 +275,113 @@ class BehaviorService {
 
   // ── Watch Time Tracking ───────────────────────────────────────────────────
 
-  void startWatchTimer(String id, {String name = ''}) {
+  /// [type]: 'live', 'movie' or 'series' (for the "what you watch" split).
+  void startWatchTimer(String id, {String name = '', String? type}) {
+    // A timer already running for this id keeps its time.
+    if (_activeTimers.containsKey(id)) _commit(id, flushOnly: true);
     _activeTimers[id] = DateTime.now();
-    if (name.isNotEmpty && _box != null) {
-      _box!.put(_k('content_name_$id'), name);
+    if (type != null) _activeTypes[id] = type;
+    if (_box != null) {
+      if (name.isNotEmpty) _box!.put(_k('content_name_$id'), name);
+      if (type != null) _box!.put(_k('content_type_$id'), type);
     }
+    // Save running time every minute: the stats stay current while
+    // something plays, and a crash / force-close loses at most a minute.
+    _flushTimer ??= Timer.periodic(const Duration(minutes: 1), (_) {
+      if (_activeTimers.isEmpty) {
+        _flushTimer?.cancel();
+        _flushTimer = null;
+        return;
+      }
+      for (final id in _activeTimers.keys.toList()) {
+        _commit(id, flushOnly: true);
+      }
+      _changed();
+    });
   }
 
   Future<void> stopWatchTimer(String id) async {
-    if (_box == null) return;
-    final start = _activeTimers.remove(id);
-    if (start == null) return;
-    final seconds = DateTime.now().difference(start).inSeconds;
-    if (seconds < 5) return;
+    if (_box == null || !_activeTimers.containsKey(id)) return;
+    _commit(id);
+    _activeTimers.remove(id);
+    _activeTypes.remove(id);
+    _changed(taste: true);
+  }
 
-    final dateKey = _todayKey();
-    final totalKey = _k('total_watch_$dateKey');
-    final contentKey = _k('content_watch_$id');
-    await _box!.put(
-      totalKey,
-      (_box!.get(totalKey, defaultValue: 0) as int) + seconds,
-    );
-    await _box!.put(
-      contentKey,
-      (_box!.get(contentKey, defaultValue: 0) as int) + seconds,
+  /// Adds the time since the timer (re)started to the totals.
+  void _commit(String id, {bool flushOnly = false}) {
+    final start = _activeTimers[id];
+    if (_box == null || start == null) return;
+    final now = DateTime.now();
+    final seconds = now.difference(start).inSeconds;
+    if (flushOnly) _activeTimers[id] = now;
+    if (seconds < 5) return;
+    void add(String key) =>
+        _box!.put(key, (_box!.get(key, defaultValue: 0) as int) + seconds);
+    add(_k('total_watch_${_todayKey()}'));
+    add(_k('content_watch_$id'));
+    add(_k('hour_watch_${now.hour}'));
+    final type =
+        _activeTypes[id] ?? _box!.get(_k('content_type_$id')) as String?;
+    if (type != null) add(_k('type_watch_$type'));
+  }
+
+  /// Seconds of the sessions still running (not saved yet).
+  int getActiveSeconds() {
+    final now = DateTime.now();
+    return _activeTimers.values.fold(
+      0,
+      (sum, start) => sum + now.difference(start).inSeconds,
     );
   }
+
+  bool get isWatching => _activeTimers.isNotEmpty;
+
+  /// Watch seconds per type ('live', 'movie', 'series').
+  Map<String, int> getWatchByType() {
+    if (_box == null) return {};
+    final prefix = _k('type_watch_');
+    final out = <String, int>{};
+    for (final key in _box!.keys) {
+      final k = key.toString();
+      if (k.startsWith(prefix)) {
+        out[k.substring(prefix.length)] = _box!.get(key) as int? ?? 0;
+      }
+    }
+    return out;
+  }
+
+  /// Watch seconds per hour of the day (index 0 to 23).
+  List<int> getWatchByHour() {
+    if (_box == null) return List.filled(24, 0);
+    return [
+      for (var h = 0; h < 24; h++)
+        _box!.get(_k('hour_watch_$h'), defaultValue: 0) as int,
+    ];
+  }
+
+  /// Days in a row (ending today, or yesterday if nothing yet today) with
+  /// some watch time.
+  int getStreakDays() {
+    if (_box == null) return 0;
+    int secsOn(DateTime d) =>
+        _box!.get(_k('total_watch_${_dateKey(d)}'), defaultValue: 0) as int;
+    var day = DateTime.now();
+    var streak = 0;
+    if (secsOn(day) > 0 || isWatching) {
+      streak = 1;
+    }
+    day = day.subtract(const Duration(days: 1));
+    while (secsOn(day) > 0 && streak < 3650) {
+      streak++;
+      day = day.subtract(const Duration(days: 1));
+    }
+    return streak;
+  }
+
+  /// Type recorded for a content id ('live' / 'movie' / 'series'), if any.
+  String? getContentType(String id) =>
+      _box?.get(_k('content_type_$id')) as String?;
 
   List<Map<String, dynamic>> getWatchTimeByDay({int days = 7}) {
     if (_box == null) return [];
@@ -272,7 +391,8 @@ class BehaviorService {
       final date = now.subtract(Duration(days: i));
       final dateKey = _dateKey(date);
       final seconds =
-          _box!.get(_k('total_watch_$dateKey'), defaultValue: 0) as int;
+          (_box!.get(_k('total_watch_$dateKey'), defaultValue: 0) as int) +
+          (i == 0 ? getActiveSeconds() : 0);
       result.add({
         'date': dateKey,
         'label': _shortLabel(date),
@@ -374,6 +494,7 @@ class BehaviorService {
             'id': e.key,
             'name': name.isNotEmpty ? name : e.key, // ← name for display
             'seconds': e.value,
+            'type': _box!.get(_k('content_type_${e.key}')) as String?,
           };
         })
         .toList();
@@ -391,6 +512,7 @@ class BehaviorService {
     for (final key in toDelete) {
       await _box!.delete(key);
     }
+    _changed(taste: true);
   }
 
   /// Clears ONLY Live TV behavior (hourly prefs, live watch-time).
@@ -409,6 +531,7 @@ class BehaviorService {
     for (final key in toDelete) {
       await _box!.delete(key);
     }
+    _changed(taste: true);
   }
 
   /// Clears Movies + Series behavior (watch time, positions, genres, search ranks).
@@ -423,6 +546,9 @@ class BehaviorService {
       _k('total_watch_'),
       _k('genre_freq_'),
       _k('search_rank_'),
+      _k('type_watch_'),
+      _k('hour_watch_'),
+      _k('content_type_'),
     ];
     final toDelete = _box!.keys.where((k) {
       final s = k.toString();
@@ -431,10 +557,14 @@ class BehaviorService {
     for (final key in toDelete) {
       await _box!.delete(key);
     }
+    _changed(taste: true);
   }
 
   /// Clears all data across ALL playlists.
-  Future<void> clearAll() async => await _box?.clear();
+  Future<void> clearAll() async {
+    await _box?.clear();
+    _changed(taste: true);
+  }
 
   /// Clears only position/continue-watching data for current playlist.
   Future<void> clearContinueWatching() async {
@@ -446,6 +576,7 @@ class BehaviorService {
     for (final key in toDelete) {
       await _box!.delete(key);
     }
+    _changed(taste: true);
   }
 
   /// Clears watch-time data for current playlist (for stats reset).
@@ -455,6 +586,9 @@ class BehaviorService {
       _k('total_watch_'),
       _k('content_watch_'),
       _k('content_name_'),
+      _k('type_watch_'),
+      _k('hour_watch_'),
+      _k('content_type_'),
     ];
     final toDelete = _box!.keys.where((k) {
       final s = k.toString();
@@ -463,6 +597,7 @@ class BehaviorService {
     for (final key in toDelete) {
       await _box!.delete(key);
     }
+    _changed(taste: true);
   }
 
   // ── Utilities ─────────────────────────────────────────────────────────────

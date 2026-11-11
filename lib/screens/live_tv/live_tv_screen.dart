@@ -13,6 +13,7 @@ import '../../models/xtream_models.dart';
 import '../../providers/app_providers.dart';
 import '../../providers/live_player_provider.dart';
 import '../../providers/live_tv_provider.dart';
+import '../../services/behavior_service.dart';
 import '../../services/cache_service.dart';
 import '../../services/m3u_service.dart';
 import '../../services/storage_service.dart';
@@ -761,6 +762,10 @@ class _LiveTVScreenState extends ConsumerState<LiveTVScreen> {
   /// Returns a Future so back-navigation can await it before routing away.
   Future<void> _stopPlayer() async {
     try {
+      final ch = ref.read(selectedChannelProvider);
+      if (ch != null) BehaviorService.instance.stopWatchTimer(ch.streamId);
+    } catch (_) {}
+    try {
       await ref.read(livePlayerProvider.notifier).stop();
     } catch (_) {}
   }
@@ -781,6 +786,13 @@ class _LiveTVScreenState extends ConsumerState<LiveTVScreen> {
 
       // Start streaming
       ref.read(livePlayerProvider.notifier).openChannel(url);
+      // Watch time for My Stats (one channel at a time).
+      if (prev != null) BehaviorService.instance.stopWatchTimer(prev.streamId);
+      BehaviorService.instance.startWatchTimer(
+        next.streamId,
+        name: next.name,
+        type: 'live',
+      );
       ref.read(recentlyViewedLiveProvider.notifier).add(next.streamId);
 
       // Centrally save last watched (notifier checks rememberPosition internally)

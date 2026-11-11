@@ -293,7 +293,11 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
     await PlatformUtils.enableWakelock();
 
     // ── Behavior tracking ─────────────────────────────────────────────────────
-    BehaviorService.instance.startWatchTimer(widget.id, name: widget.title);
+    BehaviorService.instance.startWatchTimer(
+      widget.id,
+      name: widget.title,
+      type: widget.type,
+    );
 
     // ── Periodic position save (VOD only, every 10s) ─────────────────────────
     if (!_isLive) {
@@ -1184,7 +1188,7 @@ class _ReconnectOverlay extends StatelessWidget {
           ),
           const SizedBox(height: 6),
           const Text(
-            'Stream interrupted — retrying...',
+            'The stream dropped. Trying again…',
             style: TextStyle(color: Colors.white60, fontSize: 12),
           ),
           const SizedBox(height: 16),
@@ -1781,7 +1785,7 @@ class _ErrorView extends StatelessWidget {
             ),
             const SizedBox(height: 16),
             const Text(
-              'HTTP Stream — Not Supported in Browser',
+              "This stream can't play in a browser",
               style: TextStyle(
                 color: Colors.white,
                 fontSize: 18,

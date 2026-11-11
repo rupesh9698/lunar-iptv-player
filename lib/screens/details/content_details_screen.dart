@@ -7,6 +7,7 @@ import 'package:url_launcher/url_launcher.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/utils/focus_utils.dart';
 import '../../core/utils/launcher_utils.dart';
+import '../../core/utils/recommend.dart';
 import '../../core/utils/responsive.dart';
 import '../../models/xtream_models.dart';
 import '../../providers/app_providers.dart';
@@ -268,26 +269,45 @@ mixin _DetailsNav<T extends ConsumerStatefulWidget> on ConsumerState<T> {
     return out;
   }
 
-  // "More Like This" is computed once per (library, category).
+  // "More Like This": same franchise (shared title words), shared genres,
+  // same category, a close year and a good rating (see moreLikeThis).
+  // Computed once per (library, seed, genres).
   Object? _similarFor;
+  String? _similarKey;
   List<Object> _similar = const [];
 
-  List<X> similarFrom<X extends Object>(
-    List<X>? all,
-    String? categoryId,
-    bool Function(X) sameCategoryOther,
-  ) {
-    if (all == null || categoryId == null) return const [];
-    if (!identical(_similarFor, all)) {
-      _similarFor = all;
-      final out = <X>[];
-      for (final x in all) {
-        if (sameCategoryOther(x)) {
-          out.add(x);
-          if (out.length >= 24) break;
+  List<X> similarFrom<X extends Object>({
+    required List<X>? all,
+    required List<RecItem>? items,
+    required String Function(X) idOf,
+    required String seedId,
+    required RecItem? Function() fallbackSeed,
+    String? genres,
+  }) {
+    if (all == null || items == null) return const [];
+    final key = '$seedId|${genres ?? ''}';
+    if (!identical(_similarFor, items) || _similarKey != key) {
+      _similarFor = items;
+      _similarKey = key;
+      RecItem? seed;
+      for (final x in items) {
+        if (x.id == seedId) {
+          seed = x;
+          break;
         }
       }
-      _similar = out;
+      seed ??= fallbackSeed();
+      if (seed == null) return const [];
+      final ids = moreLikeThis(
+        seed,
+        items,
+        seedGenres: splitGenres(genres),
+      ).map((e) => e.id).toList();
+      final byId = {for (final x in all) idOf(x): x};
+      _similar = [
+        for (final id in ids)
+          if (byId[id] != null) byId[id]!,
+      ];
     }
     return _similar.cast<X>();
   }
@@ -355,9 +375,16 @@ class _MovieDetailsScreenState extends ConsumerState<MovieDetailsScreen>
     final trailer = info?.youtubeTrailer;
 
     final similar = similarFrom<VodStream>(
-      ref.watch(vodAllStreamsProvider).valueOrNull,
-      movie.categoryId,
-      (m) => m.categoryId == movie.categoryId && m.streamId != movie.streamId,
+      all: ref.watch(vodAllStreamsProvider).valueOrNull,
+      items: ref.watch(vodRecItemsProvider),
+      idOf: (m) => m.streamId,
+      seedId: movie.streamId,
+      fallbackSeed: () => RecItem(
+        id: movie.streamId,
+        name: movie.name,
+        categoryId: movie.categoryId,
+      ),
+      genres: info?.genre,
     );
     similarCount = similar.length;
 
@@ -593,9 +620,17 @@ class _SeriesDetailsScreenState extends ConsumerState<SeriesDetailsScreen>
         : series.youtubeTrailer;
 
     final similar = similarFrom<Series>(
-      ref.watch(seriesAllListProvider).valueOrNull,
-      series.categoryId,
-      (x) => x.categoryId == series.categoryId && x.seriesId != series.seriesId,
+      all: ref.watch(seriesAllListProvider).valueOrNull,
+      items: ref.watch(seriesRecItemsProvider),
+      idOf: (x) => x.seriesId,
+      seedId: series.seriesId,
+      fallbackSeed: () => RecItem(
+        id: series.seriesId,
+        name: series.name,
+        categoryId: series.categoryId,
+        genres: splitGenres(series.genre),
+      ),
+      genres: s?.genre ?? series.genre,
     );
     similarCount = similar.length;
 

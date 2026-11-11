@@ -401,7 +401,7 @@ class _ContinueCardState extends State<_ContinueCard> {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text(
-            'Cannot resume — no URL stored. Open from Movies/Series instead.',
+            "Can't resume this one. Open it from Movies or Series instead.",
           ),
           behavior: SnackBarBehavior.floating,
         ),

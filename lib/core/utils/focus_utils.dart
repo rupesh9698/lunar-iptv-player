@@ -3,6 +3,8 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import 'platform_utils.dart';
+
 // ─────────────────────────────────────────────────────────────────────────────
 // TV KEY TRACKER
 // Global, passive key listener (never consumes events). Lets focus widgets
@@ -957,4 +959,99 @@ class TvKeyRoot extends StatelessWidget {
     onKeyEvent: onKeyEvent,
     child: child,
   );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// TV TYPE ON OK
+// On Android TV a TextField opens the on-screen keyboard as soon as the
+// remote lands on it, so just moving through a form popped the keyboard up
+// over everything. This keeps the field read-only (no keyboard) until the
+// user presses OK on it — or taps it — and goes back to read-only when focus
+// leaves. Phones / desktop are unchanged.
+// ─────────────────────────────────────────────────────────────────────────────
+class TvTypeOnOk extends StatefulWidget {
+  final FocusNode focusNode;
+
+  /// Builds the field; pass `readOnly` through and call `onTap` from the
+  /// field's own onTap.
+  final Widget Function(BuildContext context, bool readOnly, VoidCallback onTap)
+  builder;
+
+  /// Defaults to [PlatformUtils.isTV].
+  final bool? enabled;
+
+  const TvTypeOnOk({
+    super.key,
+    required this.focusNode,
+    required this.builder,
+    this.enabled,
+  });
+
+  @override
+  State<TvTypeOnOk> createState() => _TvTypeOnOkState();
+}
+
+class _TvTypeOnOkState extends State<TvTypeOnOk> {
+  bool _typing = false;
+
+  bool get _on => widget.enabled ?? PlatformUtils.isTV;
+
+  @override
+  void initState() {
+    super.initState();
+    widget.focusNode.addListener(_onFocus);
+  }
+
+  @override
+  void didUpdateWidget(TvTypeOnOk old) {
+    super.didUpdateWidget(old);
+    if (old.focusNode != widget.focusNode) {
+      old.focusNode.removeListener(_onFocus);
+      widget.focusNode.addListener(_onFocus);
+    }
+  }
+
+  @override
+  void dispose() {
+    widget.focusNode.removeListener(_onFocus);
+    super.dispose();
+  }
+
+  void _onFocus() {
+    if (!widget.focusNode.hasFocus && _typing && mounted) {
+      setState(() => _typing = false);
+    }
+  }
+
+  void _startTyping() {
+    if (_typing) return;
+    setState(() => _typing = true);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      if (!widget.focusNode.hasFocus) widget.focusNode.requestFocus();
+      SystemChannels.textInput.invokeMethod<void>('TextInput.show');
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final readOnly = _on && !_typing;
+    return Focus(
+      canRequestFocus: false,
+      skipTraversal: true,
+      onKeyEvent: (node, event) {
+        if (!readOnly || event is! KeyDownEvent) return KeyEventResult.ignored;
+        final k = event.logicalKey;
+        if (k == LogicalKeyboardKey.select ||
+            k == LogicalKeyboardKey.enter ||
+            k == LogicalKeyboardKey.numpadEnter ||
+            k == LogicalKeyboardKey.gameButtonA) {
+          _startTyping();
+          return KeyEventResult.handled;
+        }
+        return KeyEventResult.ignored;
+      },
+      child: widget.builder(context, readOnly, _startTyping),
+    );
+  }
 }

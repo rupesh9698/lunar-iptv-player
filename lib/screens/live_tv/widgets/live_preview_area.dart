@@ -1407,7 +1407,7 @@ class _ReconnectOverlay extends StatelessWidget {
         ),
         const SizedBox(height: 6),
         const Text(
-          'Stream interrupted — retrying...',
+          'The stream dropped. Trying again…',
           style: TextStyle(color: Colors.white60, fontSize: 12),
         ),
         const SizedBox(height: 16),

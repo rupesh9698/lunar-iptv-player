@@ -502,50 +502,60 @@ class _AddPlaylistScreenState extends ConsumerState<AddPlaylistScreen> {
 
         const SizedBox(height: 18),
 
-        TextFormField(
-              controller: _m3uUrlCtrl,
+        TvTypeOnOk(
               focusNode: _m3uUrlFocus,
-              keyboardType: TextInputType.url,
-              textInputAction: TextInputAction.done,
-              onFieldSubmitted: (_) => _addBtnFocus.requestFocus(),
-              style: const TextStyle(color: AppTheme.textPrimary, fontSize: 16),
-              validator: (v) {
-                if (v == null || v.trim().isEmpty) return 'M3U URL is required';
-                final uri = Uri.tryParse(v.trim());
-                if (uri == null || !uri.hasAuthority) {
-                  return 'Enter a valid URL';
-                }
-                return null;
-              },
-              decoration: InputDecoration(
-                labelText: 'M3U Playlist URL',
-                hintText: 'http://server.com/playlist.m3u',
-                prefixIcon: const Icon(
-                  Icons.link,
-                  color: AppTheme.textMuted,
-                  size: 22,
+              builder: (context, readOnly, onTap) => TextFormField(
+                readOnly: readOnly,
+                onTap: onTap,
+                controller: _m3uUrlCtrl,
+                focusNode: _m3uUrlFocus,
+                keyboardType: TextInputType.url,
+                textInputAction: TextInputAction.done,
+                onFieldSubmitted: (_) => _addBtnFocus.requestFocus(),
+                style: const TextStyle(
+                  color: AppTheme.textPrimary,
+                  fontSize: 16,
                 ),
-                labelStyle: const TextStyle(
-                  color: AppTheme.primary,
-                  fontSize: 14,
-                ),
-                contentPadding: const EdgeInsets.symmetric(
-                  vertical: 18,
-                  horizontal: 16,
-                ),
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(14),
-                  borderSide: const BorderSide(color: AppTheme.divider),
-                ),
-                enabledBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(14),
-                  borderSide: const BorderSide(color: AppTheme.divider),
-                ),
-                focusedBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(14),
-                  borderSide: const BorderSide(
+                validator: (v) {
+                  if (v == null || v.trim().isEmpty) {
+                    return 'M3U URL is required';
+                  }
+                  final uri = Uri.tryParse(v.trim());
+                  if (uri == null || !uri.hasAuthority) {
+                    return 'Enter a valid URL';
+                  }
+                  return null;
+                },
+                decoration: InputDecoration(
+                  labelText: 'M3U Playlist URL',
+                  hintText: 'http://server.com/playlist.m3u',
+                  prefixIcon: const Icon(
+                    Icons.link,
+                    color: AppTheme.textMuted,
+                    size: 22,
+                  ),
+                  labelStyle: const TextStyle(
                     color: AppTheme.primary,
-                    width: 2,
+                    fontSize: 14,
+                  ),
+                  contentPadding: const EdgeInsets.symmetric(
+                    vertical: 18,
+                    horizontal: 16,
+                  ),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(14),
+                    borderSide: const BorderSide(color: AppTheme.divider),
+                  ),
+                  enabledBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(14),
+                    borderSide: const BorderSide(color: AppTheme.divider),
+                  ),
+                  focusedBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(14),
+                    borderSide: const BorderSide(
+                      color: AppTheme.primary,
+                      width: 2,
+                    ),
                   ),
                 ),
               ),
@@ -638,74 +648,24 @@ class _AddPlaylistScreenState extends ConsumerState<AddPlaylistScreen> {
     String? Function(String?)? validator,
     TextInputType? keyboardType,
   }) {
-    return TextFormField(
-      controller: controller,
+    return TvTypeOnOk(
       focusNode: focusNode,
-      validator: validator,
-      keyboardType: keyboardType,
-      textInputAction: nextFocus != null
-          ? TextInputAction.next
-          : TextInputAction.done,
-      onFieldSubmitted: (_) => nextFocus?.requestFocus(),
-      style: const TextStyle(color: AppTheme.textPrimary, fontSize: 16),
-      decoration: InputDecoration(
-        labelText: label,
-        hintText: hint,
-        prefixIcon: Icon(icon, color: AppTheme.textMuted, size: 22),
-        labelStyle: const TextStyle(color: AppTheme.primary, fontSize: 14),
-        contentPadding: const EdgeInsets.symmetric(
-          vertical: 18,
-          horizontal: 16,
-        ),
-        border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(14),
-          borderSide: const BorderSide(color: AppTheme.divider),
-        ),
-        enabledBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(14),
-          borderSide: const BorderSide(color: AppTheme.divider),
-        ),
-        focusedBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(14),
-          borderSide: const BorderSide(color: AppTheme.primary, width: 2),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildPasswordField() {
-    // TvTextFieldNav: D-pad Right at the end of the text reaches the
-    // show/hide-password toggle.
-    return TvTextFieldNav(
-      controller: _passwordCtrl,
-      onUp: () => _usernameFocus.requestFocus(),
-      onDown: () => _addBtnFocus.requestFocus(),
-      child: TextFormField(
-        controller: _passwordCtrl,
-        focusNode: _passwordFocus,
-        obscureText: !_showPassword,
-        textInputAction: TextInputAction.done,
-        onFieldSubmitted: (_) => _addBtnFocus.requestFocus(),
+      builder: (context, readOnly, onTap) => TextFormField(
+        readOnly: readOnly,
+        onTap: onTap,
+        controller: controller,
+        focusNode: focusNode,
+        validator: validator,
+        keyboardType: keyboardType,
+        textInputAction: nextFocus != null
+            ? TextInputAction.next
+            : TextInputAction.done,
+        onFieldSubmitted: (_) => nextFocus?.requestFocus(),
         style: const TextStyle(color: AppTheme.textPrimary, fontSize: 16),
-        validator: (v) =>
-            (v == null || v.trim().isEmpty) ? 'Password is required' : null,
         decoration: InputDecoration(
-          labelText: 'Password',
-          hintText: 'Enter password',
-          prefixIcon: const Icon(
-            Icons.lock_outline,
-            color: AppTheme.textMuted,
-            size: 22,
-          ),
-          suffixIcon: IconButton(
-            focusNode: _passwordVisibilityFocus,
-            icon: Icon(
-              _showPassword ? Icons.visibility_off : Icons.visibility,
-              color: AppTheme.textMuted,
-              size: 22,
-            ),
-            onPressed: () => setState(() => _showPassword = !_showPassword),
-          ),
+          labelText: label,
+          hintText: hint,
+          prefixIcon: Icon(icon, color: AppTheme.textMuted, size: 22),
           labelStyle: const TextStyle(color: AppTheme.primary, fontSize: 14),
           contentPadding: const EdgeInsets.symmetric(
             vertical: 18,
@@ -722,6 +682,66 @@ class _AddPlaylistScreenState extends ConsumerState<AddPlaylistScreen> {
           focusedBorder: OutlineInputBorder(
             borderRadius: BorderRadius.circular(14),
             borderSide: const BorderSide(color: AppTheme.primary, width: 2),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildPasswordField() {
+    // TvTextFieldNav: D-pad Right at the end of the text reaches the
+    // show/hide-password toggle.
+    return TvTextFieldNav(
+      controller: _passwordCtrl,
+      onUp: () => _usernameFocus.requestFocus(),
+      onDown: () => _addBtnFocus.requestFocus(),
+      child: TvTypeOnOk(
+        focusNode: _passwordFocus,
+        builder: (context, readOnly, onTap) => TextFormField(
+          readOnly: readOnly,
+          onTap: onTap,
+          controller: _passwordCtrl,
+          focusNode: _passwordFocus,
+          obscureText: !_showPassword,
+          textInputAction: TextInputAction.done,
+          onFieldSubmitted: (_) => _addBtnFocus.requestFocus(),
+          style: const TextStyle(color: AppTheme.textPrimary, fontSize: 16),
+          validator: (v) =>
+              (v == null || v.trim().isEmpty) ? 'Password is required' : null,
+          decoration: InputDecoration(
+            labelText: 'Password',
+            hintText: 'Enter password',
+            prefixIcon: const Icon(
+              Icons.lock_outline,
+              color: AppTheme.textMuted,
+              size: 22,
+            ),
+            suffixIcon: IconButton(
+              focusNode: _passwordVisibilityFocus,
+              icon: Icon(
+                _showPassword ? Icons.visibility_off : Icons.visibility,
+                color: AppTheme.textMuted,
+                size: 22,
+              ),
+              onPressed: () => setState(() => _showPassword = !_showPassword),
+            ),
+            labelStyle: const TextStyle(color: AppTheme.primary, fontSize: 14),
+            contentPadding: const EdgeInsets.symmetric(
+              vertical: 18,
+              horizontal: 16,
+            ),
+            border: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(14),
+              borderSide: const BorderSide(color: AppTheme.divider),
+            ),
+            enabledBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(14),
+              borderSide: const BorderSide(color: AppTheme.divider),
+            ),
+            focusedBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(14),
+              borderSide: const BorderSide(color: AppTheme.primary, width: 2),
+            ),
           ),
         ),
       ),

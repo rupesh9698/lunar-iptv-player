@@ -73,15 +73,20 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final isWide = MediaQuery.of(context).size.width >= 900;
+    // Same layout everywhere (sidebar + one section at a time). Narrow
+    // screens used to get one long scrolling page with no sidebar; there
+    // the sidebar now shrinks to an icon rail instead.
+    final w = MediaQuery.sizeOf(context).width;
+    final rail = w < 720;
+    final sideW = rail ? 72.0 : (w < 1100 ? 184.0 : 210.0);
 
     return Scaffold(
       backgroundColor: AppTheme.background,
-      body: isWide ? _buildDesktop() : _buildMobile(),
+      body: SafeArea(bottom: false, child: _buildLayout(rail, sideW)),
     );
   }
 
-  Widget _buildDesktop() {
+  Widget _buildLayout(bool rail, double sideW) {
     return Column(
       children: [
         // Top bar
@@ -92,6 +97,8 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
               // Sidebar
               _SettingsSidebar(
                 selected: _section,
+                width: sideW,
+                rail: rail,
                 onSelect: (s) => setState(() => _section = s),
               ),
               const VerticalDivider(
@@ -103,30 +110,6 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
               Expanded(child: _buildSectionContent(_section)),
             ],
           ),
-        ),
-      ],
-    );
-  }
-
-  Widget _buildMobile() {
-    return CustomScrollView(
-      slivers: [
-        // if (widget.isStandalone)
-        //   IconButton(
-        //     icon: const Icon(Icons.arrow_back, color: AppTheme.textPrimary),
-        //     onPressed: () => context.go('/home'),
-        //   )
-        // else
-        //   const SizedBox(width: 16),
-        SliverAppBar(
-          title: const Text('Settings'),
-          floating: true,
-          backgroundColor: AppTheme.sidebarBg,
-        ),
-        SliverList(
-          delegate: SliverChildListDelegate([
-            for (final s in _SettSection.values) _buildSectionContent(s),
-          ]),
         ),
       ],
     );
@@ -192,10 +175,12 @@ class _SettingsTopBar extends StatelessWidget {
               size: 16,
             ),
           ),
-          Text(
+          Flexible(child: Text(
             sectionLabel,
             style: const TextStyle(color: AppTheme.primary, fontSize: 13),
-          ),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+          )),
         ],
       ),
     );
@@ -208,13 +193,22 @@ class _SettingsTopBar extends StatelessWidget {
 class _SettingsSidebar extends StatelessWidget {
   final _SettSection selected;
   final ValueChanged<_SettSection> onSelect;
+  final double width;
 
-  const _SettingsSidebar({required this.selected, required this.onSelect});
+  /// Icons only (narrow phones).
+  final bool rail;
+
+  const _SettingsSidebar({
+    required this.selected,
+    required this.onSelect,
+    this.width = 200,
+    this.rail = false,
+  });
 
   @override
   Widget build(BuildContext context) {
     return Container(
-      width: 200,
+      width: width,
       color: AppTheme.sidebarBg,
       child: ListView(
         padding: const EdgeInsets.symmetric(vertical: 12),
@@ -222,6 +216,7 @@ class _SettingsSidebar extends StatelessWidget {
             .map(
               (s) => _SidebarItem(
                 section: s,
+                rail: rail,
                 isSelected: s == selected,
                 onTap: () => onSelect(s),
               ),
@@ -236,11 +231,13 @@ class _SidebarItem extends StatefulWidget {
   final _SettSection section;
   final bool isSelected;
   final VoidCallback onTap;
+  final bool rail;
 
   const _SidebarItem({
     required this.section,
     required this.isSelected,
     required this.onTap,
+    this.rail = false,
   });
 
   @override
@@ -284,7 +281,18 @@ class _SidebarItemState extends State<_SidebarItem> with TvFocusMixin {
                 color: AppTheme.primary.withValues(alpha: 0.3))
                 : null,
           ),
-          child: Row(
+          child: widget.rail
+              ? Tooltip(
+                  message: widget.section.label,
+                  child: Icon(
+                    widget.section.icon,
+                    size: 22,
+                    color: widget.isSelected
+                        ? AppTheme.primary
+                        : AppTheme.textSecondary,
+                  ),
+                )
+              : Row(
             children: [
               Icon(
                 widget.section.icon,
@@ -294,8 +302,10 @@ class _SidebarItemState extends State<_SidebarItem> with TvFocusMixin {
                     : AppTheme.textSecondary,
               ),
               const SizedBox(width: 10),
-              Text(
+              Expanded(child: Text(
                 widget.section.label,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
                 style: TextStyle(
                   color: widget.isSelected
                       ? AppTheme.textPrimary
@@ -305,7 +315,7 @@ class _SidebarItemState extends State<_SidebarItem> with TvFocusMixin {
                       ? FontWeight.w600
                       : FontWeight.w400,
                 ),
-              ),
+              )),
             ],
           ),
         );
@@ -844,6 +854,19 @@ class _PlaybackSection extends ConsumerStatefulWidget {
   ConsumerState<_PlaybackSection> createState() => _PlaybackSectionState();
 }
 
+/// Why performance mode is on / off, in plain words.
+String _perfNote() {
+  final low = Perf.detectedLowEnd;
+  if (Perf.userOverride == null) {
+    return low
+        ? 'Turned on automatically because this device needs it.'
+        : "Off by default because this device doesn't need it.";
+  }
+  return low
+      ? 'Recommended for this device.'
+      : 'Not usually needed on this device.';
+}
+
 class _PlaybackSectionState extends ConsumerState<_PlaybackSection> {
   late bool _remember;
 
@@ -923,11 +946,10 @@ class _PlaybackSectionState extends ConsumerState<_PlaybackSection> {
               icon: Icons.speed_rounded,
               title: 'Low-spec performance mode',
               subtitle:
-                  'Direct hardware video output, smaller buffers and lighter '
-                  'UI. ${Perf.userOverride == null ? 'Automatic' : 'Manual'}'
-                  ' — ${Perf.detectedLowEnd ? 'recommended' : 'not needed'}'
-                  ' for this device. Turn off if a channel shows no picture. '
-                  'Applies to the next video you open.',
+                  'Direct hardware video output, smaller buffers and a '
+                  'lighter look. ${_perfNote()} Turn it off if a channel '
+                  'shows no picture. Changes apply to the next video you '
+                  'open.',
               trailing: Switch(
                 value: Perf.enabled,
                 onChanged: (v) async {
@@ -1448,7 +1470,7 @@ class _ContentSectionState extends ConsumerState<_ContentSection> {
                         icon: Icons.folder_off_outlined,
                         iconColor: AppTheme.textMuted,
                         title: cat.categoryName,
-                        subtitle: 'Hidden — tap Restore to show again',
+                        subtitle: 'Hidden. Select Restore to show it again',
                         showDivider: i < hidden.length - 1,
                         trailing: MouseRegion(
                           cursor: SystemMouseCursors.click,
@@ -2010,7 +2032,7 @@ class _TvGuideSourceCardState extends ConsumerState<_TvGuideSourceCard> {
           : '${ago.inHours} h ago';
       return 'Updated $when · ${idx.matchedStreams} channels matched';
     }
-    if (_svc.lastError != null) return 'Last update failed — select to retry';
+    if (_svc.lastError != null) return "The last update didn't work. Select to try again";
     return 'Downloads when you open Live TV';
   }
 
@@ -2027,7 +2049,7 @@ class _TvGuideSourceCardState extends ConsumerState<_TvGuideSourceCard> {
         behavior: SnackBarBehavior.floating,
         content: Text(
           idx != null && err == null
-              ? 'TV guide updated — ${idx.matchedStreams} channels matched'
+              ? 'TV guide updated for ${idx.matchedStreams} channels'
               : 'TV guide update failed${err != null ? ': $err' : ''}',
         ),
       ),
@@ -2064,7 +2086,7 @@ class _TvGuideSourceCardState extends ConsumerState<_TvGuideSourceCard> {
             icon: Icons.live_tv_outlined,
             iconColor: AppTheme.primary,
             title: 'Enhanced TV Guide',
-            subtitle: 'Real programme names from free XMLTV guides',
+            subtitle: 'Real programme names from XMLTV guides',
             showDivider: enabled,
             onTap: () => _setEnabled(!enabled),
             trailing: Switch(
@@ -2204,8 +2226,8 @@ class _GuideSourcesDialogState extends State<_GuideSourcesDialog> {
             const Padding(
               padding: EdgeInsets.fromLTRB(16, 0, 16, 8),
               child: Text(
-                'Pick the regions of your channels. Free guides from '
-                'epgshare01.online, refreshed every 12 hours. Channels a '
+                'Pick the regions of your channels. Guides come from '
+                'epgshare01.online and refresh every 12 hours. Channels a '
                 'guide does not cover keep your provider\'s EPG.',
                 style: TextStyle(color: AppTheme.textMuted, fontSize: 12),
               ),

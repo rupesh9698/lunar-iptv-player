@@ -267,7 +267,7 @@ class XmltvEpgService {
         debugPrint(
           '[xmltv] ${res.index.matchedStreams}/${refs.length} channels '
           'matched in ${sw.elapsedMilliseconds} ms'
-          '${res.errors.isEmpty ? '' : ' — ${res.errors.join('; ')}'}',
+          '${res.errors.isEmpty ? '' : '. Errors: ${res.errors.join('; ')}'}',
         );
       } catch (e) {
         lastError = e.toString();
