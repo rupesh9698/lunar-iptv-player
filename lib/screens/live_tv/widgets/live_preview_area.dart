@@ -25,7 +25,10 @@ class LiveInlinePlayer extends ConsumerStatefulWidget {
   final bool isMaximized;
   final VoidCallback onMaximize;
   final VoidCallback onMinimize;
-  final FocusNode? watchNowFocusNode;
+
+  /// Called after leaving full screen so the screen can put remote focus
+  /// back on the playing channel in the guide.
+  final VoidCallback? onMinimizedFocus;
   final FocusNode? playPauseFocusNode;
   final FocusNode? Function()? categoryEntryFocus;
   final FocusNode? channelSearchFocus;
@@ -36,7 +39,7 @@ class LiveInlinePlayer extends ConsumerStatefulWidget {
     required this.isMaximized,
     required this.onMaximize,
     required this.onMinimize,
-    this.watchNowFocusNode,
+    this.onMinimizedFocus,
     this.playPauseFocusNode,
     this.categoryEntryFocus,
     this.channelSearchFocus,
@@ -118,8 +121,11 @@ class _LiveInlinePlayerState extends ConsumerState<LiveInlinePlayer> {
           _showChannelGuide = false;
         });
         _resetHideTimer();
-        // The previously focused full-screen button no longer exists.
-        _focusAfterFrame(widget.watchNowFocusNode);
+        // The previously focused full-screen button no longer exists:
+        // back to the playing channel's row in the guide.
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) widget.onMinimizedFocus?.call();
+        });
       }
     }
   }
@@ -196,7 +202,26 @@ class _LiveInlinePlayerState extends ConsumerState<LiveInlinePlayer> {
     });
   }
 
+  /// Lock (touch): close the TV Guide and controls and ignore taps until
+  /// unlocked. The guide used to stay open — and usable — on top of the
+  /// lock, so locking from the guide did nothing.
+  void _lock() {
+    _hideTimer?.cancel();
+    setState(() {
+      _locked = true;
+      _showChannelGuide = false;
+      _ctrlVisible = false;
+    });
+  }
+
+  void _unlock() {
+    setState(() => _locked = false);
+    _maxRootFocus.requestFocus();
+    _resetHideTimer();
+  }
+
   void _openGuide() {
+    if (_locked) return;
     // Top bar stays up for as long as the guide is open.
     _hideTimer?.cancel();
     setState(() {
@@ -252,6 +277,15 @@ class _LiveInlinePlayerState extends ConsumerState<LiveInlinePlayer> {
     final k = event.logicalKey;
     final isDown = event is KeyDownEvent;
 
+    if (_locked) {
+      // Locked: only OK (unlock) does anything.
+      if (_isOk(k)) {
+        if (isDown) _unlock();
+        return KeyEventResult.handled;
+      }
+      return KeyEventResult.ignored;
+    }
+
     if (k == LogicalKeyboardKey.keyG) {
       if (isDown) _showChannelGuide ? _closeGuide() : _openGuide();
       return KeyEventResult.handled;
@@ -276,18 +310,6 @@ class _LiveInlinePlayerState extends ConsumerState<LiveInlinePlayer> {
         k == LogicalKeyboardKey.mediaPause) {
       if (isDown) ref.read(livePlayerProvider.notifier).togglePlayPause();
       return KeyEventResult.handled;
-    }
-
-    if (_locked) {
-      // Lock is a touch feature — OK on the remote unlocks.
-      if (_isOk(k)) {
-        if (isDown) {
-          setState(() => _locked = false);
-          _showControls(focusPlay: true);
-        }
-        return KeyEventResult.handled;
-      }
-      return KeyEventResult.ignored;
     }
 
     final onPlayer = node.hasPrimaryFocus || !_ctrlVisible;
@@ -517,8 +539,6 @@ class _LiveInlinePlayerState extends ConsumerState<LiveInlinePlayer> {
                 current: current,
                 next: next,
                 ps: ps,
-                onWatchNow: widget.onMaximize,
-                watchNowFocusNode: widget.watchNowFocusNode,
                 onTogglePlay: () =>
                     ref.read(livePlayerProvider.notifier).togglePlayPause(),
                 onVolumeChange: (v) =>
@@ -558,7 +578,9 @@ class _LiveInlinePlayerState extends ConsumerState<LiveInlinePlayer> {
                       videoFill: _videoFill,
                       ctrlVisible: _ctrlVisible,
                       // Click / tap = OK: toggles the TV Guide.
-                      onTap: _showChannelGuide ? _closeGuide : _openGuide,
+                      onTap: _locked
+                          ? () {}
+                          : (_showChannelGuide ? _closeGuide : _openGuide),
                       // No double-tap: live can't rewind / fast-forward
                       // (it used to flash a "-10s" bubble that never
                       // seeked), and without it single taps are instant.
@@ -625,7 +647,7 @@ class _LiveInlinePlayerState extends ConsumerState<LiveInlinePlayer> {
                         .watch(liveFavoritesNotifierProvider)
                         .contains(channel?.streamId ?? ''),
                     onMinimize: widget.onMinimize,
-                    onLock: () => setState(() => _locked = true),
+                    onLock: _lock,
                     onVolumeChange: (v) =>
                         ref.read(livePlayerProvider.notifier).setVolume(v),
                     onToggleFav: channel != null
@@ -642,7 +664,7 @@ class _LiveInlinePlayerState extends ConsumerState<LiveInlinePlayer> {
 
             // Lock overlay
             if (_locked)
-              _LockOverlay(onUnlock: () => setState(() => _locked = false)),
+              _LockOverlay(onUnlock: _unlock),
 
             // Volume / Brightness
             if (_showVol)
@@ -677,7 +699,7 @@ class _LiveInlinePlayerState extends ConsumerState<LiveInlinePlayer> {
               ),
 
             // Channel Guide panel
-            if (_showChannelGuide)
+            if (_showChannelGuide && !_locked)
               Positioned(
                 bottom: 0,
                 left: 0,
@@ -981,20 +1003,16 @@ class _InfoPane extends StatelessWidget {
   final EpgListing? current;
   final EpgListing? next;
   final LivePlayerState ps;
-  final VoidCallback onWatchNow;
   final VoidCallback onTogglePlay;
   final ValueChanged<double> onVolumeChange;
-  final FocusNode? watchNowFocusNode;
 
   const _InfoPane({
     required this.channel,
     required this.current,
     required this.next,
     required this.ps,
-    required this.onWatchNow,
     required this.onTogglePlay,
     required this.onVolumeChange,
-    this.watchNowFocusNode,
   });
 
   @override
@@ -1129,84 +1147,12 @@ class _InfoPane extends StatelessWidget {
             ),
           ),
 
-          const SizedBox(height: 8),
-
-          SizedBox(
-            width: double.infinity,
-            child: _FocusableElevatedButton(
-              focusNode: watchNowFocusNode,
-              label: 'Watch Now',
-              icon: Icons.fullscreen_rounded,
-              onTap: onWatchNow,
-            ),
-          ),
         ],
       ),
     );
   }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// FOCUSABLE ELEVATED BUTTON
-// ─────────────────────────────────────────────────────────────────────────────
-class _FocusableElevatedButton extends StatefulWidget {
-  final String label;
-  final IconData icon;
-  final VoidCallback onTap;
-  final FocusNode? focusNode;
-  const _FocusableElevatedButton({
-    required this.label,
-    required this.icon,
-    required this.onTap,
-    this.focusNode,
-  });
-
-  @override
-  State<_FocusableElevatedButton> createState() =>
-      _FocusableElevatedButtonState();
-}
-
-class _FocusableElevatedButtonState extends State<_FocusableElevatedButton> {
-  @override
-  Widget build(BuildContext context) {
-    return TvFocusable(
-      focusNode: widget.focusNode,
-      autoScroll: false,
-      onActivate: widget.onTap,
-      builder: (focused, _) => AnimatedContainer(
-        duration: const Duration(milliseconds: 150),
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(10),
-          border: focused
-              ? Border.all(
-                  color: Colors.white.withValues(alpha: 0.70),
-                  width: 2,
-                )
-              : null,
-        ),
-        // ExcludeFocus: the outer TvFocusable is the one D-pad stop (the
-        // inner Material button was a second, un-wired focus target).
-        child: ExcludeFocus(
-          child: ElevatedButton.icon(
-          onPressed: widget.onTap,
-          icon: Icon(widget.icon, size: 18),
-          label: Text(widget.label),
-          style: ElevatedButton.styleFrom(
-            backgroundColor: focused
-                ? AppTheme.primary.withValues(alpha: 0.9)
-                : AppTheme.primary,
-            foregroundColor: Colors.white,
-            padding: const EdgeInsets.symmetric(vertical: 8),
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(10),
-            ),
-          ),
-        ),
-        ),
-      ),
-    );
-  }
-}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // WEB HTTP STREAM ERROR

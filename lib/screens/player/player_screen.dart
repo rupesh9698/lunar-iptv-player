@@ -98,6 +98,10 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
   int _skipAmount = 10; // signed seconds shown in the skip bubble
   Timer? _seekCommitTimer;
 
+  // Touch: press and hold the left / right third to rewind / fast-forward
+  // in growing steps (like holding the remote's Left / Right).
+  Timer? _holdSeekTimer;
+
   // ── Gesture (volume / brightness) ───────────────────────────────────
   double _volume = 1.0;
   double _brightness = 0.5;
@@ -123,6 +127,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
 
   @override
   void dispose() {
+    _holdSeekTimer?.cancel();
     _seekCommitTimer?.cancel();
     _skipHideTimer?.cancel();
     _finalSaveAndRefresh(); // any other exit path (e.g. route replaced)
@@ -398,7 +403,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
 
   /// One seek step forward/back. Presses (or key repeats) in the same
   /// direction less than ~1 s apart form a run whose step accelerates.
-  void _stepSeek(bool forward) {
+  void _stepSeek(bool forward, {bool fixed = false}) {
     if (_isLive || _playerDisposed) return;
     final now = DateTime.now();
     final gap = now.difference(_lastSeekStep);
@@ -416,7 +421,9 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
     _seekChain++;
     _lastSeekStep = now;
     final base = _pendingSeek ?? _pos;
-    var target = base + Duration(seconds: dir * _stepFor(_seekChain));
+    // [fixed]: double-tap is always 10 s a time; holding accelerates.
+    final step = fixed ? 10 : _stepFor(_seekChain);
+    var target = base + Duration(seconds: dir * step);
     if (target < Duration.zero) target = Duration.zero;
     if (_dur > Duration.zero && target > _dur) target = _dur;
     _pendingSeek = target;
@@ -456,14 +463,36 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
     final w = MediaQuery.of(context).size.width;
     // Live streams can't seek: no skip bubbles, only the centre (pause).
     if (!_isLive && _lastTap.dx < w / 3) {
-      _stepSeek(false);
+      _stepSeek(false, fixed: true);
     } else if (!_isLive && _lastTap.dx > w * 2 / 3) {
-      _stepSeek(true);
+      _stepSeek(true, fixed: true);
     } else if (_isLive && (_lastTap.dx < w / 3 || _lastTap.dx > w * 2 / 3)) {
       return;
     } else {
       _togglePlay();
     }
+  }
+
+  // ── Touch: hold a side to seek continuously ─────────────────────────
+  void _onHoldStart(LongPressStartDetails d) {
+    if (_locked || _isLive) return;
+    final w = MediaQuery.sizeOf(context).width;
+    final x = d.localPosition.dx;
+    if (x > w / 3 && x < w * 2 / 3) return; // centre: nothing
+    final fwd = x >= w * 2 / 3;
+    _stepSeek(fwd);
+    _holdSeekTimer?.cancel();
+    _holdSeekTimer = Timer.periodic(
+      const Duration(milliseconds: 220),
+      (_) => _stepSeek(fwd),
+    );
+  }
+
+  void _onHoldEnd() {
+    if (_holdSeekTimer == null) return;
+    _holdSeekTimer?.cancel();
+    _holdSeekTimer = null;
+    _commitSeek(); // seek as soon as the finger lifts
   }
 
   // ── Volume / Brightness gestures ──────────────────────────────────────
@@ -821,6 +850,9 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
                     onTapDown: (d) => _lastTap = d.localPosition,
                     onTap: _toggleControls,
                     onDoubleTap: _onDoubleTap,
+                    onLongPressStart: _onHoldStart,
+                    onLongPressEnd: (_) => _onHoldEnd(),
+                    onLongPressCancel: _onHoldEnd,
                     onVerticalDragStart: _onDragStart,
                     onVerticalDragUpdate: _onDragUpdate,
                     onVerticalDragEnd: _onDragEnd,

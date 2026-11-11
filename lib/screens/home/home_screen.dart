@@ -425,7 +425,10 @@ class _PlaylistItemState extends State<_PlaylistItem> with TvFocusMixin {
 
   @override
   Widget build(BuildContext context) {
-    return Row(
+    // Delete button: as tall as the playlist row and square.
+    return IntrinsicHeight(
+      child: Row(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         Expanded(child: _buildTile(context)),
         // Always-visible delete button: its own focus stop (Right from the
@@ -442,10 +445,13 @@ class _PlaylistItemState extends State<_PlaylistItem> with TvFocusMixin {
           },
           builder: (focused, _) => Tooltip(
             message: 'Delete playlist',
-            child: AnimatedContainer(
+            child: AspectRatio(
+              aspectRatio: 1,
+              child: AnimatedContainer(
               duration: const Duration(milliseconds: 150),
-              margin: const EdgeInsets.only(left: 4),
-              padding: const EdgeInsets.all(8),
+              // Same vertical margin as the tile → identical height.
+              margin: const EdgeInsets.only(left: 6, top: 2, bottom: 2),
+              alignment: Alignment.center,
               decoration: BoxDecoration(
                 color: focused
                     ? AppTheme.error.withValues(alpha: 0.18)
@@ -460,13 +466,15 @@ class _PlaylistItemState extends State<_PlaylistItem> with TvFocusMixin {
               ),
               child: const Icon(
                 Icons.delete_outline_rounded,
-                size: 17,
+                size: 20,
                 color: AppTheme.error,
               ),
+            ),
             ),
           ),
         ),
       ],
+      ),
     );
   }
 
@@ -496,13 +504,11 @@ class _PlaylistItemState extends State<_PlaylistItem> with TvFocusMixin {
                 ? AppTheme.surface
                 : Colors.transparent,
             borderRadius: BorderRadius.circular(10),
-            border: widget.isActive
+            // Focus ring first: on the active playlist it used to vanish.
+            border: focused
+                ? Border.all(color: Colors.white, width: 2.5)
+                : widget.isActive
                 ? Border.all(color: AppTheme.primary.withValues(alpha: 0.35))
-                : focused
-                ? Border.all(
-                    color: Colors.white.withValues(alpha: 0.55),
-                    width: 2.0,
-                  )
                 : null,
           ),
           child: Row(

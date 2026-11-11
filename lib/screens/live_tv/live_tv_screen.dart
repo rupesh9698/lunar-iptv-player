@@ -56,7 +56,6 @@ class _LiveTVScreenState extends ConsumerState<LiveTVScreen> {
   final FocusNode channelSearchFocus = FocusNode(debugLabel: 'channelSearch');
   final FocusNode refreshEpgFocus = FocusNode(debugLabel: 'refreshEpg');
   final FocusNode epgFullscreenFocus = FocusNode(debugLabel: 'epgFullscreen');
-  final FocusNode watchNowFocus = FocusNode(debugLabel: 'watchNow');
   final FocusNode miniPlayPauseFocus = FocusNode(debugLabel: 'miniPlayPause');
 
   /// First focusable category-sidebar item (set by LiveCategorySidebar).
@@ -71,6 +70,19 @@ class _LiveTVScreenState extends ConsumerState<LiveTVScreen> {
   /// "Enter the channel list" action reported by the EPG timeline.
   EpgEntryFocus? _epgEntry;
 
+  /// "Focus the selected category" action reported by the sidebar (scrolls
+  /// it into view first — a tile scrolled out of the list isn't built, so
+  /// requesting its node silently did nothing).
+  VoidCallback? _sidebarEntry;
+
+  /// After closing the full-screen player: the playing channel's row.
+  void _focusPlayingRow() {
+    if (_epgEntry?.call(preferSelected: true, selectedOnly: true) ?? false) {
+      return;
+    }
+    if (!_enterChannels()) _categoryEntry()?.requestFocus();
+  }
+
   /// Focus the channel list: playing channel if listed (from the side),
   /// else the first visible row; falls back to the first row's node.
   bool _enterChannels({bool preferSelected = false}) {
@@ -80,6 +92,13 @@ class _LiveTVScreenState extends ConsumerState<LiveTVScreen> {
     final n = firstChannelItemFocus;
     if (n != null && n.context != null) {
       n.requestFocus();
+      return true;
+    }
+    // Guide hidden (no channel list on screen) and the Watch Now button is
+    // gone: Right / OK from the categories opens the player full screen.
+    if (!ref.read(epgPanelVisibleProvider) &&
+        ref.read(selectedChannelProvider) != null) {
+      ref.read(livePlayerMaximizedProvider.notifier).state = true;
       return true;
     }
     return false;
@@ -133,6 +152,10 @@ class _LiveTVScreenState extends ConsumerState<LiveTVScreen> {
   /// (The selected tile can be scrolled far out of view; requesting focus on
   /// an unbuilt tile silently did nothing.)
   FocusNode? _categoryEntry() {
+    if (_sidebarEntry != null) {
+      _sidebarEntry!(); // focuses (after scrolling if needed) itself
+      return null;
+    }
     final sel = selectedCategoryItemFocus;
     if (sel != null && sel.context != null) return sel;
     return firstCategoryItemFocus;
@@ -161,9 +184,9 @@ class _LiveTVScreenState extends ConsumerState<LiveTVScreen> {
           false) {
         return;
       }
-      // Guide hidden / channel not in the list (after a few tries, while
-      // the list loads) → "Watch Now".
-      if ((_epgEntry == null || attempt >= 6) && TvNav.focus(watchNowFocus)) {
+      // Channel not in the list (after a few tries, while it loads) →
+      // first channel in view, else the categories.
+      if (attempt >= 6 && (_enterChannels() || TvNav.focus(_categoryEntry()))) {
         return;
       }
     } else {
@@ -205,7 +228,7 @@ class _LiveTVScreenState extends ConsumerState<LiveTVScreen> {
     TvNav.wire(
       channelSearchFocus,
       TvNav.handler(
-      up: watchNowFocus,
+      up: backBtnFocus,
       onDown: () {
         if (!_enterChannels()) channelSearchFocus.requestFocus();
       },
@@ -218,7 +241,7 @@ class _LiveTVScreenState extends ConsumerState<LiveTVScreen> {
     TvNav.wire(
       refreshEpgFocus,
       TvNav.handler(
-      up: watchNowFocus,
+      up: backBtnFocus,
       onDown: () {
         if (!_enterChannels()) refreshEpgFocus.requestFocus();
       },
@@ -230,21 +253,11 @@ class _LiveTVScreenState extends ConsumerState<LiveTVScreen> {
     TvNav.wire(
       epgFullscreenFocus,
       TvNav.handler(
-      up: watchNowFocus,
+      up: backBtnFocus,
       onDown: () {
         if (!_enterChannels()) epgFullscreenFocus.requestFocus();
       },
       left: refreshEpgFocus,
-      ),
-    );
-
-    TvNav.wire(
-      watchNowFocus,
-      TvNav.handler(
-      up: backBtnFocus,
-      down: channelSearchFocus,
-      // The mini player has no buttons any more → straight to categories.
-      onLeft: () => _categoryEntry()?.requestFocus(),
       ),
     );
 
@@ -255,7 +268,7 @@ class _LiveTVScreenState extends ConsumerState<LiveTVScreen> {
       down: channelSearchFocus,
       onLeft: () =>
           _categoryEntry()?.requestFocus(),
-      right: watchNowFocus,
+      right: channelSearchFocus,
       ),
     );
   }
@@ -725,7 +738,6 @@ class _LiveTVScreenState extends ConsumerState<LiveTVScreen> {
     channelSearchFocus.dispose();
     refreshEpgFocus.dispose();
     epgFullscreenFocus.dispose();
-    watchNowFocus.dispose();
     miniPlayPauseFocus.dispose();
     // Fire-and-forget — dispose() cannot be async.
     // _stopPlayer was already called in PopScope before navigate,
@@ -859,7 +871,7 @@ class _LiveTVScreenState extends ConsumerState<LiveTVScreen> {
                         node: _previewPanelFocus,
                         child: LiveInlinePlayer(
                           isMaximized: isMaximized,
-                          watchNowFocusNode: watchNowFocus,
+                          onMinimizedFocus: _focusPlayingRow,
                           playPauseFocusNode: miniPlayPauseFocus,
                           categoryEntryFocus: () =>
                               _categoryEntry(),
@@ -929,6 +941,7 @@ class _LiveTVScreenState extends ConsumerState<LiveTVScreen> {
                       firstCategoryItemFocus = node,
                   onSelectedItemFocusReady: (node) =>
                       selectedCategoryItemFocus = node,
+                  onEntryReady: (f) => _sidebarEntry = f,
                 ),
               ),
               _ResizeDivider(
@@ -969,7 +982,7 @@ class _LiveTVScreenState extends ConsumerState<LiveTVScreen> {
         searchFocusNode: channelSearchFocus,
         refreshFocusNode: refreshEpgFocus,
         fullscreenFocusNode: epgFullscreenFocus,
-        watchNowFocus: watchNowFocus,
+        upFocus: backBtnFocus,
         categoryEntryFocus: () =>
             _categoryEntry(),
         onFirstItemFocusReady: (node) => firstChannelItemFocus = node,
@@ -1004,7 +1017,7 @@ class _LiveTVScreenState extends ConsumerState<LiveTVScreen> {
             searchFocusNode: channelSearchFocus,
             refreshFocusNode: refreshEpgFocus,
             fullscreenFocusNode: epgFullscreenFocus,
-            watchNowFocus: watchNowFocus,
+            upFocus: backBtnFocus,
             categoryEntryFocus: () =>
                 _categoryEntry(),
             onFirstItemFocusReady: (node) => firstChannelItemFocus = node,

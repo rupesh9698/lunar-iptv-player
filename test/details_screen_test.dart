@@ -139,7 +139,7 @@ void main() {
     expect(find.text('Resume'), findsOneWidget);
     expect(find.text('Start Over'), findsOneWidget);
     expect(find.text('1080p'), findsOneWidget);
-    expect(find.text('Kannada'), findsOneWidget);
+    expect(find.text('Kannada'), findsWidgets); // badge + About
     expect(find.text('2h 54m'), findsOneWidget);
 
     // Buttons: Resume, Start Over, Favourite (no server → no Download).
@@ -218,7 +218,7 @@ void main() {
     expect(find.text('Resume S2:E1'), findsOneWidget);
     expect(find.text('From S1:E1'), findsOneWidget);
     // Opened on the season being watched.
-    expect(find.text('1. S2 Chapter 1'), findsOneWidget);
+    expect(find.text('S2 Chapter 1'), findsOneWidget);
     expect(find.text('Episode 1 plot'), findsOneWidget);
 
     // Buttons: Resume S2:E1, From S1:E1, Favourite.
@@ -240,8 +240,8 @@ void main() {
     expect(focused(), 'season1');
     await key(t, LogicalKeyboardKey.select);
     await t.pumpAndSettle();
-    expect(find.text('1. S2 Chapter 1'), findsNothing);
-    expect(find.text('1. S1 Chapter 1'), findsOneWidget, reason: 'season 1');
+    expect(find.text('S2 Chapter 1'), findsNothing);
+    expect(find.text('S1 Chapter 1'), findsOneWidget, reason: 'season 1');
     await key(t, LogicalKeyboardKey.arrowUp);
     await t.pumpAndSettle();
     expect(focused(), 'detailsAction2');

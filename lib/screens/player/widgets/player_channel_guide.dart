@@ -434,12 +434,12 @@ class _ChannelItemState extends State<_ChannelItem> {
                 : Colors.white.withValues(alpha: 0.05),
             borderRadius: BorderRadius.circular(10),
             border: Border.all(
-              color: widget.isCurrent
+              color: widget.isFocused
+                  ? Colors.white
+                  : widget.isCurrent
                   ? AppTheme.primary
-                  : widget.isFocused
-                  ? Colors.white.withValues(alpha: 0.7)
                   : Colors.white.withValues(alpha: 0.12),
-              width: (widget.isCurrent || widget.isFocused) ? 2 : 1,
+              width: widget.isFocused ? 3 : (widget.isCurrent ? 2 : 1),
             ),
           ),
           child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [

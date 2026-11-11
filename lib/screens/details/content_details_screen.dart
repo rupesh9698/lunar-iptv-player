@@ -17,24 +17,32 @@ import '../../services/behavior_service.dart';
 import '../../widgets/app_network_image.dart';
 
 // ═════════════════════════════════════════════════════════════════════════════
-// Full-screen, Netflix-style details page for a movie or a series.
+// "Cinema" details page for a movie or a series.
 //
-//   ┌──────────────────────────────────────────────────────────────┐
-//   │ ←                                   (backdrop, fades left)   │
-//   │ ┌──────┐ Title                                               │
-//   │ │poster│ 2023 · ★ 6.9 · 2h 54m · 1080p · Action, Crime        │
-//   │ └──────┘ [▶ Resume] [↺ Start over] [♥] [⬇ Download] [Trailer] │
-//   │          Synopsis…                                           │
-//   ├──────────────────────────────────────────────────────────────┤
-//   │ Episodes   (Season 1) (Season 2)        ← series only        │
-//   │ [still] 1. Title · 59m · plot …                     [⬇]      │
-//   │ About: synopsis, cast, director, genres, …                   │
-//   │ More Like This  [poster] [poster] [poster] …                 │
-//   └──────────────────────────────────────────────────────────────┘
+//   ┌──────────────────────────────────────────────────────────────────┐
+//   │ ←   (backdrop: fixed, fades into the page on the left + bottom)  │
+//   │                                                                  │
+//   │  SERIES · 2 SEASONS                                    ┌──────┐  │
+//   │  Title                                                 │poster│  │
+//   │  2023 · ★ 8.0 · 2h 54m  [1080p] [5.1] [Hindi]          │      │  │
+//   │  Synopsis (3 lines)                                    └──────┘  │
+//   │  [▶ Resume S1:E3 ▬▬▬ 47m left] (↺) (♥) (⬇) (▶ Trailer)           │
+//   ├──────────────────────────────────────────────────────────────────┤
+//   │  Episodes      Season 1   Season 2  (underline tabs)             │
+//   │   1  [still]  Title · 59m · plot · progress                 (⬇)  │
+//   │  About         synopsis · cast chips  │  Director, Genres, …     │
+//   │  More Like This  [poster] [poster] …                             │
+//   └──────────────────────────────────────────────────────────────────┘
 //
-// Touch, mouse, keyboard and TV remote all work: every control is a
-// TvFocusable (tap / click / OK) and the D-pad order is explicit —
-//   Back ↔ actions row → seasons → episodes (→ ⬇) → More Like This.
+// Remote / keyboard: Back ↔ buttons (Up/Down or Left/Right walk them in
+// order) → seasons → episodes (Right = download) → More Like This.
+// Touch / mouse: everything is tappable / clickable, with hover states.
+//
+// Performance: the backdrop is a fixed layer behind the scroll view in a
+// RepaintBoundary (no repaint while scrolling); resume points come from
+// the Continue Watching list once per build (it used to read + decode a
+// saved position for every episode, several times per build); "More Like
+// This" is computed once, not on every rebuild.
 // ═════════════════════════════════════════════════════════════════════════════
 
 /// Opens the details page for [movie].
@@ -73,7 +81,7 @@ class DetailsMissingScreen extends StatelessWidget {
       child: TvFocusable(
         autofocus: true,
         onActivate: () => context.canPop() ? context.pop() : context.go('/home'),
-        builder: (focused, _) => _PillButton(
+        builder: (focused, _) => _GlassPill(
           icon: Icons.arrow_back_rounded,
           label: 'Go back',
           focused: focused,
@@ -92,9 +100,6 @@ mixin _DetailsNav<T extends ConsumerStatefulWidget> on ConsumerState<T> {
   final List<FocusNode> actionFocus = [];
   final List<FocusNode> similarFocus = [];
 
-  /// Number of actions stacked full-width above the icon row on phones.
-  int stackedActions = 0;
-  bool narrowLayout = false;
   int actionCount = 0;
   int similarCount = 0;
 
@@ -108,7 +113,7 @@ mixin _DetailsNav<T extends ConsumerStatefulWidget> on ConsumerState<T> {
     return list[i];
   }
 
-  /// First focus stop below the actions (seasons / episodes / similar).
+  /// First focus stop below the buttons (seasons / episodes / similar).
   FocusNode? get belowActions;
 
   /// Focus stop the "More Like This" row goes Up to.
@@ -183,8 +188,7 @@ mixin _DetailsNav<T extends ConsumerStatefulWidget> on ConsumerState<T> {
   /// The buttons form one sequence (Resume → Start Over → Favourite →
   /// Download → Trailer): Down / Right go to the next one, Up / Left to
   /// the previous. Down from the last leaves for the episodes / More Like
-  /// This, Up from the first goes to Back. (Down used to jump straight
-  /// from Resume to More Like This, skipping the other buttons.)
+  /// This, Up from the first goes to Back.
   KeyEventResult Function(LogicalKeyboardKey) actionArrows(int i) {
     final prev = i > 0 ? actionNode(i - 1) : null;
     final next = i + 1 < actionCount ? actionNode(i + 1) : null;
@@ -248,6 +252,43 @@ mixin _DetailsNav<T extends ConsumerStatefulWidget> on ConsumerState<T> {
 
   void download(String url) =>
       launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
+
+  /// Resume points by content id, from the Continue Watching list (watched
+  /// so it refreshes after playing). One small list per build instead of
+  /// a storage read + JSON decode per episode.
+  Map<String, _Resume> resumePoints() {
+    final out = <String, _Resume>{};
+    for (final m in ref.watch(continueWatchingProvider)) {
+      final r = _Resume.fromMap(m);
+      final id = m['id']?.toString();
+      if (r != null && id != null) out[id] = r;
+    }
+    return out;
+  }
+
+  // "More Like This" is computed once per (library, category).
+  Object? _similarFor;
+  List<Object> _similar = const [];
+
+  List<X> similarFrom<X extends Object>(
+    List<X>? all,
+    String? categoryId,
+    bool Function(X) sameCategoryOther,
+  ) {
+    if (all == null || categoryId == null) return const [];
+    if (!identical(_similarFor, all)) {
+      _similarFor = all;
+      final out = <X>[];
+      for (final x in all) {
+        if (sameCategoryOther(x)) {
+          out.add(x);
+          if (out.length >= 24) break;
+        }
+      }
+      _similar = out;
+    }
+    return _similar.cast<X>();
+  }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -306,13 +347,16 @@ class _MovieDetailsScreenState extends ConsumerState<MovieDetailsScreen>
     final infoAsync = ref.watch(vodInfoProvider(movie.streamId));
     final vod = infoAsync.valueOrNull;
     final info = vod?.info;
-    ref.watch(continueWatchingProvider); // refresh resume after playing
-    final resume = _Resume.of(movie.streamId);
+    final resume = resumePoints()[movie.streamId];
     final isFav = ref.watch(vodFavoritesProvider).contains(movie.streamId);
     final service = ref.watch(xtreamServiceProvider);
     final trailer = info?.youtubeTrailer;
 
-    final similar = _similarMovies(ref.watch(vodAllStreamsProvider).valueOrNull);
+    final similar = similarFrom<VodStream>(
+      ref.watch(vodAllStreamsProvider).valueOrNull,
+      movie.categoryId,
+      (m) => m.categoryId == movie.categoryId && m.streamId != movie.streamId,
+    );
     similarCount = similar.length;
 
     final actions = <_Action>[
@@ -348,8 +392,7 @@ class _MovieDetailsScreenState extends ConsumerState<MovieDetailsScreen>
         _Action(
           icon: Icons.download_rounded,
           label: 'Download',
-          onTap: () =>
-              download(service.getVodUrl(movie.streamId, _ext(vod))),
+          onTap: () => download(service.getVodUrl(movie.streamId, _ext(vod))),
         ),
       if (trailer != null && trailer.isNotEmpty)
         _Action(
@@ -366,6 +409,7 @@ class _MovieDetailsScreenState extends ConsumerState<MovieDetailsScreen>
 
     return _DetailsPage(
       nav: this,
+      kind: 'MOVIE',
       title: info?.name?.isNotEmpty == true ? info!.name! : movie.name,
       originalTitle: info?.oName,
       backdrop: _firstHttp([
@@ -375,16 +419,13 @@ class _MovieDetailsScreenState extends ConsumerState<MovieDetailsScreen>
         movie.streamIcon,
       ]),
       poster: _firstHttp([info?.coverBig, info?.movieImage, movie.streamIcon]),
-      meta: [
-        ?year,
-        if (rating > 0) '★ ${rating.toStringAsFixed(1)}',
-        ?dur,
-        if (info?.mpaaRating?.isNotEmpty == true) info!.mpaaRating!,
-      ],
+      rating: rating,
+      meta: [?year, ?dur],
       badges: [
         ?info?.qualityLabel,
         if ((info?.audioChannels ?? 0) >= 6) '5.1',
         if (lang.isNotEmpty) lang,
+        if (info?.mpaaRating?.isNotEmpty == true) info!.mpaaRating!,
       ],
       genres: info?.genre,
       synopsis: info?.plot ?? info?.description,
@@ -393,15 +434,17 @@ class _MovieDetailsScreenState extends ConsumerState<MovieDetailsScreen>
           ? () => ref.invalidate(vodInfoProvider(movie.streamId))
           : null,
       actions: actions,
-      about: [
-        ('Cast', info?.cast),
+      cast: info?.cast,
+      facts: [
         ('Director', info?.director),
         ('Genres', info?.genre),
         ('Country', info?.country),
         ('Released', info?.releaseDate),
         ('Audio', lang.isEmpty ? null : lang),
-        ('Video', [?info?.qualityLabel, ?info?.videoCodec?.toUpperCase()]
-            .join(' · ')),
+        (
+          'Video',
+          [?info?.qualityLabel, ?info?.videoCodec?.toUpperCase()].join(' · '),
+        ),
       ],
       similar: [
         for (final m in similar)
@@ -409,23 +452,10 @@ class _MovieDetailsScreenState extends ConsumerState<MovieDetailsScreen>
             title: m.name,
             image: m.streamIcon,
             rating: m.ratingValue,
-            onTap: () =>
-                context.pushReplacement('/movie-details', extra: m),
+            onTap: () => context.pushReplacement('/movie-details', extra: m),
           ),
       ],
     );
-  }
-
-  List<VodStream> _similarMovies(List<VodStream>? all) {
-    if (all == null || movie.categoryId == null) return const [];
-    final out = <VodStream>[];
-    for (final m in all) {
-      if (m.categoryId == movie.categoryId && m.streamId != movie.streamId) {
-        out.add(m);
-        if (out.length >= 24) break;
-      }
-    }
-    return out;
   }
 }
 
@@ -464,8 +494,7 @@ class _SeriesDetailsScreenState extends ConsumerState<SeriesDetailsScreen>
       _seasonEntry ??
       lastAction;
 
-  FocusNode get _aboveEpisodes =>
-      _seasonEntry ?? lastAction;
+  FocusNode get _aboveEpisodes => _seasonEntry ?? lastAction;
 
   @override
   void initState() {
@@ -488,11 +517,15 @@ class _SeriesDetailsScreenState extends ConsumerState<SeriesDetailsScreen>
       );
 
   /// Most recently watched, unfinished episode of this series.
-  (Episode, _Resume)? _resumeEpisode(SeriesInfo info) {
+  (Episode, _Resume)? _resumeEpisode(
+    SeriesInfo info,
+    Map<String, _Resume> resume,
+  ) {
+    if (resume.isEmpty) return null;
     (Episode, _Resume)? best;
     for (final list in info.seasons.values) {
       for (final ep in list) {
-        final r = _Resume.of(ep.id);
+        final r = resume[ep.id];
         if (r != null && (best == null || r.timestamp > best.$2.timestamp)) {
           best = (ep, r);
         }
@@ -528,14 +561,14 @@ class _SeriesDetailsScreenState extends ConsumerState<SeriesDetailsScreen>
   Widget build(BuildContext context) {
     final infoAsync = ref.watch(seriesInfoProvider(series.seriesId));
     final info = infoAsync.valueOrNull;
-    ref.watch(continueWatchingProvider); // refresh resume after playing
+    final resumeMap = resumePoints();
     final isFav = ref.watch(seriesFavoritesProvider).contains(series.seriesId);
     final s = info?.series;
 
     final keys = info == null
         ? const <String>[]
         : _sortedKeys(info.seasons.keys);
-    final resume = info == null ? null : _resumeEpisode(info);
+    final resume = info == null ? null : _resumeEpisode(info, resumeMap);
     _season ??= keys.isEmpty
         ? null
         : (resume != null && keys.contains(resume.$1.season)
@@ -559,8 +592,10 @@ class _SeriesDetailsScreenState extends ConsumerState<SeriesDetailsScreen>
         ? s!.youtubeTrailer
         : series.youtubeTrailer;
 
-    final similar = _similarSeries(
+    final similar = similarFrom<Series>(
       ref.watch(seriesAllListProvider).valueOrNull,
+      series.categoryId,
+      (x) => x.categoryId == series.categoryId && x.seriesId != series.seriesId,
     );
     similarCount = similar.length;
 
@@ -572,8 +607,7 @@ class _SeriesDetailsScreenState extends ConsumerState<SeriesDetailsScreen>
           primary: true,
           progress: resume.$2.progress,
           caption: resume.$2.leftLabel,
-          onTap: () =>
-              _playEpisode(info!, resume.$1, start: resume.$2.position),
+          onTap: () => _playEpisode(info!, resume.$1, start: resume.$2.position),
         ),
         if (firstEp != null && firstEp.id != resume.$1.id)
           _Action(
@@ -620,38 +654,41 @@ class _SeriesDetailsScreenState extends ConsumerState<SeriesDetailsScreen>
     }..remove('');
     final service = ref.watch(xtreamServiceProvider);
     final meta = info?.seasonMeta[_season];
+    final pad = _pad(context);
+    final fallbackStill =
+        meta?.cover ??
+        _firstHttp([s?.backdropPath, series.backdropPath]) ??
+        s?.cover ??
+        series.cover;
 
     return _DetailsPage(
       nav: this,
+      kind: seasonCount > 0
+          ? 'SERIES · $seasonCount SEASON${seasonCount == 1 ? '' : 'S'}'
+          : 'SERIES',
       title: s?.name.isNotEmpty == true && s!.name != 'Unknown Series'
           ? s.name
           : series.name,
-      backdrop: _firstHttp([s?.backdropPath, series.backdropPath, s?.cover]) ??
+      backdrop:
+          _firstHttp([s?.backdropPath, series.backdropPath, s?.cover]) ??
           series.cover,
       poster: _firstHttp([s?.cover, series.cover]),
-      meta: [
-        ?year,
-        if (rating10 > 0) '★ ${rating10.toStringAsFixed(1)}',
-        if (seasonCount > 0)
-          '$seasonCount Season${seasonCount == 1 ? '' : 's'}',
-      ],
+      rating: rating10,
+      meta: [?year],
       badges: [...langs.take(3)],
       genres: s?.genre ?? series.genre,
       synopsis: (s?.plot?.isNotEmpty == true ? s!.plot : null) ?? series.plot,
       loading: false,
       actions: actions,
-      about: [
-        ('Cast', s?.cast ?? series.cast),
+      cast: s?.cast ?? series.cast,
+      facts: [
         ('Director', s?.director ?? series.director),
         ('Genres', s?.genre ?? series.genre),
         ('Released', s?.releaseDate ?? series.releaseDate),
         ('Audio', langs.isEmpty ? null : langs.join(', ')),
       ],
       middle: [
-        _SectionTitle(
-          'Episodes',
-          trailing: episodes.isEmpty ? null : '${episodes.length} episodes',
-        ),
+        const _SectionTitle('Episodes'),
         if (infoAsync.isLoading && info == null)
           const SliverToBoxAdapter(child: _Loading())
         else if (infoAsync.hasError && info == null)
@@ -663,20 +700,23 @@ class _SeriesDetailsScreenState extends ConsumerState<SeriesDetailsScreen>
           )
         else ...[
           if (keys.isNotEmpty)
-            SliverToBoxAdapter(child: _seasonChips(keys, info!)),
+            SliverToBoxAdapter(child: _seasonTabs(keys, info!)),
           if (meta?.overview?.isNotEmpty == true &&
               meta!.overview != (s?.plot ?? series.plot))
             SliverToBoxAdapter(
               child: Padding(
-                padding: EdgeInsets.fromLTRB(_pad(context), 0, _pad(context), 12),
-                child: Text(
-                  meta.overview!,
-                  maxLines: 3,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                    color: AppTheme.textSecondary,
-                    fontSize: 13,
-                    height: 1.45,
+                padding: EdgeInsets.fromLTRB(pad, 4, pad, 10),
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 820),
+                  child: Text(
+                    meta.overview!,
+                    maxLines: 3,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      color: AppTheme.textSecondary,
+                      fontSize: 13,
+                      height: 1.5,
+                    ),
                   ),
                 ),
               ),
@@ -695,15 +735,12 @@ class _SeriesDetailsScreenState extends ConsumerState<SeriesDetailsScreen>
             SliverList(
               delegate: SliverChildBuilderDelegate((ctx, i) {
                 final ep = episodes[i];
+                final r = resumeMap[ep.id];
                 return _EpisodeRow(
                   key: ValueKey('ep_${ep.id}'),
                   episode: ep,
-                  fallbackImage:
-                      meta?.cover ??
-                      _firstHttp([s?.backdropPath, series.backdropPath]) ??
-                      s?.cover ??
-                      series.cover,
-                  resume: _Resume.of(ep.id),
+                  fallbackImage: fallbackStill,
+                  resume: r,
                   focusNode: _epNode(i),
                   downloadFocus: service == null ? null : _epDlNode(i),
                   onArrowKey: arrows(
@@ -720,10 +757,8 @@ class _SeriesDetailsScreenState extends ConsumerState<SeriesDetailsScreen>
                         : (similarCount > 0 ? similarNode(0) : null),
                     left: () => _epNode(i),
                   ),
-                  onPlay: () {
-                    final r = _Resume.of(ep.id);
-                    _playEpisode(info!, ep, start: r?.position ?? 0);
-                  },
+                  onPlay: () =>
+                      _playEpisode(info!, ep, start: r?.position ?? 0),
                   onDownload: service == null
                       ? null
                       : () => download(
@@ -743,27 +778,28 @@ class _SeriesDetailsScreenState extends ConsumerState<SeriesDetailsScreen>
             title: x.name,
             image: x.cover,
             rating: double.tryParse(x.rating ?? '') ?? 0,
-            onTap: () =>
-                context.pushReplacement('/series-details', extra: x),
+            onTap: () => context.pushReplacement('/series-details', extra: x),
           ),
       ],
     );
   }
 
-  Widget _seasonChips(List<String> keys, SeriesInfo info) {
+  /// Season tabs: text with an underline under the open season (TV-style).
+  Widget _seasonTabs(List<String> keys, SeriesInfo info) {
     return SizedBox(
-      height: 52,
+      height: 50,
       child: ListView.builder(
         scrollDirection: Axis.horizontal,
-        padding: EdgeInsets.symmetric(horizontal: _pad(context) - 4),
+        padding: EdgeInsets.symmetric(horizontal: _pad(context) - 10),
         itemCount: keys.length,
         itemBuilder: (_, i) {
           final k = keys[i];
           final sel = k == _season;
           final name = info.seasonMeta[k]?.name;
           final label = name != null && name.isNotEmpty ? name : 'Season $k';
+          final count = info.seasons[k]?.length ?? 0;
           return Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 6),
+            padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 4),
             child: TvFocusable(
               focusNode: _seasonNode(k),
               onActivate: () => setState(() => _season = k),
@@ -773,34 +809,48 @@ class _SeriesDetailsScreenState extends ConsumerState<SeriesDetailsScreen>
                     ? _epNode(0)
                     : (similarCount > 0 ? similarNode(0) : null),
                 left: () => i > 0 ? _seasonNode(keys[i - 1]) : null,
-                right: () => i + 1 < keys.length ? _seasonNode(keys[i + 1]) : null,
+                right: () =>
+                    i + 1 < keys.length ? _seasonNode(keys[i + 1]) : null,
               ),
               builder: (focused, _) => _Hover(
-                builder: (hover) => AnimatedContainer(
-                  duration: const Duration(milliseconds: 150),
-                  padding: const EdgeInsets.symmetric(horizontal: 18),
+                builder: (hover) => Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 14),
                   alignment: Alignment.center,
                   decoration: BoxDecoration(
-                    color: sel
+                    color: focused
                         ? Colors.white
-                        : (focused || hover)
-                        ? Colors.white.withValues(alpha: 0.16)
-                        : Colors.white.withValues(alpha: 0.07),
-                    borderRadius: BorderRadius.circular(20),
-                    border: Border.all(
-                      color: focused
-                          ? (sel ? AppTheme.primary : Colors.white)
-                          : Colors.transparent,
-                      width: 2.5,
-                    ),
+                        : hover
+                        ? Colors.white.withValues(alpha: 0.08)
+                        : Colors.transparent,
+                    borderRadius: BorderRadius.circular(8),
                   ),
-                  child: Text(
-                    label,
-                    style: TextStyle(
-                      color: sel ? Colors.black : AppTheme.textPrimary,
-                      fontSize: 13,
-                      fontWeight: sel ? FontWeight.w700 : FontWeight.w500,
-                    ),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        count > 0 ? '$label  ·  $count' : label,
+                        style: TextStyle(
+                          color: focused
+                              ? Colors.black
+                              : sel
+                              ? Colors.white
+                              : AppTheme.textSecondary,
+                          fontSize: 14,
+                          fontWeight: sel || focused
+                              ? FontWeight.w700
+                              : FontWeight.w500,
+                        ),
+                      ),
+                      const SizedBox(height: 5),
+                      Container(
+                        height: 3,
+                        width: 26,
+                        decoration: BoxDecoration(
+                          color: sel ? _accent : Colors.transparent,
+                          borderRadius: BorderRadius.circular(2),
+                        ),
+                      ),
+                    ],
                   ),
                 ),
               ),
@@ -810,23 +860,16 @@ class _SeriesDetailsScreenState extends ConsumerState<SeriesDetailsScreen>
       ),
     );
   }
-
-  List<Series> _similarSeries(List<Series>? all) {
-    if (all == null || series.categoryId == null) return const [];
-    final out = <Series>[];
-    for (final x in all) {
-      if (x.categoryId == series.categoryId && x.seriesId != series.seriesId) {
-        out.add(x);
-        if (out.length >= 24) break;
-      }
-    }
-    return out;
-  }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Page layout
 // ─────────────────────────────────────────────────────────────────────────────
+
+/// Warm accent used for the "cinema" look (rating, progress, tabs).
+const _accent = Color(0xFFE50914);
+const _gold = Color(0xFFFFC94D);
+
 class _Action {
   final IconData icon;
   final String label;
@@ -866,15 +909,17 @@ const double _zoomRoom = 14;
 
 double _pad(BuildContext context) {
   final w = Responsive.of(context).width;
-  return w < 640 ? 16 : (w < 1280 ? 32 : 48);
+  return w < 640 ? 18 : (w < 1280 ? 40 : 56);
 }
 
 class _DetailsPage extends StatelessWidget {
   final _DetailsNav nav;
+  final String kind;
   final String title;
   final String? originalTitle;
   final String? backdrop;
   final String? poster;
+  final double rating;
   final List<String> meta;
   final List<String> badges;
   final String? genres;
@@ -882,16 +927,19 @@ class _DetailsPage extends StatelessWidget {
   final bool loading;
   final VoidCallback? error;
   final List<_Action> actions;
-  final List<(String, String?)> about;
+  final String? cast;
+  final List<(String, String?)> facts;
   final List<Widget> middle; // slivers between hero and About
   final List<_SimilarItem> similar;
 
   const _DetailsPage({
     required this.nav,
+    required this.kind,
     required this.title,
     this.originalTitle,
     required this.backdrop,
     required this.poster,
+    required this.rating,
     required this.meta,
     required this.badges,
     required this.genres,
@@ -899,7 +947,8 @@ class _DetailsPage extends StatelessWidget {
     required this.loading,
     this.error,
     required this.actions,
-    required this.about,
+    required this.cast,
+    required this.facts,
     this.middle = const [],
     required this.similar,
   });
@@ -908,168 +957,157 @@ class _DetailsPage extends StatelessWidget {
   Widget build(BuildContext context) {
     final r = Responsive.of(context);
     final narrow = r.width < 720 || r.height > r.width;
-    nav.narrowLayout = narrow;
     nav.actionCount = actions.length;
-    nav.stackedActions = narrow
-        ? actions.where((a) => a.primary || a.icon == Icons.replay_rounded).length
-        : 0;
-
-    final aboutRows = about
-        .where((e) => e.$2 != null && e.$2!.trim().isNotEmpty)
-        .toList();
+    final heroH = narrow
+        ? r.width * 10 / 16
+        : (r.height * 0.88).clamp(380.0, 860.0);
 
     return Scaffold(
       backgroundColor: AppTheme.background,
-      body: CustomScrollView(
-        controller: nav.scroll,
-        slivers: [
-          SliverToBoxAdapter(
-            child: narrow ? _narrowHero(context) : _wideHero(context, r),
-          ),
-          if (loading)
-            const SliverToBoxAdapter(child: _Loading())
-          else if (error != null)
-            SliverToBoxAdapter(child: _ErrorBox(onRetry: error!)),
-          ...middle,
-          if (aboutRows.isNotEmpty || (synopsis?.isNotEmpty ?? false)) ...[
-            _SectionTitle('About $title'),
-            SliverToBoxAdapter(
-              child: Padding(
-                padding: EdgeInsets.symmetric(horizontal: _pad(context)),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    if (synopsis?.isNotEmpty ?? false) ...[
-                      ConstrainedBox(
-                        constraints: const BoxConstraints(maxWidth: 900),
-                        child: Text(
-                          synopsis!,
-                          style: const TextStyle(
-                            color: AppTheme.textSecondary,
-                            fontSize: 13.5,
-                            height: 1.55,
-                          ),
+      body: Stack(
+        children: [
+          // ── Fixed backdrop (doesn't scroll or repaint with the page) ──
+          Positioned(
+            top: 0,
+            left: narrow ? 0 : r.width * 0.22,
+            right: 0,
+            height: heroH,
+            child: RepaintBoundary(
+              child: Stack(
+                fit: StackFit.expand,
+                children: [
+                  backdrop == null
+                      ? const ColoredBox(color: AppTheme.surface)
+                      : AppNetworkImage(
+                          url: backdrop,
+                          fit: BoxFit.cover,
+                          fallback: const ColoredBox(color: AppTheme.surface),
                         ),
-                      ),
-                      const SizedBox(height: 14),
-                    ],
-                    for (final row in aboutRows)
-                      Padding(
-                        padding: const EdgeInsets.only(bottom: 8),
-                        child: ConstrainedBox(
-                          constraints: const BoxConstraints(maxWidth: 900),
-                          child: Text.rich(
-                            TextSpan(
-                              children: [
-                                TextSpan(
-                                  text: '${row.$1}:  ',
-                                  style: const TextStyle(
-                                    color: AppTheme.textMuted,
-                                    fontWeight: FontWeight.w600,
-                                  ),
-                                ),
-                                TextSpan(
-                                  text: row.$2!.trim(),
-                                  style: const TextStyle(
-                                    color: AppTheme.textPrimary,
-                                  ),
-                                ),
+                  DecoratedBox(
+                    decoration: BoxDecoration(
+                      gradient: narrow
+                          ? const LinearGradient(
+                              begin: Alignment.topCenter,
+                              end: Alignment.bottomCenter,
+                              colors: [
+                                Color(0x990A0C14),
+                                Color(0x000A0C14),
+                                Color(0x660A0C14),
+                                AppTheme.background,
                               ],
+                              stops: [0.0, 0.3, 0.7, 1.0],
+                            )
+                          : const LinearGradient(
+                              begin: Alignment.centerLeft,
+                              end: Alignment.centerRight,
+                              colors: [
+                                AppTheme.background,
+                                Color(0xB30A0C14),
+                                Color(0x330A0C14),
+                                Color(0x000A0C14),
+                              ],
+                              stops: [0.0, 0.3, 0.6, 1.0],
                             ),
-                            style: const TextStyle(fontSize: 13, height: 1.4),
-                          ),
+                    ),
+                  ),
+                  if (!narrow)
+                    const DecoratedBox(
+                      decoration: BoxDecoration(
+                        gradient: LinearGradient(
+                          begin: Alignment.topCenter,
+                          end: Alignment.bottomCenter,
+                          colors: [
+                            Color(0x800A0C14),
+                            Color(0x000A0C14),
+                            Color(0x000A0C14),
+                            AppTheme.background,
+                          ],
+                          stops: [0.0, 0.2, 0.6, 1.0],
                         ),
                       ),
-                  ],
-                ),
+                    ),
+                ],
               ),
             ),
-          ],
-          if (similar.isNotEmpty) ...[
-            const _SectionTitle('More Like This'),
-            SliverToBoxAdapter(child: _similarRow(context, narrow)),
-          ],
-          const SliverToBoxAdapter(child: SizedBox(height: 40)),
+          ),
+
+          // ── Scrolling content ─────────────────────────────────────────
+          CustomScrollView(
+            controller: nav.scroll,
+            slivers: [
+              SliverToBoxAdapter(
+                child: narrow
+                    ? _narrowHero(context, heroH)
+                    : _wideHero(context, r, heroH),
+              ),
+              if (loading)
+                const SliverToBoxAdapter(child: _Loading())
+              else if (error != null)
+                SliverToBoxAdapter(child: _ErrorBox(onRetry: error!)),
+              ...middle,
+              ..._about(context, narrow),
+              if (similar.isNotEmpty) ...[
+                const _SectionTitle('More Like This'),
+                SliverToBoxAdapter(child: _similarRow(context, narrow)),
+              ],
+              const SliverToBoxAdapter(child: SizedBox(height: 48)),
+            ],
+          ),
+
+          // ── Back (always reachable, never scrolls away) ───────────────
+          Positioned(
+            top: 12,
+            left: narrow ? 8 : _pad(context) - 14,
+            child: SafeArea(child: _BackButton(nav: nav)),
+          ),
         ],
       ),
     );
   }
 
   // ── Wide (TV / desktop / tablet landscape) ──────────────────────────────
-  Widget _wideHero(BuildContext context, Responsive r) {
-    final h = (r.height * 0.86).clamp(360.0, 820.0);
+  Widget _wideHero(BuildContext context, Responsive r, double h) {
     final pad = _pad(context);
-    final posterW = (h * 0.34).clamp(120.0, 230.0);
+    final posterW = (h * 0.36).clamp(130.0, 250.0);
+    final showPoster = r.width >= 900;
     return SizedBox(
       height: h,
       child: Stack(
-        fit: StackFit.expand,
         children: [
-          Positioned(
-            top: 0,
-            right: 0,
-            bottom: 0,
-            width: r.width * 0.74,
-            child: _backdropImage(),
-          ),
-          // Fade the backdrop into the page: from the left and the bottom.
-          const DecoratedBox(
-            decoration: BoxDecoration(
-              gradient: LinearGradient(
-                begin: Alignment.centerLeft,
-                end: Alignment.centerRight,
-                colors: [
-                  AppTheme.background,
-                  AppTheme.background,
-                  Color(0xCC0A0C14),
-                  Color(0x000A0C14),
-                ],
-                stops: [0.0, 0.26, 0.48, 0.78],
-              ),
+          if (showPoster)
+            Positioned(
+              right: pad,
+              bottom: 28,
+              child: _Poster(url: poster, width: posterW),
             ),
-          ),
-          const DecoratedBox(
-            decoration: BoxDecoration(
-              gradient: LinearGradient(
-                begin: Alignment.topCenter,
-                end: Alignment.bottomCenter,
-                colors: [
-                  Color(0x660A0C14),
-                  Color(0x000A0C14),
-                  Color(0x000A0C14),
-                  AppTheme.background,
-                ],
-                stops: [0.0, 0.18, 0.62, 1.0],
-              ),
-            ),
-          ),
-          Positioned(
-            top: 16,
-            left: pad - 8,
-            child: SafeArea(child: _BackButton(nav: nav)),
-          ),
           Positioned(
             left: pad,
-            right: r.width * 0.12,
-            bottom: 20,
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.end,
-              children: [
-                _Poster(url: poster, width: posterW),
-                SizedBox(width: pad * 0.8),
-                Expanded(
-                  child: _HeroInfo(
-                    title: title,
-                    originalTitle: originalTitle,
-                    meta: meta,
-                    badges: badges,
-                    genres: genres,
-                    synopsis: synopsis,
-                    big: true,
-                    actions: _wideActions(),
-                  ),
-                ),
-              ],
+            right: showPoster ? posterW + pad * 2 : r.width * 0.2,
+            bottom: 24,
+            child: _HeroInfo(
+              kind: kind,
+              title: title,
+              originalTitle: originalTitle,
+              rating: rating,
+              meta: meta,
+              badges: badges,
+              genres: genres,
+              synopsis: synopsis,
+              big: true,
+              actions: Wrap(
+                spacing: 12,
+                runSpacing: 12,
+                crossAxisAlignment: WrapCrossAlignment.center,
+                children: [
+                  for (var i = 0; i < actions.length; i++)
+                    _ActionButton(
+                      action: actions[i],
+                      focusNode: nav.actionNode(i),
+                      autofocus: i == 0,
+                      onArrowKey: nav.actionArrows(i),
+                    ),
+                ],
+              ),
             ),
           ),
         ],
@@ -1077,123 +1115,183 @@ class _DetailsPage extends StatelessWidget {
     );
   }
 
-  Widget _wideActions() => Wrap(
-    spacing: 10,
-    runSpacing: 10,
-    crossAxisAlignment: WrapCrossAlignment.center,
-    children: [
-      for (var i = 0; i < actions.length; i++)
-        _ActionButton(
-          action: actions[i],
-          focusNode: nav.actionNode(i),
-          autofocus: i == 0,
-          onArrowKey: nav.actionArrows(i),
-          compact: false,
-        ),
-    ],
-  );
-
   // ── Narrow (phones / portrait) ──────────────────────────────────────────
-  Widget _narrowHero(BuildContext context) {
+  Widget _narrowHero(BuildContext context, double backdropH) {
     final pad = _pad(context);
-    final stacked = nav.stackedActions;
+    final primary = actions.where((a) => a.primary).length;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        AspectRatio(
-          aspectRatio: 16 / 10,
-          child: Stack(
-            fit: StackFit.expand,
+        SizedBox(height: backdropH - 70),
+        Padding(
+          padding: EdgeInsets.symmetric(horizontal: pad),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.end,
             children: [
-              _backdropImage(),
-              const DecoratedBox(
-                decoration: BoxDecoration(
-                  gradient: LinearGradient(
-                    begin: Alignment.topCenter,
-                    end: Alignment.bottomCenter,
-                    colors: [
-                      Color(0x990A0C14),
-                      Color(0x000A0C14),
-                      AppTheme.background,
-                    ],
-                    stops: [0.0, 0.35, 1.0],
-                  ),
+              _Poster(url: poster, width: 96),
+              const SizedBox(width: 14),
+              Expanded(
+                child: _HeroInfo(
+                  kind: kind,
+                  title: title,
+                  originalTitle: originalTitle,
+                  rating: rating,
+                  meta: meta,
+                  badges: const [],
+                  genres: null,
+                  synopsis: null,
+                  big: false,
+                  actions: const SizedBox.shrink(),
                 ),
-              ),
-              Positioned(
-                top: 4,
-                left: 4,
-                child: SafeArea(child: _BackButton(nav: nav)),
-              ),
-              Positioned(
-                left: pad,
-                bottom: 0,
-                child: _Poster(url: poster, width: 92),
               ),
             ],
           ),
         ),
         Padding(
-          padding: EdgeInsets.fromLTRB(pad, 12, pad, 0),
-          child: _HeroInfo(
-            title: title,
-            originalTitle: originalTitle,
-            meta: meta,
-            badges: badges,
-            genres: genres,
-            synopsis: synopsis,
-            big: false,
-            actions: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                for (var i = 0; i < stacked; i++)
-                  Padding(
-                    padding: const EdgeInsets.only(bottom: 8),
-                    child: _ActionButton(
-                      action: actions[i],
-                      focusNode: nav.actionNode(i),
-                      autofocus: i == 0,
-                      onArrowKey: nav.actionArrows(i),
-                      compact: false,
-                      expand: true,
-                    ),
-                  ),
-                if (actions.length > stacked)
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                    children: [
-                      for (var i = stacked; i < actions.length; i++)
-                        _ActionButton(
-                          action: actions[i],
-                          focusNode: nav.actionNode(i),
-                          autofocus: i == 0,
-                          onArrowKey: nav.actionArrows(i),
-                          compact: true,
-                        ),
-                    ],
-                  ),
+          padding: EdgeInsets.fromLTRB(pad, 14, pad, 0),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              if (badges.isNotEmpty) ...[
+                Wrap(
+                  spacing: 6,
+                  runSpacing: 6,
+                  children: [for (final b in badges) _Chip(b)],
+                ),
+                const SizedBox(height: 14),
               ],
-            ),
+              for (var i = 0; i < primary; i++)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 10),
+                  child: _ActionButton(
+                    action: actions[i],
+                    focusNode: nav.actionNode(i),
+                    autofocus: i == 0,
+                    onArrowKey: nav.actionArrows(i),
+                    expand: true,
+                  ),
+                ),
+              if (actions.length > primary)
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                  children: [
+                    for (var i = primary; i < actions.length; i++)
+                      _ActionButton(
+                        action: actions[i],
+                        focusNode: nav.actionNode(i),
+                        autofocus: false,
+                        onArrowKey: nav.actionArrows(i),
+                        compact: true,
+                      ),
+                  ],
+                ),
+              if (synopsis != null && synopsis!.trim().isNotEmpty) ...[
+                const SizedBox(height: 14),
+                Text(
+                  synopsis!.trim(),
+                  maxLines: 4,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: AppTheme.textPrimary.withValues(alpha: 0.82),
+                    fontSize: 13.5,
+                    height: 1.5,
+                  ),
+                ),
+              ],
+            ],
           ),
         ),
       ],
     );
   }
 
-  Widget _backdropImage() => backdrop == null
-      ? const ColoredBox(color: AppTheme.surface)
-      : AppNetworkImage(
-          url: backdrop,
-          fit: BoxFit.cover,
-          fallback: const ColoredBox(color: AppTheme.surface),
-        );
+  // ── About: synopsis + cast | facts ─────────────────────────────────────
+  List<Widget> _about(BuildContext context, bool narrow) {
+    final rows = facts
+        .where((e) => e.$2 != null && e.$2!.trim().isNotEmpty)
+        .toList();
+    final castNames = (cast ?? '')
+        .split(',')
+        .map((e) => e.trim())
+        .where((e) => e.isNotEmpty)
+        .take(12)
+        .toList();
+    final hasSyn = synopsis?.trim().isNotEmpty ?? false;
+    if (rows.isEmpty && castNames.isEmpty && !hasSyn) return const [];
+    final pad = _pad(context);
+
+    final story = Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        if (hasSyn)
+          Text(
+            synopsis!.trim(),
+            style: const TextStyle(
+              color: AppTheme.textSecondary,
+              fontSize: 14,
+              height: 1.6,
+            ),
+          ),
+        if (castNames.isNotEmpty) ...[
+          const SizedBox(height: 16),
+          const _Eyebrow('CAST'),
+          const SizedBox(height: 8),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [for (final c in castNames) _Chip(c, soft: true)],
+          ),
+        ],
+      ],
+    );
+    final factList = Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        for (final row in rows) ...[
+          _Eyebrow(row.$1.toUpperCase()),
+          const SizedBox(height: 4),
+          Text(
+            row.$2!.trim(),
+            style: const TextStyle(
+              color: AppTheme.textPrimary,
+              fontSize: 13.5,
+              height: 1.4,
+            ),
+          ),
+          const SizedBox(height: 14),
+        ],
+      ],
+    );
+
+    return [
+      _SectionTitle('About $title'),
+      SliverToBoxAdapter(
+        child: Padding(
+          padding: EdgeInsets.symmetric(horizontal: pad),
+          child: narrow
+              ? Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [story, const SizedBox(height: 18), factList],
+                )
+              : Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Expanded(flex: 3, child: story),
+                    SizedBox(width: pad),
+                    Expanded(flex: 2, child: factList),
+                  ],
+                ),
+        ),
+      ),
+    ];
+  }
 
   Widget _similarRow(BuildContext context, bool narrow) {
-    final w = narrow ? 108.0 : 138.0;
+    final w = narrow ? 112.0 : 146.0;
     return SizedBox(
-      // Room above and below for the 1.06 focus zoom — the list clips its
+      // Room above and below for the focus zoom — the list clips its
       // children, so a zoomed poster was cut off at the top.
-      height: w * 1.5 + 34 + 2 * _zoomRoom,
+      height: w * 1.5 + 36 + 2 * _zoomRoom,
       child: ListView.builder(
         scrollDirection: Axis.horizontal,
         padding: EdgeInsets.symmetric(
@@ -1222,7 +1320,7 @@ class _DetailsPage extends StatelessWidget {
                           width: w,
                           height: w * 1.5,
                           decoration: BoxDecoration(
-                            borderRadius: BorderRadius.circular(8),
+                            borderRadius: BorderRadius.circular(10),
                             border: Border.all(
                               color: focused ? Colors.white : Colors.transparent,
                               width: 2.5,
@@ -1245,13 +1343,13 @@ class _DetailsPage extends StatelessWidget {
                                 Positioned(
                                   top: 6,
                                   left: 6,
-                                  child: _Chip('★ ${it.rating.toStringAsFixed(1)}'),
+                                  child: _RatingPill(it.rating, small: true),
                                 ),
                             ],
                           ),
                         ),
                       ),
-                      const SizedBox(height: 6),
+                      const SizedBox(height: 7),
                       Text(
                         it.title,
                         maxLines: 1,
@@ -1261,6 +1359,9 @@ class _DetailsPage extends StatelessWidget {
                               ? AppTheme.textPrimary
                               : AppTheme.textSecondary,
                           fontSize: 12,
+                          fontWeight: focused
+                              ? FontWeight.w600
+                              : FontWeight.w400,
                         ),
                       ),
                     ],
@@ -1276,8 +1377,10 @@ class _DetailsPage extends StatelessWidget {
 }
 
 class _HeroInfo extends StatelessWidget {
+  final String kind;
   final String title;
   final String? originalTitle;
+  final double rating;
   final List<String> meta;
   final List<String> badges;
   final String? genres;
@@ -1286,8 +1389,10 @@ class _HeroInfo extends StatelessWidget {
   final Widget actions;
 
   const _HeroInfo({
+    required this.kind,
     required this.title,
     required this.originalTitle,
+    required this.rating,
     required this.meta,
     required this.badges,
     required this.genres,
@@ -1303,28 +1408,44 @@ class _HeroInfo extends StatelessWidget {
         .map((e) => e.trim())
         .where((e) => e.isNotEmpty)
         .take(4)
-        .join('  ·  ');
+        .join('   •   ');
     return Column(
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
+        Row(
+          children: [
+            Container(
+              width: 4,
+              height: 14,
+              decoration: BoxDecoration(
+                color: _accent,
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+            const SizedBox(width: 8),
+            Flexible(child: _Eyebrow(kind, color: Colors.white70)),
+          ],
+        ),
+        const SizedBox(height: 10),
         Text(
           title,
           maxLines: 2,
           overflow: TextOverflow.ellipsis,
           style: TextStyle(
             color: Colors.white,
-            fontSize: big ? 32 : 22,
-            fontWeight: FontWeight.w800,
-            height: 1.15,
-            shadows: const [Shadow(color: Colors.black54, blurRadius: 12)],
+            fontSize: big ? 40 : 22,
+            fontWeight: FontWeight.w900,
+            height: 1.08,
+            letterSpacing: big ? -0.8 : -0.3,
+            shadows: const [Shadow(color: Colors.black54, blurRadius: 14)],
           ),
         ),
         if (originalTitle != null &&
             originalTitle!.isNotEmpty &&
             originalTitle != title)
           Padding(
-            padding: const EdgeInsets.only(top: 2),
+            padding: const EdgeInsets.only(top: 4),
             child: Text(
               originalTitle!,
               maxLines: 1,
@@ -1336,53 +1457,56 @@ class _HeroInfo extends StatelessWidget {
               ),
             ),
           ),
-        const SizedBox(height: 10),
+        const SizedBox(height: 12),
         Wrap(
-          spacing: 10,
-          runSpacing: 6,
+          spacing: 12,
+          runSpacing: 8,
           crossAxisAlignment: WrapCrossAlignment.center,
           children: [
+            if (rating > 0) _RatingPill(rating),
             for (final m in meta)
               Text(
                 m,
                 style: TextStyle(
-                  color: m.startsWith('★')
-                      ? const Color(0xFFFFC94D)
-                      : AppTheme.textPrimary.withValues(alpha: 0.85),
-                  fontSize: big ? 14 : 13,
+                  color: Colors.white.withValues(alpha: 0.88),
+                  fontSize: big ? 15 : 13,
                   fontWeight: FontWeight.w600,
                 ),
               ),
-            for (final b in badges) _Chip(b, outlined: true),
+            for (final b in badges) _Chip(b),
           ],
         ),
         if (g != null && g.isNotEmpty) ...[
-          const SizedBox(height: 6),
+          const SizedBox(height: 10),
           Text(
             g,
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
-            style: const TextStyle(color: AppTheme.textSecondary, fontSize: 13),
+            style: TextStyle(
+              color: Colors.white.withValues(alpha: 0.7),
+              fontSize: 13,
+              fontWeight: FontWeight.w500,
+            ),
           ),
         ],
-        SizedBox(height: big ? 18 : 14),
-        actions,
         if (synopsis != null && synopsis!.trim().isNotEmpty) ...[
-          SizedBox(height: big ? 16 : 12),
+          const SizedBox(height: 14),
           ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 680),
+            constraints: const BoxConstraints(maxWidth: 640),
             child: Text(
               synopsis!.trim(),
-              maxLines: big ? 3 : 4,
+              maxLines: 3,
               overflow: TextOverflow.ellipsis,
               style: TextStyle(
-                color: AppTheme.textPrimary.withValues(alpha: 0.8),
-                fontSize: big ? 14 : 13,
-                height: 1.5,
+                color: Colors.white.withValues(alpha: 0.8),
+                fontSize: 14.5,
+                height: 1.55,
               ),
             ),
           ),
         ],
+        if (big) const SizedBox(height: 22),
+        actions,
       ],
     );
   }
@@ -1401,7 +1525,7 @@ class _ActionButton extends StatelessWidget {
     required this.focusNode,
     required this.autofocus,
     required this.onArrowKey,
-    required this.compact,
+    this.compact = false,
     this.expand = false,
   });
 
@@ -1416,19 +1540,16 @@ class _ActionButton extends StatelessWidget {
       builder: (focused, pressed) => _Hover(
         builder: (hover) {
           if (compact) {
-            return AnimatedContainer(
-              duration: const Duration(milliseconds: 150),
+            return Container(
               width: 84,
               padding: const EdgeInsets.symmetric(vertical: 8),
               decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(10),
-                color: focused || hover
+                borderRadius: BorderRadius.circular(12),
+                color: focused
+                    ? Colors.white
+                    : hover
                     ? Colors.white.withValues(alpha: 0.12)
                     : Colors.transparent,
-                border: Border.all(
-                  color: focused ? Colors.white : Colors.transparent,
-                  width: 2,
-                ),
               ),
               child: Column(
                 mainAxisSize: MainAxisSize.min,
@@ -1436,16 +1557,19 @@ class _ActionButton extends StatelessWidget {
                   Icon(
                     a.icon,
                     size: 24,
-                    color: a.active ? AppTheme.error : Colors.white,
+                    color: a.active
+                        ? _accent
+                        : (focused ? Colors.black : Colors.white),
                   ),
                   const SizedBox(height: 4),
                   Text(
                     a.label,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                      color: AppTheme.textSecondary,
+                    style: TextStyle(
+                      color: focused ? Colors.black : AppTheme.textSecondary,
                       fontSize: 11,
+                      fontWeight: FontWeight.w600,
                     ),
                   ),
                 ],
@@ -1454,55 +1578,45 @@ class _ActionButton extends StatelessWidget {
           }
           final primary = a.primary;
           final enabled = a.onTap != null;
-          final bg = primary
-              ? (focused ? Colors.white : Colors.white.withValues(alpha: 0.92))
-              : (focused
-                    ? Colors.white.withValues(alpha: 0.28)
-                    : hover
-                    ? Colors.white.withValues(alpha: 0.2)
-                    : Colors.white.withValues(alpha: 0.12));
-          final fg = primary ? Colors.black : Colors.white;
-          final iconColor = a.active ? AppTheme.error : fg;
+          // Primary: solid white. Others: glass pills that turn white when
+          // focused — one unmistakable "you are here".
+          final bg = primary || focused
+              ? Colors.white
+              : Colors.white.withValues(alpha: hover ? 0.22 : 0.14);
+          final fg = primary || focused ? Colors.black : Colors.white;
+          final iconColor = a.active ? _accent : fg;
           return AnimatedScale(
-            scale: focused ? 1.05 : 1.0,
-            duration: const Duration(milliseconds: 150),
-            child: AnimatedContainer(
-              duration: const Duration(milliseconds: 150),
-              constraints: BoxConstraints(minWidth: expand ? double.infinity : 0),
+            scale: focused ? 1.07 : 1.0,
+            duration: const Duration(milliseconds: 140),
+            child: Container(
+              constraints: BoxConstraints(
+                minWidth: expand ? double.infinity : 0,
+                minHeight: 50,
+              ),
               decoration: BoxDecoration(
                 color: enabled ? bg : bg.withValues(alpha: 0.4),
-                borderRadius: BorderRadius.circular(8),
+                borderRadius: BorderRadius.circular(primary ? 10 : 26),
                 border: Border.all(
-                  color: focused
-                      ? (primary ? AppTheme.primary : Colors.white)
-                      : Colors.transparent,
+                  color: focused && primary ? _accent : Colors.transparent,
                   width: 2.5,
                 ),
-                boxShadow: focused
-                    ? [
-                        BoxShadow(
-                          color: Colors.black.withValues(alpha: 0.45),
-                          blurRadius: 14,
-                          offset: const Offset(0, 4),
-                        ),
-                      ]
-                    : null,
               ),
               clipBehavior: Clip.antiAlias,
               child: Column(
                 mainAxisSize: MainAxisSize.min,
+                mainAxisAlignment: MainAxisAlignment.center,
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
                   Padding(
                     padding: EdgeInsets.symmetric(
-                      horizontal: primary ? 22 : 16,
-                      vertical: 10,
+                      horizontal: primary ? 26 : 18,
+                      vertical: 11,
                     ),
                     child: Row(
                       mainAxisSize: MainAxisSize.min,
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
-                        Icon(a.icon, size: primary ? 26 : 20, color: iconColor),
+                        Icon(a.icon, size: primary ? 28 : 21, color: iconColor),
                         const SizedBox(width: 8),
                         Flexible(
                           child: Text(
@@ -1511,18 +1625,18 @@ class _ActionButton extends StatelessWidget {
                             overflow: TextOverflow.ellipsis,
                             style: TextStyle(
                               color: fg,
-                              fontSize: primary ? 15 : 14,
-                              fontWeight: FontWeight.w700,
+                              fontSize: primary ? 16 : 14,
+                              fontWeight: FontWeight.w800,
                             ),
                           ),
                         ),
                         if (a.caption != null) ...[
-                          const SizedBox(width: 10),
+                          const SizedBox(width: 12),
                           Text(
                             a.caption!,
                             style: TextStyle(
-                              color: fg.withValues(alpha: 0.6),
-                              fontSize: 12,
+                              color: fg.withValues(alpha: 0.55),
+                              fontSize: 12.5,
                               fontWeight: FontWeight.w600,
                             ),
                           ),
@@ -1533,9 +1647,9 @@ class _ActionButton extends StatelessWidget {
                   if (a.progress != null)
                     LinearProgressIndicator(
                       value: a.progress!.clamp(0.0, 1.0),
-                      minHeight: 3,
+                      minHeight: 4,
                       backgroundColor: Colors.black12,
-                      color: AppTheme.error,
+                      color: _accent,
                     ),
                 ],
               ),
@@ -1556,19 +1670,20 @@ class _BackButton extends StatelessWidget {
     focusNode: nav.backFocus,
     onActivate: nav.goBack,
     onArrowKey: nav.backArrows,
+    autoScroll: false,
     builder: (focused, _) => _Hover(
-      builder: (hover) => AnimatedContainer(
-        duration: const Duration(milliseconds: 150),
-        padding: const EdgeInsets.all(9),
+      builder: (hover) => Container(
+        padding: const EdgeInsets.all(10),
         decoration: BoxDecoration(
           shape: BoxShape.circle,
-          color: Colors.black.withValues(alpha: focused || hover ? 0.7 : 0.45),
-          border: Border.all(
-            color: focused ? Colors.white : Colors.transparent,
-            width: 2,
-          ),
+          color: focused
+              ? Colors.white
+              : Colors.black.withValues(alpha: hover ? 0.7 : 0.45),
         ),
-        child: const Icon(Icons.arrow_back_rounded, color: Colors.white),
+        child: Icon(
+          Icons.arrow_back_rounded,
+          color: focused ? Colors.black : Colors.white,
+        ),
       ),
     ),
   );
@@ -1585,13 +1700,10 @@ class _Poster extends StatelessWidget {
     height: width * 1.5,
     decoration: BoxDecoration(
       color: AppTheme.surfaceVariant,
-      borderRadius: BorderRadius.circular(10),
-      boxShadow: [
-        BoxShadow(
-          color: Colors.black.withValues(alpha: 0.55),
-          blurRadius: 24,
-          offset: const Offset(0, 10),
-        ),
+      borderRadius: BorderRadius.circular(12),
+      border: Border.all(color: Colors.white.withValues(alpha: 0.12)),
+      boxShadow: const [
+        BoxShadow(color: Colors.black54, blurRadius: 18, offset: Offset(0, 10)),
       ],
     ),
     clipBehavior: Clip.antiAlias,
@@ -1632,11 +1744,11 @@ class _EpisodeRow extends StatelessWidget {
     final narrow = Responsive.of(context).width < 720;
     final pad = _pad(context);
     final ep = episode;
-    final thumbW = narrow ? 128.0 : 210.0;
+    final thumbW = narrow ? 132.0 : 220.0;
     final title = _episodeTitle(ep);
     final dur = ep.formattedDuration;
     return Padding(
-      padding: EdgeInsets.fromLTRB(pad - 8, 2, pad - 8, 2),
+      padding: EdgeInsets.fromLTRB(pad - 10, 3, pad - 10, 3),
       child: Row(
         children: [
           Expanded(
@@ -1647,31 +1759,46 @@ class _EpisodeRow extends StatelessWidget {
               onArrowKey: onArrowKey,
               scrollAlignment: 0.4,
               builder: (focused, _) => _Hover(
-                builder: (hover) => AnimatedContainer(
-                  duration: const Duration(milliseconds: 150),
-                  padding: const EdgeInsets.all(8),
+                builder: (hover) => Container(
+                  padding: const EdgeInsets.all(10),
                   decoration: BoxDecoration(
                     color: focused
-                        ? Colors.white.withValues(alpha: 0.10)
+                        ? Colors.white.withValues(alpha: 0.12)
                         : hover
                         ? Colors.white.withValues(alpha: 0.05)
                         : Colors.transparent,
-                    borderRadius: BorderRadius.circular(10),
+                    borderRadius: BorderRadius.circular(12),
                     border: Border.all(
                       color: focused ? Colors.white : Colors.transparent,
-                      width: 2,
+                      width: 2.5,
                     ),
                   ),
                   child: Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
+                    crossAxisAlignment: CrossAxisAlignment.center,
                     children: [
+                      if (!narrow)
+                        SizedBox(
+                          width: 44,
+                          child: Text(
+                            ep.episodeNum,
+                            textAlign: TextAlign.center,
+                            style: TextStyle(
+                              color: focused
+                                  ? Colors.white
+                                  : AppTheme.textMuted,
+                              fontSize: 26,
+                              fontWeight: FontWeight.w800,
+                            ),
+                          ),
+                        ),
+                      if (!narrow) const SizedBox(width: 10),
                       _EpisodeThumb(
                         url: ep.image ?? fallbackImage,
                         width: thumbW,
                         progress: resume?.progress,
                         showPlay: focused || hover,
                       ),
-                      const SizedBox(width: 14),
+                      const SizedBox(width: 16),
                       Expanded(
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
@@ -1680,12 +1807,14 @@ class _EpisodeRow extends StatelessWidget {
                               children: [
                                 Expanded(
                                   child: Text(
-                                    '${ep.episodeNum}. $title',
+                                    narrow
+                                        ? '${ep.episodeNum}. $title'
+                                        : title,
                                     maxLines: narrow ? 2 : 1,
                                     overflow: TextOverflow.ellipsis,
                                     style: const TextStyle(
                                       color: AppTheme.textPrimary,
-                                      fontSize: 14.5,
+                                      fontSize: 15,
                                       fontWeight: FontWeight.w700,
                                     ),
                                   ),
@@ -1696,6 +1825,7 @@ class _EpisodeRow extends StatelessWidget {
                                     style: const TextStyle(
                                       color: AppTheme.textSecondary,
                                       fontSize: 13,
+                                      fontWeight: FontWeight.w600,
                                     ),
                                   ),
                               ],
@@ -1713,13 +1843,13 @@ class _EpisodeRow extends StatelessWidget {
                               ),
                             if (resume != null)
                               Padding(
-                                padding: const EdgeInsets.only(top: 3),
+                                padding: const EdgeInsets.only(top: 4),
                                 child: Text(
                                   resume!.leftLabel,
                                   style: const TextStyle(
-                                    color: AppTheme.error,
+                                    color: _accent,
                                     fontSize: 12,
-                                    fontWeight: FontWeight.w600,
+                                    fontWeight: FontWeight.w700,
                                   ),
                                 ),
                               ),
@@ -1727,11 +1857,11 @@ class _EpisodeRow extends StatelessWidget {
                               const SizedBox(height: 6),
                               Text(
                                 ep.plot!,
-                                maxLines: 3,
+                                maxLines: 2,
                                 overflow: TextOverflow.ellipsis,
                                 style: const TextStyle(
                                   color: AppTheme.textSecondary,
-                                  fontSize: 12.5,
+                                  fontSize: 13,
                                   height: 1.45,
                                 ),
                               ),
@@ -1747,7 +1877,7 @@ class _EpisodeRow extends StatelessWidget {
           ),
           if (onDownload != null && downloadFocus != null)
             Padding(
-              padding: const EdgeInsets.only(left: 6),
+              padding: const EdgeInsets.only(left: 8),
               child: TvFocusable(
                 focusNode: downloadFocus,
                 onActivate: onDownload,
@@ -1755,9 +1885,8 @@ class _EpisodeRow extends StatelessWidget {
                 builder: (focused, _) => _Hover(
                   builder: (hover) => Tooltip(
                     message: 'Download episode',
-                    child: AnimatedContainer(
-                      duration: const Duration(milliseconds: 150),
-                      padding: const EdgeInsets.all(10),
+                    child: Container(
+                      padding: const EdgeInsets.all(11),
                       decoration: BoxDecoration(
                         shape: BoxShape.circle,
                         color: focused
@@ -1797,7 +1926,7 @@ class _EpisodeThumb extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => ClipRRect(
-    borderRadius: BorderRadius.circular(6),
+    borderRadius: BorderRadius.circular(8),
     child: SizedBox(
       width: width,
       height: width * 9 / 16,
@@ -1809,10 +1938,8 @@ class _EpisodeThumb extends StatelessWidget {
             fit: BoxFit.cover,
             fallback: const ColoredBox(color: AppTheme.surfaceVariant),
           ),
-          AnimatedOpacity(
-            opacity: showPlay ? 1 : 0.0,
-            duration: const Duration(milliseconds: 150),
-            child: ColoredBox(
+          if (showPlay)
+            ColoredBox(
               color: Colors.black38,
               child: Center(
                 child: Container(
@@ -1830,7 +1957,6 @@ class _EpisodeThumb extends StatelessWidget {
                 ),
               ),
             ),
-          ),
           if (progress != null)
             Positioned(
               left: 0,
@@ -1840,7 +1966,7 @@ class _EpisodeThumb extends StatelessWidget {
                 value: progress!.clamp(0.0, 1.0),
                 minHeight: 3,
                 backgroundColor: Colors.white24,
-                color: AppTheme.error,
+                color: _accent,
               ),
             ),
         ],
@@ -1851,75 +1977,107 @@ class _EpisodeThumb extends StatelessWidget {
 
 class _SectionTitle extends StatelessWidget {
   final String text;
-  final String? trailing;
-  const _SectionTitle(this.text, {this.trailing});
+  const _SectionTitle(this.text);
 
   @override
   Widget build(BuildContext context) => SliverToBoxAdapter(
     child: Padding(
-      padding: EdgeInsets.fromLTRB(_pad(context), 22, _pad(context), 10),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.end,
-        children: [
-          Flexible(
-            child: Text(
-              text,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: const TextStyle(
-                color: AppTheme.textPrimary,
-                fontSize: 19,
-                fontWeight: FontWeight.w800,
-              ),
-            ),
-          ),
-          if (trailing != null) ...[
-            const SizedBox(width: 12),
-            Text(
-              trailing!,
-              style: const TextStyle(
-                color: AppTheme.textMuted,
-                fontSize: 13,
-              ),
-            ),
-          ],
-        ],
+      padding: EdgeInsets.fromLTRB(_pad(context), 28, _pad(context), 12),
+      child: Text(
+        text,
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+        style: const TextStyle(
+          color: AppTheme.textPrimary,
+          fontSize: 21,
+          fontWeight: FontWeight.w800,
+          letterSpacing: -0.3,
+        ),
       ),
+    ),
+  );
+}
+
+class _Eyebrow extends StatelessWidget {
+  final String text;
+  final Color color;
+  const _Eyebrow(this.text, {this.color = AppTheme.textMuted});
+
+  @override
+  Widget build(BuildContext context) => Text(
+    text,
+    maxLines: 1,
+    overflow: TextOverflow.ellipsis,
+    style: TextStyle(
+      color: color,
+      fontSize: 11,
+      fontWeight: FontWeight.w800,
+      letterSpacing: 1.6,
+    ),
+  );
+}
+
+class _RatingPill extends StatelessWidget {
+  final double rating;
+  final bool small;
+  const _RatingPill(this.rating, {this.small = false});
+
+  @override
+  Widget build(BuildContext context) => Container(
+    padding: EdgeInsets.symmetric(horizontal: small ? 6 : 9, vertical: 3),
+    decoration: BoxDecoration(
+      color: small ? Colors.black.withValues(alpha: 0.7) : const Color(0x33FFC94D),
+      borderRadius: BorderRadius.circular(6),
+    ),
+    child: Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Icon(Icons.star_rounded, size: small ? 12 : 15, color: _gold),
+        const SizedBox(width: 3),
+        Text(
+          rating.toStringAsFixed(1),
+          style: TextStyle(
+            color: _gold,
+            fontSize: small ? 11 : 13.5,
+            fontWeight: FontWeight.w800,
+          ),
+        ),
+      ],
     ),
   );
 }
 
 class _Chip extends StatelessWidget {
   final String text;
-  final bool outlined;
-  const _Chip(this.text, {this.outlined = false});
+  final bool soft;
+  const _Chip(this.text, {this.soft = false});
 
   @override
   Widget build(BuildContext context) => Container(
-    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+    padding: EdgeInsets.symmetric(horizontal: soft ? 10 : 7, vertical: 3),
     decoration: BoxDecoration(
-      color: outlined ? Colors.transparent : Colors.black.withValues(alpha: 0.65),
-      borderRadius: BorderRadius.circular(4),
-      border: outlined
-          ? Border.all(color: Colors.white.withValues(alpha: 0.5))
-          : null,
+      color: soft ? Colors.white.withValues(alpha: 0.07) : Colors.transparent,
+      borderRadius: BorderRadius.circular(soft ? 14 : 4),
+      border: soft
+          ? null
+          : Border.all(color: Colors.white.withValues(alpha: 0.55)),
     ),
     child: Text(
       text,
       style: TextStyle(
-        color: outlined ? AppTheme.textPrimary : const Color(0xFFFFC94D),
-        fontSize: 11,
-        fontWeight: FontWeight.w700,
+        color: soft ? AppTheme.textSecondary : AppTheme.textPrimary,
+        fontSize: soft ? 12.5 : 11.5,
+        fontWeight: soft ? FontWeight.w500 : FontWeight.w700,
       ),
     ),
   );
 }
 
-class _PillButton extends StatelessWidget {
+class _GlassPill extends StatelessWidget {
   final IconData icon;
   final String label;
   final bool focused;
-  const _PillButton({
+  const _GlassPill({
     required this.icon,
     required this.label,
     required this.focused,
@@ -1929,16 +2087,21 @@ class _PillButton extends StatelessWidget {
   Widget build(BuildContext context) => Container(
     padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
     decoration: BoxDecoration(
-      color: Colors.white.withValues(alpha: focused ? 0.25 : 0.12),
-      borderRadius: BorderRadius.circular(8),
-      border: Border.all(color: focused ? Colors.white : Colors.transparent),
+      color: focused ? Colors.white : Colors.white.withValues(alpha: 0.12),
+      borderRadius: BorderRadius.circular(24),
     ),
     child: Row(
       mainAxisSize: MainAxisSize.min,
       children: [
-        Icon(icon, color: Colors.white),
+        Icon(icon, color: focused ? Colors.black : Colors.white),
         const SizedBox(width: 8),
-        Text(label, style: const TextStyle(color: Colors.white)),
+        Text(
+          label,
+          style: TextStyle(
+            color: focused ? Colors.black : Colors.white,
+            fontWeight: FontWeight.w700,
+          ),
+        ),
       ],
     ),
   );
@@ -1951,7 +2114,7 @@ class _Loading extends StatelessWidget {
   Widget build(BuildContext context) => const Padding(
     padding: EdgeInsets.all(32),
     child: Center(
-      child: CircularProgressIndicator(color: AppTheme.primary, strokeWidth: 2),
+      child: CircularProgressIndicator(color: _accent, strokeWidth: 2),
     ),
   );
 }
@@ -1962,7 +2125,7 @@ class _ErrorBox extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Padding(
-    padding: const EdgeInsets.all(24),
+    padding: EdgeInsets.symmetric(horizontal: _pad(context), vertical: 20),
     child: Row(
       children: [
         const Icon(Icons.cloud_off_outlined, color: AppTheme.textMuted),
@@ -1975,7 +2138,7 @@ class _ErrorBox extends StatelessWidget {
         ),
         TvFocusable(
           onActivate: onRetry,
-          builder: (focused, _) => _PillButton(
+          builder: (focused, _) => _GlassPill(
             icon: Icons.refresh_rounded,
             label: 'Retry',
             focused: focused,
@@ -2027,9 +2190,7 @@ class _Resume {
     return '${left < 1 ? 1 : left}m left';
   }
 
-  static _Resume? of(String id) {
-    final m = BehaviorService.instance.getPosition(id);
-    if (m == null) return null;
+  static _Resume? fromMap(Map<String, dynamic> m) {
     final pos = (m['position'] as num?)?.toDouble() ?? 0;
     final dur = (m['duration'] as num?)?.toDouble() ?? 0;
     if (pos <= 3 || dur <= 0) return null;

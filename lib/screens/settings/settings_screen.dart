@@ -276,13 +276,12 @@ class _SidebarItemState extends State<_SidebarItem> with TvFocusMixin {
                 ? AppTheme.surface
                 : Colors.transparent,
             borderRadius: BorderRadius.circular(10),
-            border: widget.isSelected
+            // Focus ring first: on the open section it used to vanish.
+            border: focused
+                ? Border.all(color: Colors.white, width: 2.5)
+                : widget.isSelected
                 ? Border.all(
                 color: AppTheme.primary.withValues(alpha: 0.3))
-                : focused
-                ? Border.all(
-                color: Colors.white.withValues(alpha: 0.55),
-                width: 1.5)
                 : null,
           ),
           child: Row(

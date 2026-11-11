@@ -501,6 +501,11 @@ class _SeriesCategorySidebarState
                         isSelected:
                             filter == SeriesFilter.all && selected == null,
                         onTap: () {
+                          // Already open: move into its titles (no deselect).
+                          if (filter == SeriesFilter.all && selected == null) {
+                            _enterGrid();
+                            return;
+                          }
                           ref.read(seriesFilterProvider.notifier).state =
                               SeriesFilter.all;
                           ref
@@ -518,6 +523,11 @@ class _SeriesCategorySidebarState
                         count: favorites.length,
                         isSelected: filter == SeriesFilter.favorites,
                         onTap: () {
+                          // Already open: move into its titles (no deselect).
+                          if (filter == SeriesFilter.favorites) {
+                            _enterGrid();
+                            return;
+                          }
                           ref.read(seriesFilterProvider.notifier).state =
                               SeriesFilter.favorites;
                           ref
@@ -535,6 +545,11 @@ class _SeriesCategorySidebarState
                         count: recentIds.length,
                         isSelected: filter == SeriesFilter.recent,
                         onTap: () {
+                          // Already open: move into its titles (no deselect).
+                          if (filter == SeriesFilter.recent) {
+                            _enterGrid();
+                            return;
+                          }
                           ref.read(seriesFilterProvider.notifier).state =
                               SeriesFilter.recent;
                           ref
@@ -551,6 +566,11 @@ class _SeriesCategorySidebarState
                         label: 'Recently Added',
                         isSelected: filter == SeriesFilter.recentlyAdded,
                         onTap: () {
+                          // Already open: move into its titles (no deselect).
+                          if (filter == SeriesFilter.recentlyAdded) {
+                            _enterGrid();
+                            return;
+                          }
                           ref.read(seriesFilterProvider.notifier).state =
                               SeriesFilter.recentlyAdded;
                           ref
@@ -597,12 +617,14 @@ class _SeriesCategorySidebarState
                           isSelected: selected?.categoryId == cat.categoryId,
                           count: countMap[cat.categoryId] ?? 0,
                           onTap: () {
+                            // Already open: move into its titles (no deselect).
+                            if (selected?.categoryId == cat.categoryId) {
+                              _enterGrid();
+                              return;
+                            }
                             ref.read(seriesFilterProvider.notifier).state =
                                 SeriesFilter.all;
-                            final newCat =
-                                selected?.categoryId == cat.categoryId
-                                ? null
-                                : cat;
+                            final newCat = cat;
                             ref
                                     .read(
                                       selectedSeriesCategoryProvider.notifier,
@@ -677,12 +699,8 @@ class _SeriesSidebarTileState extends State<_SeriesSidebarTile>
                 ? AppTheme.surface
                 : Colors.transparent,
             borderRadius: BorderRadius.circular(8),
-            border: focused && !widget.isSelected
-                ? Border.all(
-                    color: Colors.white.withValues(alpha: 0.55),
-                    width: 1.5,
-                  )
-                : null,
+            // Focus ring shows on the selected tile too.
+            border: focused ? Border.all(color: Colors.white, width: 2.5) : null,
           ),
           child: Row(
             children: [
@@ -764,14 +782,12 @@ class _SeriesCatItemState extends State<_SeriesCatItem> with TvFocusMixin {
                 ? AppTheme.surface
                 : Colors.transparent,
             borderRadius: BorderRadius.circular(8),
-            border: widget.isSelected
+            // Focus ring first: on the selected tile it used to vanish.
+            border: focused
+                ? Border.all(color: Colors.white, width: 2.5)
+                : widget.isSelected
                 ? const Border(
                     left: BorderSide(color: AppTheme.primary, width: 2),
-                  )
-                : focused
-                ? Border.all(
-                    color: Colors.white.withValues(alpha: 0.55),
-                    width: 1.5,
                   )
                 : null,
           ),
@@ -1015,10 +1031,11 @@ class _SeriesPosterCardState extends ConsumerState<_SeriesPosterCard>
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(10),
             border: Border.all(
-              color: isSelected
+              // Focus (white) wins over "last opened" (blue).
+              color: focused
+                  ? Colors.white
+                  : isSelected
                   ? AppTheme.primary
-                  : focused
-                  ? Colors.white.withValues(alpha: 0.6)
                   : isTvHovered
                   ? AppTheme.primary.withValues(alpha: 0.4)
                   : Colors.transparent,
@@ -1395,4 +1412,11 @@ class _SeriesScanCard extends StatelessWidget {
       ),
     );
   }
+}
+
+/// Moves remote focus from the sidebar into the poster grid (as Right does).
+void _enterGrid() {
+  FocusManager.instance.primaryFocus?.focusInDirection(
+    TraversalDirection.right,
+  );
 }

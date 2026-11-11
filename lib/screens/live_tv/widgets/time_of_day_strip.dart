@@ -149,12 +149,12 @@ class _TimeOfDayChipState extends ConsumerState<_TimeOfDayChip>
                     : AppTheme.surface,
                 borderRadius: BorderRadius.circular(10),
                 border: Border.all(
-                  color: isSelected
+                  color: focused
+                      ? Colors.white
+                      : isSelected
                       ? AppTheme.primary
-                      : focused
-                      ? Colors.white.withValues(alpha: 0.55)
                       : AppTheme.divider,
-                  width: (isSelected || focused) ? 1.5 : 1,
+                  width: focused ? 2.5 : (isSelected ? 1.5 : 1),
                 ),
                 boxShadow: (isSelected || focused)
                     ? [

@@ -31,6 +31,9 @@ class LiveCategorySidebar extends ConsumerStatefulWidget {
   /// can jump straight to it on "arrow-left".
   final ValueChanged<FocusNode>? onSelectedItemFocusReady;
 
+  /// Reports "focus the selected category" (scrolls it into view first).
+  final ValueChanged<VoidCallback>? onEntryReady;
+
   const LiveCategorySidebar({
     super.key,
     required this.width,
@@ -39,6 +42,7 @@ class LiveCategorySidebar extends ConsumerStatefulWidget {
     this.onEnterChannels,
     this.onFirstItemFocusReady,
     this.onSelectedItemFocusReady,
+    this.onEntryReady,
   });
 
   @override
@@ -72,6 +76,47 @@ class _LiveCategorySidebarState extends ConsumerState<LiveCategorySidebar> {
   void _enterChannels() {
     if (widget.onEnterChannels?.call() ?? false) return;
     widget.channelListEntryFocus?.call()?.requestFocus();
+  }
+
+  /// List index of the selected tile (0-2 pinned, 3+ categories).
+  int _selectedIdx = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) widget.onEntryReady?.call(_focusSelected);
+    });
+  }
+
+  /// Focus the selected tile, from the guide / player. If it is scrolled
+  /// out of the list it isn't built, so jump near it first and retry
+  /// (requesting focus on an unbuilt tile did nothing — "Left sometimes
+  /// doesn't reach the categories").
+  void _focusSelected([int attempt = 0]) {
+    if (!mounted) return;
+    final node = _nodeFor(_selectedIdx);
+    if (node.context != null) {
+      node.requestFocus();
+      return;
+    }
+    if (attempt > 5 || !_scrollCtrl.hasClients) return;
+    final pos = _scrollCtrl.position;
+    if (_selectedIdx < 3) {
+      _scrollCtrl.jumpTo(0);
+    } else {
+      const pinnedAndHeader = 230.0;
+      const rowHeight = 37.0;
+      _scrollCtrl.jumpTo(
+        (pinnedAndHeader +
+                (_selectedIdx - 3) * rowHeight -
+                pos.viewportDimension / 2)
+            .clamp(0.0, pos.maxScrollExtent),
+      );
+    }
+    WidgetsBinding.instance.addPostFrameCallback(
+      (_) => _focusSelected(attempt + 1),
+    );
   }
 
   void _focusItem(int index, [int attempt = 0]) {
@@ -180,6 +225,7 @@ class _LiveCategorySidebarState extends ConsumerState<LiveCategorySidebar> {
                       final ci = _catIndexMap[selected.categoryId];
                       if (ci != null) selectedIdx = 3 + ci;
                     }
+                    _selectedIdx = selectedIdx;
                     widget.onSelectedItemFocusReady
                         ?.call(_nodeFor(selectedIdx));
                   });
@@ -210,6 +256,10 @@ class _LiveCategorySidebarState extends ConsumerState<LiveCategorySidebar> {
                         isSelected:
                         filter == LiveFilter.all && selected == null,
                         onTap: () {
+                          if (filter == LiveFilter.all && selected == null) {
+                            _enterChannels(); // already showing → go in
+                            return;
+                          }
                           ref.read(liveFilterProvider.notifier).state =
                               LiveFilter.all;
                           ref
@@ -232,6 +282,10 @@ class _LiveCategorySidebarState extends ConsumerState<LiveCategorySidebar> {
                         count: favorites.length,
                         isSelected: filter == LiveFilter.favorites,
                         onTap: () {
+                          if (filter == LiveFilter.favorites) {
+                            _enterChannels(); // already showing → go in
+                            return;
+                          }
                           ref.read(liveFilterProvider.notifier).state =
                               LiveFilter.favorites;
                           ref
@@ -257,6 +311,10 @@ class _LiveCategorySidebarState extends ConsumerState<LiveCategorySidebar> {
                         count: recentIds.length,
                         isSelected: filter == LiveFilter.recent,
                         onTap: () {
+                          if (filter == LiveFilter.recent) {
+                            _enterChannels(); // already showing → go in
+                            return;
+                          }
                           ref.read(liveFilterProvider.notifier).state =
                               LiveFilter.recent;
                           ref
@@ -639,10 +697,14 @@ class _LiveCategorySidebarState extends ConsumerState<LiveCategorySidebar> {
     final isSameAndAll =
         selected?.categoryId == cat.categoryId &&
         ref.read(liveFilterProvider) == LiveFilter.all;
+    // Selecting the category that is already open no longer deselects
+    // it: it moves into its channels in the guide.
+    if (isSameAndAll) {
+      _enterChannels();
+      return;
+    }
     ref.read(liveFilterProvider.notifier).state = LiveFilter.all;
-    ref.read(selectedLiveCategoryProvider.notifier).state = isSameAndAll
-        ? null
-        : cat;
+    ref.read(selectedLiveCategoryProvider.notifier).state = cat;
 
     // Record tap for smart category ordering (AI feature)
     BehaviorService.instance.recordCategoryTap(cat.categoryId);
@@ -880,13 +942,12 @@ class _SidebarTileState extends State<_SidebarTile> with TvFocusMixin {
                 ? AppTheme.surface
                 : Colors.transparent,
             borderRadius: BorderRadius.circular(8),
-            border: widget.isSelected
+            // Focus ring first: on the selected tile it used to vanish.
+            border: focused
+                ? Border.all(color: Colors.white, width: 2.5)
+                : widget.isSelected
                 ? Border.all(
                 color: AppTheme.primary.withValues(alpha: 0.25))
-                : focused
-                ? Border.all(
-                color: Colors.white.withValues(alpha: 0.55),
-                width: 1.5)
                 : null,
           ),
           child: Row(
@@ -993,13 +1054,12 @@ class _CategoryTileState extends State<_CategoryTile> with TvFocusMixin {
                 ? AppTheme.surface
                 : Colors.transparent,
             borderRadius: BorderRadius.circular(8),
-            border: widget.isSelected
+            // Focus ring first: on the selected tile it used to vanish.
+            border: focused
+                ? Border.all(color: Colors.white, width: 2.5)
+                : widget.isSelected
                 ? const Border(
                 left: BorderSide(color: AppTheme.primary, width: 2))
-                : focused
-                ? Border.all(
-                color: Colors.white.withValues(alpha: 0.55),
-                width: 1.5)
                 : null,
           ),
           child: Row(

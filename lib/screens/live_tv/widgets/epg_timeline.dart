@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'package:lunar_iptv_player/widgets/app_network_image.dart';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -27,8 +28,9 @@ class EpgTimeline extends ConsumerStatefulWidget {
   final FocusNode? refreshFocusNode;
   final FocusNode? fullscreenFocusNode;
 
-  /// "Watch Now" button's FocusNode — Up from search/refresh/fullscreen.
-  final FocusNode? watchNowFocus;
+  /// Where Up from search / refresh / fullscreen goes (the screen's Back
+  /// button — the "Watch Now" button above the guide was removed).
+  final FocusNode? upFocus;
 
   /// Returns the currently-focused/selected category tile's FocusNode —
   /// used for "Left" from the first channel-list item.
@@ -47,7 +49,7 @@ class EpgTimeline extends ConsumerStatefulWidget {
     this.searchFocusNode,
     this.refreshFocusNode,
     this.fullscreenFocusNode,
-    this.watchNowFocus,
+    this.upFocus,
     this.categoryEntryFocus,
     this.onFirstItemFocusReady,
     this.onEntryReady,
@@ -68,6 +70,148 @@ class _EpgTimelineState extends ConsumerState<EpgTimeline> {
   // Per-channel-row focus nodes, indexed by position in the visible list.
   final List<FocusNode> _channelFocusNodes = [];
 
+  // ── Programme cursor (TV remote) ─────────────────────────────────────
+  // Right from a channel moves into its programmes: a highlighted show
+  // that Left / Right step through (the timeline scrolls along, so
+  // upcoming shows can be browsed), Up / Down keep the same time on the
+  // neighbouring channel, OK plays the channel, Left on the current show
+  // goes back to the channel name.
+  final List<FocusNode> _progFocusNodes = [];
+  final ValueNotifier<_GuideCursor?> _cursor = ValueNotifier(null);
+  Map<String, List<EpgListing>> _epg = const {};
+  DateTime _winStart = DateTime.now();
+  DateTime _winEnd = DateTime.now();
+
+  FocusNode _progNode(int index) {
+    while (_progFocusNodes.length <= index) {
+      _progFocusNodes.add(FocusNode(debugLabel: 'epgProg${_progFocusNodes.length}'));
+    }
+    return _progFocusNodes[index];
+  }
+
+  List<_EpgSlot> _slotsFor(int row) => row < _streams.length
+      ? _resolveEpgOverlaps(_epg[_streams[row].streamId] ?? const [])
+      : const [];
+
+  /// Right from channel [row]: highlight the show on now (or the first
+  /// one in view if the timeline was scrolled ahead).
+  void _enterGuide(int row) {
+    var at = _now;
+    if (_horizCtrl.hasClients) {
+      final viewStart = _winStart.add(
+        Duration(minutes: (_horizCtrl.offset / _pxPerHour * 60).round()),
+      );
+      if (viewStart.isAfter(at)) at = viewStart;
+    }
+    _cursor.value = _GuideCursor(row, at);
+    _revealTime(at);
+    _focusChannel(row, prog: true);
+  }
+
+  /// Steps the cursor to the next / previous show. Returns false when it
+  /// can't go further back (already on the show airing now).
+  bool _moveCursor(int row, DateTime at, int dir) {
+    final slots = _slotsFor(row);
+    _EpgSlot? cur;
+    for (final sl in slots) {
+      if (!sl.listing.startTime.isAfter(at) && sl.effectiveEnd.isAfter(at)) {
+        cur = sl;
+        break;
+      }
+    }
+    DateTime target;
+    if (dir > 0) {
+      DateTime? next;
+      for (final sl in slots) {
+        if (sl.listing.startTime.isAfter(at)) {
+          next = sl.listing.startTime;
+          break;
+        }
+      }
+      target = next ?? at.add(const Duration(minutes: 30));
+      if (!target.isBefore(_winEnd)) return true; // end of the guide
+    } else {
+      final curStart = cur?.listing.startTime ?? at;
+      if (!curStart.isAfter(_now)) return false; // on the live show
+      DateTime? prev;
+      for (final sl in slots) {
+        if (sl.listing.startTime.isBefore(curStart)) {
+          prev = sl.listing.startTime;
+        }
+      }
+      target = prev ?? curStart.subtract(const Duration(minutes: 30));
+      if (target.isBefore(_now)) target = _now;
+    }
+    _cursor.value = _GuideCursor(row, target);
+    _revealTime(target);
+    return true;
+  }
+
+  /// Scrolls the timeline so time [t] is comfortably in view.
+  void _revealTime(DateTime t) {
+    if (!_horizCtrl.hasClients) return;
+    final pos = _horizCtrl.position;
+    final x = t.difference(_winStart).inMinutes / 60.0 * _pxPerHour;
+    if (x < pos.pixels + 12 || x > pos.pixels + pos.viewportDimension - 180) {
+      _horizCtrl.animateTo(
+        (x - 60).clamp(0.0, pos.maxScrollExtent),
+        duration: const Duration(milliseconds: 220),
+        curve: Curves.easeOut,
+      );
+    }
+  }
+
+  static bool _isOk(LogicalKeyboardKey k) =>
+      k == LogicalKeyboardKey.select ||
+      k == LogicalKeyboardKey.enter ||
+      k == LogicalKeyboardKey.numpadEnter ||
+      k == LogicalKeyboardKey.gameButtonA;
+
+  bool _okDown = false;
+
+  KeyEventResult _onProgKey(int row, KeyEvent e) {
+    final k = e.logicalKey;
+    if (_isOk(k)) {
+      // Act on release (like every other button), once per press.
+      if (e is KeyDownEvent) _okDown = true;
+      if (e is KeyUpEvent && _okDown) {
+        _okDown = false;
+        if (row < _streams.length) _onChannelTap(context, _streams[row]);
+      }
+      return KeyEventResult.handled;
+    }
+    if (e is KeyUpEvent) return KeyEventResult.ignored;
+    final at = _cursor.value?.at ?? _now;
+    if (k == LogicalKeyboardKey.arrowRight) {
+      _moveCursor(row, at, 1);
+      return KeyEventResult.handled;
+    }
+    if (k == LogicalKeyboardKey.arrowLeft) {
+      if (!_moveCursor(row, at, -1)) {
+        _cursor.value = null;
+        _focusChannel(row);
+      }
+      return KeyEventResult.handled;
+    }
+    if (k == LogicalKeyboardKey.arrowUp) {
+      if (row == 0) {
+        widget.searchFocusNode?.requestFocus();
+      } else {
+        _cursor.value = _GuideCursor(row - 1, at);
+        _focusChannel(row - 1, prog: true);
+      }
+      return KeyEventResult.handled;
+    }
+    if (k == LogicalKeyboardKey.arrowDown) {
+      if (row + 1 < _streams.length) {
+        _cursor.value = _GuideCursor(row + 1, at);
+        _focusChannel(row + 1, prog: true);
+      }
+      return KeyEventResult.handled;
+    }
+    return KeyEventResult.ignored;
+  }
+
   FocusNode _channelNode(int index) {
     while (_channelFocusNodes.length <= index) {
       _channelFocusNodes.add(FocusNode(debugLabel: 'epgChannel$index'));
@@ -79,8 +223,8 @@ class _EpgTimelineState extends ConsumerState<EpgTimeline> {
   /// beyond the ListView's cache extent — common when the D-pad is held
   /// down), first jump the list so the row gets built, then focus it on the
   /// next frame. Without this, focus silently stopped at the last built row.
-  void _focusChannel(int index, {bool reveal = false}) {
-    final node = _channelNode(index);
+  void _focusChannel(int index, {bool reveal = false, bool prog = false}) {
+    final node = prog ? _progNode(index) : _channelNode(index);
     // Entering the list (not stepping row to row): bring a row that is out
     // of view into view first — a built-but-hidden row would take focus
     // off-screen.
@@ -164,9 +308,10 @@ class _EpgTimelineState extends ConsumerState<EpgTimeline> {
     _rightCtrl.dispose();
     _horizCtrl.dispose();
     _clockTimer?.cancel();
-    for (final n in _channelFocusNodes) {
+    for (final n in [..._channelFocusNodes, ..._progFocusNodes]) {
       n.dispose();
     }
+    _cursor.dispose();
     super.dispose();
   }
 
@@ -233,7 +378,7 @@ class _EpgTimelineState extends ConsumerState<EpgTimeline> {
           searchFocusNode: widget.searchFocusNode,
           refreshFocusNode: widget.refreshFocusNode,
           fullscreenFocusNode: widget.fullscreenFocusNode,
-          watchNowFocus: widget.watchNowFocus,
+          upFocus: widget.upFocus,
           categoryEntryFocus: widget.categoryEntryFocus,
           enterChannels: () => _focusEntry(),
           onRefresh: () {
@@ -301,6 +446,9 @@ class _EpgTimelineState extends ConsumerState<EpgTimeline> {
     int hours,
   ) {
     _streams = streams;
+    _epg = epgCache;
+    _winStart = windowStart;
+    _winEnd = windowEnd;
     final nowOffsetPx = _now.isAfter(windowStart) && _now.isBefore(windowEnd)
         ? _now.difference(windowStart).inMinutes / 60.0 * _pxPerHour
         : -1.0;
@@ -375,6 +523,7 @@ class _EpgTimelineState extends ConsumerState<EpgTimeline> {
                               : null,
                           onLeftToCategory: () =>
                               widget.categoryEntryFocus?.call()?.requestFocus(),
+                          onRightToGuide: () => _enterGuide(i),
                         );
                       },
                     ),
@@ -417,6 +566,10 @@ class _EpgTimelineState extends ConsumerState<EpgTimeline> {
                                 final ch = streams[i];
                                 return _ProgramRow(
                                   key: ValueKey('prog_${ch.streamId}'),
+                                  rowIndex: i,
+                                  focusNode: _progNode(i),
+                                  cursor: _cursor,
+                                  onKey: (e) => _onProgKey(i, e),
                                   channel: ch,
                                   epg: epgCache[ch.streamId] ?? [],
                                   isEpgLoaded: epgCache.containsKey(
@@ -481,7 +634,7 @@ class _EpgControlBar extends ConsumerStatefulWidget {
   final FocusNode? searchFocusNode;
   final FocusNode? refreshFocusNode;
   final FocusNode? fullscreenFocusNode;
-  final FocusNode? watchNowFocus;
+  final FocusNode? upFocus;
   final bool Function()? enterChannels;
   final FocusNode? Function()? categoryEntryFocus;
 
@@ -492,7 +645,7 @@ class _EpgControlBar extends ConsumerStatefulWidget {
     this.searchFocusNode,
     this.refreshFocusNode,
     this.fullscreenFocusNode,
-    this.watchNowFocus,
+    this.upFocus,
     this.enterChannels,
     this.categoryEntryFocus,
   });
@@ -532,7 +685,7 @@ class _EpgControlBarState extends ConsumerState<_EpgControlBar> {
             onTap: widget.onRefresh,
             onArrowKey: (key) {
               if (key == LogicalKeyboardKey.arrowUp) {
-                widget.watchNowFocus?.requestFocus();
+                widget.upFocus?.requestFocus();
                 return KeyEventResult.handled;
               }
               if (key == LogicalKeyboardKey.arrowDown) {
@@ -562,7 +715,7 @@ class _EpgControlBarState extends ConsumerState<_EpgControlBar> {
             onTap: widget.onToggleFullscreen,
             onArrowKey: (key) {
               if (key == LogicalKeyboardKey.arrowUp) {
-                widget.watchNowFocus?.requestFocus();
+                widget.upFocus?.requestFocus();
                 return KeyEventResult.handled;
               }
               if (key == LogicalKeyboardKey.arrowDown) {
@@ -595,7 +748,7 @@ class _EpgControlBarState extends ConsumerState<_EpgControlBar> {
       },
       onArrowKey: (key) {
         if (key == LogicalKeyboardKey.arrowUp) {
-          widget.watchNowFocus?.requestFocus();
+          widget.upFocus?.requestFocus();
           return KeyEventResult.handled;
         }
         if (key == LogicalKeyboardKey.arrowDown) {
@@ -660,7 +813,7 @@ class _EpgControlBarState extends ConsumerState<_EpgControlBar> {
                 Expanded(
                   child: TvTextFieldNav(
                     controller: _searchCtrl,
-                    onUp: () => widget.watchNowFocus?.requestFocus(),
+                    onUp: () => widget.upFocus?.requestFocus(),
                     onDown: () =>
                         _goFirstChannelOrSelf(widget.searchFocusNode!),
                     child: TextField(
@@ -785,8 +938,10 @@ class _ChannelCell extends StatefulWidget {
   final VoidCallback? onUpAtTop;
   final VoidCallback? onDownNext;
   final VoidCallback? onLeftToCategory;
+  final VoidCallback? onRightToGuide;
 
   const _ChannelCell({
+    this.onRightToGuide,
     super.key,
     required this.channel,
     required this.isSelected,
@@ -867,13 +1022,18 @@ class _ChannelCellState extends State<_ChannelCell> with TvFocusMixin {
             : rowLit
             ? AppTheme.surfaceVariant
             : AppTheme.epgFuture,
-        border: Border(
-          bottom: const BorderSide(color: AppTheme.epgBorder, width: 0.5),
-          left: focused && !widget.isSelected
-              ? const BorderSide(color: AppTheme.primary, width: 2.5)
-              : BorderSide.none,
+        // Focus ring on top of everything — on the playing channel's row
+        // the old left-edge marker was invisible.
+        border: const Border(
+          bottom: BorderSide(color: AppTheme.epgBorder, width: 0.5),
         ),
       ),
+      foregroundDecoration: focused
+          ? BoxDecoration(
+              border: Border.all(color: Colors.white, width: 2.5),
+              borderRadius: BorderRadius.circular(4),
+            )
+          : null,
       child: Row(
         children: [
           Expanded(
@@ -887,7 +1047,13 @@ class _ChannelCellState extends State<_ChannelCell> with TvFocusMixin {
               onFocusChange: setTvFocused,
               onArrowKey: (key) {
                 if (key == LogicalKeyboardKey.arrowRight) {
-                  _heartFocus.requestFocus();
+                  // Into the programmes (browse upcoming shows). The heart
+                  // stays a click target; hold OK toggles favourite.
+                  if (widget.onRightToGuide != null) {
+                    widget.onRightToGuide!();
+                  } else {
+                    _heartFocus.requestFocus();
+                  }
                   return KeyEventResult.handled;
                 }
                 if (key == LogicalKeyboardKey.arrowLeft) {
@@ -1107,7 +1273,17 @@ List<_EpgSlot> _resolveEpgOverlaps(List<EpgListing> raw) {
 // ─────────────────────────────────────────────────────────────────────────────
 // PROGRAM ROW (shows for one channel)
 // ─────────────────────────────────────────────────────────────────────────────
+class _GuideCursor {
+  final int row;
+  final DateTime at;
+  const _GuideCursor(this.row, this.at);
+}
+
 class _ProgramRow extends StatefulWidget {
+  final int rowIndex;
+  final FocusNode focusNode;
+  final ValueListenable<_GuideCursor?> cursor;
+  final KeyEventResult Function(KeyEvent e) onKey;
   final LiveStream channel;
   final List<EpgListing> epg;
   final bool isEpgLoaded;
@@ -1122,6 +1298,10 @@ class _ProgramRow extends StatefulWidget {
 
   const _ProgramRow({
     super.key,
+    required this.rowIndex,
+    required this.focusNode,
+    required this.cursor,
+    required this.onKey,
     required this.channel,
     required this.epg,
     required this.isEpgLoaded,
@@ -1140,6 +1320,8 @@ class _ProgramRow extends StatefulWidget {
 }
 
 class _ProgramRowState extends State<_ProgramRow> {
+  bool _hasFocus = false;
+
   @override
   void initState() {
     super.initState();
@@ -1148,7 +1330,30 @@ class _ProgramRowState extends State<_ProgramRow> {
 
   @override
   Widget build(BuildContext context) {
+    return Focus(
+      focusNode: widget.focusNode,
+      onFocusChange: (f) => setState(() => _hasFocus = f),
+      onKeyEvent: (_, e) => widget.onKey(e),
+      child: ValueListenableBuilder<_GuideCursor?>(
+        valueListenable: widget.cursor,
+        builder: (context, c, _) => _row(
+          _hasFocus && c != null && c.row == widget.rowIndex ? c.at : null,
+        ),
+      ),
+    );
+  }
+
+  Widget _row(DateTime? at) {
+    final slots = _resolveEpgOverlaps(widget.epg);
+    final hit = at != null &&
+        slots.any(
+          (sl) =>
+              !sl.listing.startTime.isAfter(at) && sl.effectiveEnd.isAfter(at),
+        );
     return Container(
+      foregroundDecoration: _hasFocus && !hit
+          ? BoxDecoration(border: Border.all(color: Colors.white, width: 2.5))
+          : null,
       height: 56,
       decoration: BoxDecoration(
         color: widget.isSelected
@@ -1203,8 +1408,12 @@ class _ProgramRowState extends State<_ProgramRow> {
               ),
             )
           else
-            ..._resolveEpgOverlaps(widget.epg).map(
+            ...slots.map(
               (slot) => _ShowBlock(
+                highlighted:
+                    at != null &&
+                    !slot.listing.startTime.isAfter(at) &&
+                    slot.effectiveEnd.isAfter(at),
                 epg: slot.listing,
                 effectiveEnd: slot.effectiveEnd,
                 windowStart: widget.windowStart,
@@ -1224,6 +1433,7 @@ class _ProgramRowState extends State<_ProgramRow> {
 // SHOW BLOCK
 // ─────────────────────────────────────────────────────────────────────────────
 class _ShowBlock extends StatefulWidget {
+  final bool highlighted; // under the remote's programme cursor
   final EpgListing epg;
   final DateTime effectiveEnd;
   final DateTime windowStart;
@@ -1233,6 +1443,7 @@ class _ShowBlock extends StatefulWidget {
   final VoidCallback onTap;
 
   const _ShowBlock({
+    this.highlighted = false,
     required this.epg,
     required this.effectiveEnd,
     required this.windowStart,
@@ -1296,13 +1507,19 @@ class _ShowBlockState extends State<_ShowBlock> {
           child: AnimatedContainer(
             duration: const Duration(milliseconds: 150),
             decoration: BoxDecoration(
-              color: _hovering ? AppTheme.surfaceVariant : bgColor,
+              color: widget.highlighted
+                  ? AppTheme.selectedItem
+                  : _hovering
+                  ? AppTheme.surfaceVariant
+                  : bgColor,
               borderRadius: BorderRadius.circular(4),
               border: Border.all(
-                color: isCurrent
+                color: widget.highlighted
+                    ? Colors.white
+                    : isCurrent
                     ? AppTheme.primary.withValues(alpha: 0.6)
                     : AppTheme.epgBorder,
-                width: isCurrent ? 1.5 : 0.5,
+                width: widget.highlighted ? 2.5 : (isCurrent ? 1.5 : 0.5),
               ),
             ),
             padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
