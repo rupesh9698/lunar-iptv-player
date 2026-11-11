@@ -286,7 +286,9 @@ class _EpgTimelineState extends ConsumerState<EpgTimeline> {
     }
     if (node.context != null) {
       node.requestFocus();
-      if (prog) _keepRowInView(index);
+      // Channel cells and programme rows both rely on this: the cells'
+      // own centre-on-focus didn't scroll the channel list.
+      _keepRowInView(index);
       return;
     }
     if (_leftCtrl.hasClients) {
@@ -1093,8 +1095,8 @@ class _ChannelCellState extends State<_ChannelCell> with TvFocusMixin {
           Expanded(
             child: TvFocusable(
               focusNode: widget.focusNode,
-              autoScroll: true,
-              scrollAlignment: 0.3,
+              // Scrolling is done by the timeline (_keepRowInView).
+              autoScroll: false,
               onActivate: widget.onTap,
               // Hold OK / Menu still toggles favourite too.
               onLongPress: _toggleFavorite,
@@ -1397,6 +1399,22 @@ class _ProgramRowState extends State<_ProgramRow> {
     );
   }
 
+  /// A row label kept at the timeline's visible left edge.
+  Widget _pinnedLabel(Widget child) {
+    final h = widget.horizontal;
+    Widget at(double x) => Positioned(
+      left: x + 10,
+      top: 0,
+      bottom: 0,
+      child: Center(child: child),
+    );
+    if (h == null) return at(0);
+    return AnimatedBuilder(
+      animation: h,
+      builder: (_, _) => at(h.hasClients ? h.offset : 0),
+    );
+  }
+
   Widget _row(DateTime? at) {
     final slots = _resolveEpgOverlaps(widget.epg);
     final hit =
@@ -1431,34 +1449,24 @@ class _ProgramRowState extends State<_ProgramRow> {
 
           // Program blocks OR loading/empty states
           if (!widget.isEpgLoaded)
-            const Positioned(
-              left: 10,
-              top: 0,
-              bottom: 0,
-              child: Center(
-                child: SizedBox(
-                  width: 12,
-                  height: 12,
-                  child: CircularProgressIndicator(
-                    strokeWidth: 1.5,
-                    color: AppTheme.textMuted,
-                  ),
+            _pinnedLabel(
+              const SizedBox(
+                width: 12,
+                height: 12,
+                child: CircularProgressIndicator(
+                  strokeWidth: 1.5,
+                  color: AppTheme.textMuted,
                 ),
               ),
             )
           else if (widget.epg.isEmpty)
-            const Positioned(
-              left: 10,
-              top: 0,
-              bottom: 0,
-              child: Center(
-                child: Text(
-                  'No EPG',
-                  style: TextStyle(
-                    color: AppTheme.textMuted,
-                    fontSize: 10,
-                    fontStyle: FontStyle.italic,
-                  ),
+            _pinnedLabel(
+              const Text(
+                'No EPG',
+                style: TextStyle(
+                  color: AppTheme.textMuted,
+                  fontSize: 10,
+                  fontStyle: FontStyle.italic,
                 ),
               ),
             )
@@ -1470,10 +1478,11 @@ class _ProgramRowState extends State<_ProgramRow> {
                   slot.effectiveEnd.isAfter(at);
               return _ShowBlock(
                 highlighted: lit,
-                // The highlighted show sticks to the timeline's visible
-                // left edge, so its ring and title aren't hidden behind
-                // the channel column when it began before the view.
-                stickTo: lit ? widget.horizontal : null,
+                // Every show sticks to the timeline's visible left edge,
+                // so a show that began before the view keeps its outline
+                // and title on screen instead of running under the
+                // channel column.
+                stickTo: widget.horizontal,
                 epg: slot.listing,
                 effectiveEnd: slot.effectiveEnd,
                 windowStart: widget.windowStart,

@@ -160,5 +160,34 @@ void main() {
     expect(focused(), 'epgHeart15');
     await key(t, LogicalKeyboardKey.arrowLeft);
     expect(focused(), 'epgChannel15');
+
+    // Channel column: the list follows the selector both ways, and the
+    // focused row sits fully inside the list (not under its header).
+    final list = t.getRect(find.byType(ListView).first);
+    Rect cell(int i) => t.getRect(
+      find
+          .ancestor(
+            of: find.text('Channel $i'),
+            matching: find.byType(AnimatedContainer),
+          )
+          .first,
+    );
+    for (var i = 0; i < 10; i++) {
+      await key(t, LogicalKeyboardKey.arrowDown);
+    }
+    await settle(t);
+    expect(focused(), 'epgChannel25');
+    expect(cell(25).bottom, lessThanOrEqualTo(list.bottom + 0.5));
+    for (var i = 0; i < 20; i++) {
+      await key(t, LogicalKeyboardKey.arrowUp);
+    }
+    await settle(t);
+    expect(focused(), 'epgChannel5');
+    expect(cell(5).top, greaterThanOrEqualTo(list.top - 0.5));
+    expect(cell(5).bottom, lessThanOrEqualTo(list.bottom + 0.5));
+
+    // Shows that aren't highlighted stay readable at the edge too.
+    expect(t.getRect(find.text('Now 6')).left, greaterThan(column));
+    expect(t.getRect(find.text('Now 7')).left, greaterThan(column));
   }, timeout: const Timeout(Duration(seconds: 90)));
 }
