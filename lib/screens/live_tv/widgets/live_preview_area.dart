@@ -239,16 +239,6 @@ class _LiveInlinePlayerState extends ConsumerState<LiveInlinePlayer> {
     _maxRootFocus.requestFocus();
   }
 
-  void _toggleControls() {
-    if (_locked) return;
-    if (_ctrlVisible) {
-      _hideTimer?.cancel();
-      _hideControls();
-    } else {
-      _resetHideTimer();
-    }
-  }
-
   static bool _isOk(LogicalKeyboardKey k) =>
       k == LogicalKeyboardKey.select ||
       k == LogicalKeyboardKey.enter ||
@@ -402,24 +392,23 @@ class _LiveInlinePlayerState extends ConsumerState<LiveInlinePlayer> {
       // Keep the banner until the new stream is actually playing (the
       // picture is black while it connects) — min 2 s, max 8 s.
       final shownAt = DateTime.now();
-      _channelSwitchTimer = Timer.periodic(
-        const Duration(milliseconds: 400),
-        (t) {
-          if (!mounted) {
-            t.cancel();
-            return;
-          }
-          final elapsed = DateTime.now().difference(shownAt);
-          final ps = ref.read(livePlayerProvider);
-          final started = ps.isPlaying && !ps.isBuffering;
-          if ((elapsed >= const Duration(seconds: 2) && started) ||
-              elapsed >= const Duration(seconds: 8) ||
-              ps.error.isNotEmpty) {
-            t.cancel();
-            setState(() => _switchingChannel = null);
-          }
-        },
-      );
+      _channelSwitchTimer = Timer.periodic(const Duration(milliseconds: 400), (
+        t,
+      ) {
+        if (!mounted) {
+          t.cancel();
+          return;
+        }
+        final elapsed = DateTime.now().difference(shownAt);
+        final ps = ref.read(livePlayerProvider);
+        final started = ps.isPlaying && !ps.isBuffering;
+        if ((elapsed >= const Duration(seconds: 2) && started) ||
+            elapsed >= const Duration(seconds: 8) ||
+            ps.error.isNotEmpty) {
+          t.cancel();
+          setState(() => _switchingChannel = null);
+        }
+      });
     }
   }
 
@@ -527,8 +516,10 @@ class _LiveInlinePlayerState extends ConsumerState<LiveInlinePlayer> {
                 ps: ps,
                 videoFill: _videoFill,
                 ctrlVisible: _ctrlVisible,
-                onTap: _toggleControls,
-                onDoubleTap: widget.onMaximize,
+                // One tap opens full screen (no double-tap wait); play /
+                // volume stay in the info pane beside it.
+                onTap: widget.onMaximize,
+                onDoubleTap: null,
                 centerSpinner: true,
               ),
             ),
@@ -616,55 +607,58 @@ class _LiveInlinePlayerState extends ConsumerState<LiveInlinePlayer> {
                 child: ExcludeFocus(
                   excluding: !_ctrlVisible,
                   child: IgnorePointer(
-                  ignoring: !_ctrlVisible,
-                  child: _tv
-                      ? _TvInfoBar(
-                          channel: channel,
-                          ps: ps,
-                          current: current,
-                          next: next,
-                          isFavorite: ref
-                              .watch(liveFavoritesNotifierProvider)
-                              .contains(channel?.streamId ?? ''),
-                          showHint: !_showChannelGuide,
-                          minimizeFocus: _maxMinimizeFocus,
-                          favoriteFocus: _maxFavFocus,
-                          onMinimize: widget.onMinimize,
-                          onToggleFav: channel != null
-                              ? () => ref
-                                    .read(
-                                      liveFavoritesNotifierProvider.notifier,
-                                    )
-                                    .toggle(channel.streamId)
-                              : null,
-                        )
-                      : _MaximizedControls(
-                    playFocusNode: _maxPlayFocus,
-                    channel: channel,
-                    ps: ps,
-                    isVideoFill: _videoFill,
-                    isFavorite: ref
-                        .watch(liveFavoritesNotifierProvider)
-                        .contains(channel?.streamId ?? ''),
-                    onMinimize: widget.onMinimize,
-                    onLock: _lock,
-                    onVolumeChange: (v) =>
-                        ref.read(livePlayerProvider.notifier).setVolume(v),
-                    onToggleFav: channel != null
-                        ? () => ref
-                              .read(liveFavoritesNotifierProvider.notifier)
-                              .toggle(channel.streamId)
-                        : null,
-                    onToggleGuide: () =>
-                        _showChannelGuide ? _closeGuide() : _openGuide(),
+                    ignoring: !_ctrlVisible,
+                    child: _tv
+                        ? _TvInfoBar(
+                            channel: channel,
+                            ps: ps,
+                            current: current,
+                            next: next,
+                            isFavorite: ref
+                                .watch(liveFavoritesNotifierProvider)
+                                .contains(channel?.streamId ?? ''),
+                            showHint: !_showChannelGuide,
+                            minimizeFocus: _maxMinimizeFocus,
+                            favoriteFocus: _maxFavFocus,
+                            onMinimize: widget.onMinimize,
+                            onToggleFav: channel != null
+                                ? () => ref
+                                      .read(
+                                        liveFavoritesNotifierProvider.notifier,
+                                      )
+                                      .toggle(channel.streamId)
+                                : null,
+                          )
+                        : _MaximizedControls(
+                            playFocusNode: _maxPlayFocus,
+                            channel: channel,
+                            ps: ps,
+                            isVideoFill: _videoFill,
+                            isFavorite: ref
+                                .watch(liveFavoritesNotifierProvider)
+                                .contains(channel?.streamId ?? ''),
+                            onMinimize: widget.onMinimize,
+                            onLock: _lock,
+                            onVolumeChange: (v) => ref
+                                .read(livePlayerProvider.notifier)
+                                .setVolume(v),
+                            onToggleFav: channel != null
+                                ? () => ref
+                                      .read(
+                                        liveFavoritesNotifierProvider.notifier,
+                                      )
+                                      .toggle(channel.streamId)
+                                : null,
+                            onToggleGuide: () => _showChannelGuide
+                                ? _closeGuide()
+                                : _openGuide(),
+                          ),
                   ),
-                ),
                 ),
               ),
 
             // Lock overlay
-            if (_locked)
-              _LockOverlay(onUnlock: _unlock),
+            if (_locked) _LockOverlay(onUnlock: _unlock),
 
             // Volume / Brightness
             if (_showVol)
@@ -851,103 +845,103 @@ class _MaximizedControls extends StatelessWidget {
       behavior: HitTestBehavior.translucent,
       onTap: onToggleGuide,
       child: Container(
-      decoration: BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.topCenter,
-          end: Alignment.bottomCenter,
-          colors: [
-            Colors.black.withValues(alpha: 0.80),
-            Colors.transparent,
-            Colors.transparent,
-            Colors.black.withValues(alpha: 0.85),
-          ],
-          stops: const [0.0, 0.18, 0.78, 1.0],
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+            colors: [
+              Colors.black.withValues(alpha: 0.80),
+              Colors.transparent,
+              Colors.transparent,
+              Colors.black.withValues(alpha: 0.85),
+            ],
+            stops: const [0.0, 0.18, 0.78, 1.0],
+          ),
         ),
-      ),
-      child: SafeArea(
-        child: Column(
-          children: [
-            // Top bar
-            Padding(
-              padding: const EdgeInsets.fromLTRB(4, 4, 12, 4),
-              child: Row(
-                children: [
-                  IconButton(
-                    focusNode: playFocusNode,
-                    onPressed: onMinimize,
-                    icon: const Icon(
-                      Icons.fullscreen_exit_rounded,
-                      color: Colors.white,
-                      size: 24,
+        child: SafeArea(
+          child: Column(
+            children: [
+              // Top bar
+              Padding(
+                padding: const EdgeInsets.fromLTRB(4, 4, 12, 4),
+                child: Row(
+                  children: [
+                    IconButton(
+                      focusNode: playFocusNode,
+                      onPressed: onMinimize,
+                      icon: const Icon(
+                        Icons.fullscreen_exit_rounded,
+                        color: Colors.white,
+                        size: 24,
+                      ),
+                      tooltip: 'Minimize',
                     ),
-                    tooltip: 'Minimize',
-                  ),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Text(
-                          channel?.name ?? '',
-                          style: const TextStyle(
-                            color: Colors.white,
-                            fontSize: 15,
-                            fontWeight: FontWeight.w700,
-                            shadows: [
-                              Shadow(color: Colors.black, blurRadius: 6),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(
+                            channel?.name ?? '',
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 15,
+                              fontWeight: FontWeight.w700,
+                              shadows: [
+                                Shadow(color: Colors.black, blurRadius: 6),
+                              ],
+                            ),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                          const Row(
+                            children: [
+                              _LiveDot(),
+                              SizedBox(width: 4),
+                              Text(
+                                'LIVE',
+                                style: TextStyle(
+                                  color: AppTheme.error,
+                                  fontSize: 10,
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
                             ],
                           ),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                        const Row(
-                          children: [
-                            _LiveDot(),
-                            SizedBox(width: 4),
-                            Text(
-                              'LIVE',
-                              style: TextStyle(
-                                color: AppTheme.error,
-                                fontSize: 10,
-                                fontWeight: FontWeight.w700,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ],
-                    ),
-                  ),
-                  if (ps.quality.isNotEmpty) ...[
-                    _QualityBadge(ps.quality),
-                    const SizedBox(width: 6),
-                  ],
-                  if (onToggleFav != null)
-                    IconButton(
-                      onPressed: onToggleFav,
-                      icon: Icon(
-                        isFavorite ? Icons.favorite : Icons.favorite_border,
-                        color: isFavorite ? AppTheme.error : Colors.white,
-                        size: 22,
+                        ],
                       ),
                     ),
-                  IconButton(
-                    onPressed: onLock,
-                    icon: const Icon(
-                      Icons.lock_outline,
-                      color: Colors.white,
-                      size: 22,
+                    if (ps.quality.isNotEmpty) ...[
+                      _QualityBadge(ps.quality),
+                      const SizedBox(width: 6),
+                    ],
+                    if (onToggleFav != null)
+                      IconButton(
+                        onPressed: onToggleFav,
+                        icon: Icon(
+                          isFavorite ? Icons.favorite : Icons.favorite_border,
+                          color: isFavorite ? AppTheme.error : Colors.white,
+                          size: 22,
+                        ),
+                      ),
+                    IconButton(
+                      onPressed: onLock,
+                      icon: const Icon(
+                        Icons.lock_outline,
+                        color: Colors.white,
+                        size: 22,
+                      ),
+                      tooltip: 'Lock',
                     ),
-                    tooltip: 'Lock',
-                  ),
-                ],
+                  ],
+                ),
               ),
-            ),
 
-            const Spacer(),
-          ],
+              const Spacer(),
+            ],
+          ),
         ),
       ),
-    ),
     );
   }
 }
@@ -1146,13 +1140,11 @@ class _InfoPane extends StatelessWidget {
               ),
             ),
           ),
-
         ],
       ),
     );
   }
 }
-
 
 // ─────────────────────────────────────────────────────────────────────────────
 // WEB HTTP STREAM ERROR
@@ -1731,21 +1723,21 @@ class _TvInfoBar extends StatelessWidget {
         ),
         // Remote hint (hidden while the guide covers the bottom)
         if (showHint)
-        Positioned(
-          left: 20,
-          bottom: 18,
-          child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-            decoration: BoxDecoration(
-              color: Colors.black.withValues(alpha: 0.55),
-              borderRadius: BorderRadius.circular(8),
-            ),
-            child: const Text(
-              '◀ ▶  Change channel     OK  TV Guide     BACK  Minimize',
-              style: TextStyle(color: Colors.white70, fontSize: 11),
+          Positioned(
+            left: 20,
+            bottom: 18,
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+              decoration: BoxDecoration(
+                color: Colors.black.withValues(alpha: 0.55),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: const Text(
+                '◀ ▶  Change channel     OK  TV Guide     BACK  Minimize',
+                style: TextStyle(color: Colors.white70, fontSize: 11),
+              ),
             ),
           ),
-        ),
       ],
     );
   }
