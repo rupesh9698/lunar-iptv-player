@@ -565,6 +565,12 @@ class _LiveInlinePlayerState extends ConsumerState<LiveInlinePlayer> {
                 onTap: widget.onMaximize,
                 onDoubleTap: null,
                 centerSpinner: true,
+                bufferingPercent: ref
+                    .read(livePlayerProvider.notifier)
+                    .bufferingPercentage,
+                bufferingPercentNow: ref
+                    .read(livePlayerProvider.notifier)
+                    .bufferingPercentageNow,
               ),
             ),
             // Info pane
@@ -629,7 +635,18 @@ class _LiveInlinePlayerState extends ConsumerState<LiveInlinePlayer> {
 
             // Loading: a ring in the middle of the screen.
             if (ps.isBuffering && ps.error.isEmpty && !ps.isReconnecting)
-              const SafeArea(child: Center(child: PlayerLoadingRing())),
+              SafeArea(
+                child: Center(
+                  child: PlayerLoadingRing(
+                    percent: ref
+                        .read(livePlayerProvider.notifier)
+                        .bufferingPercentage,
+                    initialPercent: ref
+                        .read(livePlayerProvider.notifier)
+                        .bufferingPercentageNow,
+                  ),
+                ),
+              ),
 
             // Reconnect
             if (ps.isReconnecting)
@@ -775,6 +792,8 @@ class _VideoArea extends StatelessWidget {
   final bool videoFill;
   final bool ctrlVisible;
   final bool centerSpinner;
+  final Stream<double>? bufferingPercent;
+  final double? bufferingPercentNow;
   final VoidCallback onTap;
   final VoidCallback? onDoubleTap;
   final GestureDragStartCallback? onDragStart;
@@ -787,6 +806,8 @@ class _VideoArea extends StatelessWidget {
     required this.videoFill,
     required this.ctrlVisible,
     this.centerSpinner = false,
+    this.bufferingPercent,
+    this.bufferingPercentNow,
     required this.onTap,
     this.onDoubleTap,
     this.onDragStart,
@@ -846,7 +867,14 @@ class _VideoArea extends StatelessWidget {
           ),
           // Mini player: centred loading ring while (re)buffering.
           if (centerSpinner && ps.isBuffering)
-            const Center(child: PlayerLoadingRing(size: 44, strokeWidth: 3)),
+            Center(
+              child: PlayerLoadingRing(
+                size: 44,
+                strokeWidth: 3,
+                percent: bufferingPercent,
+                initialPercent: bufferingPercentNow,
+              ),
+            ),
         ],
       ),
     );

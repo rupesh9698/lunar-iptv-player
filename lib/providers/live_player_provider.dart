@@ -68,6 +68,18 @@ class LivePlayerNotifier extends StateNotifier<LivePlayerState> {
   /// Expose for the Video widget — never changes after first init.
   VideoController? get videoController => _videoController;
 
+  /// How full the buffer is before playback resumes (0–100), for the
+  /// loading ring. Null before the player exists.
+  Stream<double>? get bufferingPercentage =>
+      _player?.stream.bufferingPercentage;
+
+  /// Last known value of [bufferingPercentage]; null when it's stale (a
+  /// finished earlier fill reads 100).
+  double? get bufferingPercentageNow {
+    final v = _player?.state.bufferingPercentage;
+    return v == null || v >= 100 ? null : v;
+  }
+
   Future<void>? _tuned;
 
   void _ensureInitialized() {
@@ -166,10 +178,7 @@ class LivePlayerNotifier extends StateNotifier<LivePlayerState> {
       await _player!.setVolume(state.volume * 100);
     } catch (e) {
       if (mounted) {
-        state = state.copyWith(
-          isBuffering: false,
-          error: 'Stream unavailable',
-        );
+        state = state.copyWith(isBuffering: false, error: 'Stream unavailable');
       }
     }
   }

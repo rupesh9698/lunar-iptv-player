@@ -16,6 +16,7 @@ import '../../core/theme/app_theme.dart';
 import '../../core/utils/focus_utils.dart';
 import '../../core/utils/platform_utils.dart';
 import '../../core/utils/player_tuning.dart';
+import '../../core/utils/track_labels.dart';
 import '../../providers/app_providers.dart';
 import '../../providers/behavior_providers.dart';
 import '../../providers/live_tv_provider.dart';
@@ -947,7 +948,19 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
               // the play / pause button when the controls are up (both
               // sit at the exact centre of the safe area).
               if (_buffering && _error.isEmpty && !_isReconnecting)
-                const SafeArea(child: Center(child: PlayerLoadingRing())),
+                SafeArea(
+                  child: Center(
+                    child: PlayerLoadingRing(
+                      percent: _player.stream.bufferingPercentage,
+                      initialPercent: _player.state.bufferingPercentage < 100
+                          ? _player.state.bufferingPercentage
+                          : null,
+                      // The play button covers the middle while the
+                      // controls are up: the number goes under the ring.
+                      percentBelow: _ctrlVisible && !_locked,
+                    ),
+                  ),
+                ),
 
               // ── Reconnecting overlay ──────────────────────────────────
               if (_isReconnecting)
@@ -1941,50 +1954,52 @@ class _TrackSheetState extends State<_TrackSheet>
     super.dispose();
   }
 
-  // Resolve a human-readable track label from id/language/title
-  static String _trackLabel(String? id, String? language, String? title) {
-    const langs = {
-      'eng': 'English',
-      'hin': 'Hindi',
-      'tam': 'Tamil',
-      'tel': 'Telugu',
-      'kan': 'Kannada',
-      'mal': 'Malayalam',
-      'mar': 'Marathi',
-      'ben': 'Bengali',
-      'pun': 'Punjabi',
-      'guj': 'Gujarati',
-      'urd': 'Urdu',
-      'ara': 'Arabic',
-      'fre': 'French',
-      'ger': 'German',
-      'spa': 'Spanish',
-      'por': 'Portuguese',
-      'rus': 'Russian',
-      'zho': 'Chinese',
-      'jpn': 'Japanese',
-      'kor': 'Korean',
-      'ita': 'Italian',
-      'dut': 'Dutch',
-      'tur': 'Turkish',
-      'und': 'Mixed',
-    };
-    if (id == 'auto') return 'Default';
-    final langName = language?.isNotEmpty == true
-        ? langs[language!.toLowerCase()]
-        : null;
-    if (langName != null) return langName;
-    if (language?.isNotEmpty == true) return language!.toUpperCase();
-    if (title?.isNotEmpty == true) return title!;
-    return id ?? 'Track';
-  }
+  static TrackInfo _audioInfo(AudioTrack t) => TrackInfo(
+    t.id,
+    title: t.title,
+    language: t.language,
+    codec: t.codec,
+    channelsCount: t.channelscount ?? t.audiochannels,
+    isDefault: t.isDefault,
+  );
+
+  static TrackInfo _subInfo(SubtitleTrack t) => TrackInfo(
+    t.id,
+    title: t.title,
+    language: t.language,
+    codec: t.codec,
+    isDefault: t.isDefault,
+  );
 
   @override
   Widget build(BuildContext context) {
+    final p = widget.player;
+    // The track list often fills in (names, languages) after the
+    // stream opens, and the selection changes when a row is picked.
+    return StreamBuilder<Tracks>(
+      stream: p.stream.tracks,
+      initialData: p.state.tracks,
+      builder: (context, _) => StreamBuilder<Track>(
+        stream: p.stream.track,
+        initialData: p.state.track,
+        builder: (context, _) => _sheet(context),
+      ),
+    );
+  }
+
+  Widget _sheet(BuildContext context) {
     final tracks = widget.player.state.tracks;
 
     // Filter audio: remove 'no' (mute handled by volume control)
     final audioTracks = tracks.audio.where((t) => t.id != 'no').toList();
+    final audioLabels = describeTracks(
+      audioTracks.map(_audioInfo).toList(),
+      audio: true,
+    );
+    final subLabels = describeTracks(
+      tracks.subtitle.map(_subInfo).toList(),
+      audio: false,
+    );
 
     return Column(
       mainAxisSize: MainAxisSize.min,
@@ -2028,7 +2043,7 @@ class _TrackSheetState extends State<_TrackSheet>
             children: [
               _TrackList(
                 tracks: audioTracks,
-                label: (t) => _trackLabel(t.id, t.language, t.title),
+                labels: audioLabels,
                 isCurrent: (t) => widget.player.state.track.audio.id == t.id,
                 onTap: (t) {
                   widget.player.setAudioTrack(t);
@@ -2037,9 +2052,7 @@ class _TrackSheetState extends State<_TrackSheet>
               ),
               _TrackList(
                 tracks: tracks.subtitle,
-                label: (t) => t.id == 'no'
-                    ? 'Off'
-                    : _trackLabel(t.id, t.language, t.title),
+                labels: subLabels,
                 isCurrent: (t) => widget.player.state.track.subtitle.id == t.id,
                 onTap: (t) {
                   widget.player.setSubtitleTrack(t);
@@ -2057,12 +2070,12 @@ class _TrackSheetState extends State<_TrackSheet>
 
 class _TrackList<T> extends StatelessWidget {
   final List<T> tracks;
-  final String Function(T) label;
+  final List<TrackLabel> labels;
   final bool Function(T) isCurrent;
   final void Function(T) onTap;
   const _TrackList({
     required this.tracks,
-    required this.label,
+    required this.labels,
     required this.isCurrent,
     required this.onTap,
   });
@@ -2084,8 +2097,20 @@ class _TrackList<T> extends StatelessWidget {
           const Divider(color: AppTheme.divider, height: 1),
       itemBuilder: (_, i) {
         final t = tracks[i];
+        final l = labels[i];
         return ListTile(
-          title: Text(label(t)),
+          title: Text(l.name, maxLines: 1, overflow: TextOverflow.ellipsis),
+          subtitle: l.detail.isEmpty
+              ? null
+              : Text(
+                  l.detail,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    color: AppTheme.textSecondary,
+                    fontSize: 12,
+                  ),
+                ),
           trailing: isCurrent(t)
               ? const Icon(Icons.check, color: AppTheme.primary)
               : null,
