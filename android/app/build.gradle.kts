@@ -63,8 +63,10 @@ android {
         }
         getByName("release") {
             signingConfig = signingConfigs.getByName("release")
-            isMinifyEnabled = false
-            isShrinkResources = false
+            // R8: shrink + obfuscate Java/Kotlin code (Play's DEX optimisation
+            // check), and drop unused resources. Keep rules: proguard-rules.pro.
+            isMinifyEnabled = true
+            isShrinkResources = true
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
@@ -75,6 +77,8 @@ android {
 
 dependencies {
     coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.5")
+    // WindowCompat.enableEdgeToEdge (MainActivity).
+    implementation("androidx.core:core-ktx:1.17.0")
 }
 
 kotlin {
