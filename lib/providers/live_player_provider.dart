@@ -205,10 +205,14 @@ class LivePlayerNotifier extends StateNotifier<LivePlayerState> {
       // stream). Only reconnect if playback has really stopped moving.
       final at = _player?.state.position ?? Duration.zero;
       _webErrorCheck?.cancel();
-      _webErrorCheck = Timer(const Duration(seconds: 4), () {
+      // A channel can take 4 to 5 seconds to start through the proxy, and
+      // an error fires on every source switch: give it time, and leave a
+      // stream that is playing alone.
+      _webErrorCheck = Timer(const Duration(seconds: 10), () {
         if (!mounted) return;
-        final now = _player?.state.position ?? Duration.zero;
-        if (now > at) return;
+        final p = _player;
+        final now = p?.state.position ?? Duration.zero;
+        if (now > at || (p?.state.playing ?? false)) return;
         _reconnect();
       });
       return;

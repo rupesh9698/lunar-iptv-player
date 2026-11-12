@@ -18,9 +18,17 @@ import '../../screens/sync/sync_screen.dart';
 import '../../screens/splash/splash_screen.dart'; // Import your custom splash screen widget
 import '../../services/cache_service.dart';
 
+/// Set once the start-up route has run (it removes the native splash).
+bool _initDone = false;
+
 final routerProvider = Provider<GoRouter>((ref) {
   return GoRouter(
     initialLocation: '/init', // Keep initialization as the hidden gatekeeper
+    // Every fresh start goes through /init. On the web a reload keeps the
+    // address (e.g. #/home), which skipped /init: the splash image was
+    // never removed and covered the app.
+    redirect: (context, state) =>
+        !_initDone && state.matchedLocation != '/init' ? '/init' : null,
     routes: [
       GoRoute(path: '/init', builder: (context, _) => const _AppInitializer()),
       GoRoute(
@@ -88,6 +96,7 @@ class _AppInitializerState extends ConsumerState<_AppInitializer> {
 
   Future<void> _handleNavigation() async {
     if (!mounted) return;
+    _initDone = true;
 
     try {
       final playlist = ref.read(activePlaylistProvider);

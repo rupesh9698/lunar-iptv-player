@@ -25,7 +25,25 @@
       ],
       "headers": [
         {
-          "source": "**/*.@(js|css|wasm)",
+          "source": "**/*.@(js|mjs|json|wasm|css|html)",
+          "headers": [
+            {
+              "key": "Cache-Control",
+              "value": "no-cache"
+            }
+          ]
+        },
+        {
+          "source": "/",
+          "headers": [
+            {
+              "key": "Cache-Control",
+              "value": "no-cache"
+            }
+          ]
+        },
+        {
+          "source": "**/*.@(png|jpg|jpeg|webp|svg|ico|otf|ttf|woff|woff2)",
           "headers": [
             {
               "key": "Cache-Control",

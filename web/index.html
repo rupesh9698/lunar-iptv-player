@@ -146,19 +146,96 @@
     property below keeps this one (later assignments are ignored).
     The browser must also decode HEVC (Chrome / Edge with a GPU that
     supports it, Safari).
+    Our own copy has one change: Dolby Digital Plus (E-AC-3) audio, which
+    browsers can't play, is skipped like Dolby Digital (AC-3) already is,
+    so those channels show the picture instead of not starting at all.
   -->
-  <script src="https://cdn.jsdelivr.net/npm/hls.js@1.6.15/dist/hls.min.js"></script>
+  <script src="js/hls-1.6.15-lunar.min.js"></script>
   <script>
     (function () {
       try {
-        var hls = window.Hls;
-        if (hls) {
-          Object.defineProperty(window, 'Hls', {
-            configurable: false,
-            get: function () { return hls; },
-            set: function () {}
-          });
-        }
+        var Real = window.Hls;
+        if (!Real) return;
+        // media_kit creates a new Hls for every channel and never destroys
+        // the old one: the previous channel kept downloading in the
+        // background. With one-stream IPTV accounts that made the server
+        // refuse the next channel (HTTP 403). Only one instance lives at a
+        // time, and it stops when the video's source is cleared (stop).
+        var current = null;
+        var stop = function (h) {
+          if (current === h) current = null;
+          try { h.destroy(); } catch (e) {}
+        };
+        var LunarHls = function (config) {
+          if (current) stop(current);
+          var h = new Real(config);
+          current = h;
+          var attach = h.attachMedia.bind(h);
+          h.attachMedia = function (media) {
+            // media_kit calls play() right after attaching; hls.js 1.6 sets
+            // the source a moment later, which cancels that play() and left
+            // the video paused. Autoplay starts it once the stream is ready
+            // (media_kit always opens live streams with play: true).
+            media.autoplay = true;
+            attach(media);
+            // If the video was moved on screen while loading, the browser
+            // cancels autoplay too: start it once the stream is ready.
+            var onReady = function () {
+              media.removeEventListener('canplay', onReady);
+              if (current === h && media.paused) {
+                var p = media.play();
+                if (p && p.catch) p.catch(function () {});
+              }
+            };
+            media.addEventListener('canplay', onReady);
+            // media_kit ignores hls.js errors, so a single bad video packet
+            // or a dropped connection froze the channel. Recover the way
+            // hls.js recommends, a few times, before giving up.
+            var fixes = [];
+            h.on(Real.Events.ERROR, function (_, d) {
+              if (!d || !d.fatal || current !== h) return;
+              var now = Date.now();
+              fixes = fixes.filter(function (t) { return now - t < 60000; });
+              if (fixes.length >= 4) return;
+              fixes.push(now);
+              if (d.type === Real.ErrorTypes.MEDIA_ERROR) {
+                if (fixes.length === 3) h.swapAudioCodec();
+                h.recoverMediaError();
+                media.addEventListener('canplay', onReady);
+              } else if (d.type === Real.ErrorTypes.NETWORK_ERROR) {
+                setTimeout(function () {
+                  if (current === h) h.startLoad();
+                }, 2000);
+              }
+            });
+            // 'emptied' also fires while hls.js itself attaches (it may use
+            // a <source> child, not src), so look again a moment later: if
+            // the video no longer plays a stream of ours, the player was
+            // stopped.
+            var onEmptied = function () {
+              setTimeout(function () {
+                if (current !== h) return;
+                var cur = media.currentSrc || media.src || '';
+                var ours = cur.indexOf('blob:') === 0 ||
+                  !!media.querySelector('source[src^="blob:"]');
+                if (!ours) {
+                  media.removeEventListener('emptied', onEmptied);
+                  stop(h);
+                }
+              }, 1500);
+            };
+            media.addEventListener('emptied', onEmptied);
+          };
+          return h;
+        };
+        LunarHls.prototype = Real.prototype;
+        Object.setPrototypeOf(LunarHls, Real);
+        // Keep this hls.js even when media_kit injects its bundled 1.4.10.
+        Object.defineProperty(window, 'Hls', {
+          configurable: false,
+          get: function () { return LunarHls; },
+          set: function () {}
+        });
       } catch (e) {}
     })();
   </script>
@@ -176,7 +253,7 @@
       } catch (e) {}
     })();
   </script>
-  <script src="flutter_bootstrap.js" async=""></script>
+  <script src="flutter_bootstrap.js?v=20261113b" async=""></script>
 
 
 </body></html>

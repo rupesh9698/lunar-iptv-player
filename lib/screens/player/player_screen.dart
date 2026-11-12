@@ -322,9 +322,12 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
       // playing; only act if playback has really stopped moving.
       final at = _player.state.position;
       _webErrorCheck?.cancel();
-      _webErrorCheck = Timer(const Duration(seconds: 4), () {
+      // Streams can take several seconds to start through the proxy, and
+      // an error fires on every source switch: give it time, and leave a
+      // video that is playing alone.
+      _webErrorCheck = Timer(const Duration(seconds: 10), () {
         if (!mounted || _playerDisposed) return;
-        if (_player.state.position > at) return;
+        if (_player.state.position > at || _player.state.playing) return;
         _webErrorConfirmed = true;
         _handleStreamError(error);
         _webErrorConfirmed = false;
