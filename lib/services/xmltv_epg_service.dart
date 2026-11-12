@@ -2,12 +2,17 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:isolate';
+import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
+import 'package:hive_flutter/hive_flutter.dart';
+import 'package:http/http.dart' as http;
 import 'package:path_provider/path_provider.dart';
 
 import '../models/xtream_models.dart';
+import 'gunzip_io.dart' if (dart.library.js_interop) 'gunzip_web.dart';
 import 'storage_service.dart';
+import 'stream_proxy_service.dart';
 
 // ============================================================================
 // External XMLTV programme guide
@@ -99,7 +104,15 @@ class XmltvEpgService {
   static const _kSources = 'xmltv_epg_sources';
 
   // ── Settings ─────────────────────────────────────────────────────────────
-  bool get supported => !kIsWeb;
+  // Web too: guides download through the HTTPS proxy (no CORS on the
+  // guide hosts), are unpacked by the browser, parsed in slices on the main
+  // thread (no isolates on the web) and kept in IndexedDB (Hive box).
+  bool get supported => true;
+
+  static const _webBox = 'xmltv_web';
+  Future<Box<String>> _box() => Hive.isBoxOpen(_webBox)
+      ? Future.value(Hive.box<String>(_webBox))
+      : Hive.openBox<String>(_webBox);
 
   /// Test hooks: guide folder and sources without Hive / path_provider.
   @visibleForTesting
@@ -160,7 +173,7 @@ class XmltvEpgService {
   String _sig(String playlistId) => '$playlistId|${sources.join(',')}';
 
   Future<File?> _file(String playlistId) async {
-    if (!supported) return null;
+    if (kIsWeb) return null;
     final dir =
         testDirectory ??
         Directory(
@@ -199,6 +212,16 @@ class XmltvEpgService {
     _index = null;
     return _loading = () async {
       try {
+        if (kIsWeb) {
+          final raw = (await _box()).get(playlistId);
+          final idx = raw == null ? null : _readIndexJson(raw, sig);
+          if (_indexSig != sig) return null;
+          if (idx != null) {
+            _index = idx;
+            _refreshIfStale(playlistId, channels);
+            return idx;
+          }
+        }
         final f = await _file(playlistId);
         if (f != null && f.existsSync()) {
           final idx = await _readInIsolate(f.path, sig);
@@ -248,15 +271,21 @@ class XmltvEpgService {
         final ids = [for (final r in refs) r.streamId];
         final epgIds = [for (final r in refs) r.epgId ?? ''];
         final nowS = DateTime.now().millisecondsSinceEpoch ~/ 1000;
-        final res = await _buildInIsolate(
-          urls,
-          ids,
-          names,
-          epgIds,
-          nowS,
-          path,
-          sig,
-        );
+        final res = kIsWeb
+            ? await _buildIndex(
+                urls,
+                ids,
+                names,
+                epgIds,
+                nowS,
+                null,
+                sig,
+                web: true,
+              )
+            : await _buildInIsolate(urls, ids, names, epgIds, nowS, path, sig);
+        if (kIsWeb && res.json != null) {
+          await (await _box()).put(playlistId, res.json!);
+        }
         lastError = res.errors.isEmpty ? null : res.errors.join('\n');
         if (_indexSig == sig || _indexSig == null) {
           _indexSig = sig;
@@ -296,6 +325,11 @@ class XmltvEpgService {
       Isolate.run(() => _buildIndex(urls, ids, names, epgIds, nowS, path, sig));
 
   Future<void> clearCache(String playlistId) async {
+    if (kIsWeb) {
+      try {
+        await (await _box()).delete(playlistId);
+      } catch (_) {}
+    }
     try {
       final f = await _file(playlistId);
       if (f != null && f.existsSync()) await f.delete();
@@ -311,15 +345,21 @@ class XmltvEpgService {
 class _BuildResult {
   final XmltvIndex index;
   final List<String> errors;
-  _BuildResult(this.index, this.errors);
+
+  /// The saved form (web keeps it in IndexedDB); null when not worth saving.
+  final String? json;
+  _BuildResult(this.index, this.errors, [this.json]);
 }
 
 const _kPast = 3 * 3600;
 final _latin = RegExp(r'^[ -~]*[A-Za-z0-9]');
 const _kFuture = 48 * 3600;
 
-XmltvIndex? _readIndexFile(String path, String sig) {
-  final j = jsonDecode(File(path).readAsStringSync()) as Map<String, dynamic>;
+XmltvIndex? _readIndexFile(String path, String sig) =>
+    _readIndexJson(File(path).readAsStringSync(), sig);
+
+XmltvIndex? _readIndexJson(String raw, String sig) {
+  final j = jsonDecode(raw) as Map<String, dynamic>;
   if (j['v'] != 1 || j['sig'] != sig) return null;
   return _indexFromJson(j);
 }
@@ -359,8 +399,9 @@ Future<_BuildResult> _buildIndex(
   List<String> epgIds,
   int nowS,
   String? path,
-  String sig,
-) async {
+  String sig, {
+  bool web = false,
+}) async {
   final matcher = XmltvMatcher(names, epgIds);
   // guide channel key ("<source>|<id>") → raw programmes
   final progs = <String, List<List<Object>>>{};
@@ -372,7 +413,7 @@ Future<_BuildResult> _buildIndex(
     final url = urls[s];
     final wanted = <String, String>{}; // guide channel id → key
     try {
-      await XmltvParser.parseUrl(
+      await (web ? XmltvParser.parseUrlWeb : XmltvParser.parseUrl)(
         url,
         onChannel: (id, displayNames) {
           final hits = matcher.match(id, displayNames);
@@ -443,14 +484,19 @@ Future<_BuildResult> _buildIndex(
     'ch': ch,
     'map': map,
   };
-  if (path != null && (map.isNotEmpty || errors.isEmpty)) {
+  final worthSaving = map.isNotEmpty || errors.isEmpty;
+  if (path != null && worthSaving) {
     try {
       File(path).writeAsStringSync(jsonEncode(json), flush: true);
     } catch (e) {
       errors.add('write: $e');
     }
   }
-  return _BuildResult(_indexFromJson(json), errors);
+  return _BuildResult(
+    _indexFromJson(json),
+    errors,
+    web && worthSaving ? jsonEncode(json) : null,
+  );
 }
 
 // ── Channel matching ────────────────────────────────────────────────────────
@@ -602,6 +648,35 @@ class XmltvParser {
     } finally {
       client.close(force: true);
     }
+  }
+
+  /// Web: downloads through the HTTPS proxy, unpacks with the browser and
+  /// parses in slices, yielding between them so the page keeps responding
+  /// (there are no background isolates on the web).
+  static Future<void> parseUrlWeb(
+    String url, {
+    required XmltvChannelCb onChannel,
+    required XmltvProgrammeCb onProgramme,
+  }) async {
+    final res = await http
+        .get(Uri.parse(StreamProxyService.resolveApi(url)))
+        .timeout(const Duration(minutes: 2));
+    if (res.statusCode != 200) throw Exception('HTTP ${res.statusCode}');
+    var bytes = res.bodyBytes;
+    if (bytes.length >= 2 && bytes[0] == 0x1f && bytes[1] == 0x8b) {
+      bytes = await gunzipBytes(bytes);
+    }
+    final text = const Utf8Decoder(
+      allowMalformed: true,
+    ).startChunkedConversion(_Scanner(onChannel, onProgramme));
+    const slice = 256 * 1024;
+    for (var i = 0; i < bytes.length; i += slice) {
+      text.add(
+        Uint8List.sublistView(bytes, i, math.min(i + slice, bytes.length)),
+      );
+      await Future<void>.delayed(Duration.zero);
+    }
+    text.close();
   }
 
   /// Parses an XMLTV byte stream (gzip detected automatically).

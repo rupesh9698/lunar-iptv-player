@@ -139,6 +139,29 @@
     fine. Where MediaSource exists (desktop and Android browsers), report
     no built-in HLS. Safari keeps its own player.
   -->
+  <!--
+    hls.js 1.6 instead of media_kit's bundled 1.4.10, which rejects H.265
+    (HEVC) in MPEG-TS ("Unsupported HEVC stream type found"): most 4K
+    channels are HEVC. media_kit still injects its own copy later; the
+    property below keeps this one (later assignments are ignored).
+    The browser must also decode HEVC (Chrome / Edge with a GPU that
+    supports it, Safari).
+  -->
+  <script src="https://cdn.jsdelivr.net/npm/hls.js@1.6.15/dist/hls.min.js"></script>
+  <script>
+    (function () {
+      try {
+        var hls = window.Hls;
+        if (hls) {
+          Object.defineProperty(window, 'Hls', {
+            configurable: false,
+            get: function () { return hls; },
+            set: function () {}
+          });
+        }
+      } catch (e) {}
+    })();
+  </script>
   <script>
     (function () {
       try {
