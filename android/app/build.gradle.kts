@@ -1,8 +1,18 @@
+import java.io.FileInputStream
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     id("kotlin-android")
     // The Flutter Gradle Plugin must be applied after the Android and Kotlin Gradle plugins.
     id("dev.flutter.flutter-gradle-plugin")
+}
+
+// Upload key: android/key.properties (storeFile, storePassword, keyAlias,
+// keyPassword). Kept out of git by android/.gitignore.
+val keystoreProperties = Properties().apply {
+    val f = rootProject.file("key.properties")
+    if (f.exists()) FileInputStream(f).use { load(it) }
 }
 
 android {
@@ -28,19 +38,22 @@ android {
         versionName = flutter.versionName
     }
 
+    // Signing keys come from android/key.properties (not in git). Without
+    // it, builds fall back to the standard debug key.
     signingConfigs {
-        getByName("debug") {
-            storeFile = file("../../../../Keys/LunarIPTVPlayer.keystore")
-            storePassword = "Developer#2000$"
-            keyAlias = "lunar_iptv_player"
-            keyPassword = "Developer#2000$"
-        }
-
-        create("release") {
-            storeFile = file("../../../../Keys/LunarIPTVPlayer.keystore")
-            storePassword = "Developer#2000$"
-            keyAlias = "lunar_iptv_player"
-            keyPassword = "Developer#2000$"
+        if (keystoreProperties.isNotEmpty()) {
+            getByName("debug") {
+                storeFile = file(keystoreProperties.getProperty("storeFile"))
+                storePassword = keystoreProperties.getProperty("storePassword")
+                keyAlias = keystoreProperties.getProperty("keyAlias")
+                keyPassword = keystoreProperties.getProperty("keyPassword")
+            }
+            create("release") {
+                storeFile = file(keystoreProperties.getProperty("storeFile"))
+                storePassword = keystoreProperties.getProperty("storePassword")
+                keyAlias = keystoreProperties.getProperty("keyAlias")
+                keyPassword = keystoreProperties.getProperty("keyPassword")
+            }
         }
     }
 
@@ -62,7 +75,8 @@ android {
             )
         }
         getByName("release") {
-            signingConfig = signingConfigs.getByName("release")
+            signingConfig = signingConfigs.findByName("release")
+                ?: signingConfigs.getByName("debug")
             // R8: shrink + obfuscate Java/Kotlin code (Play's DEX optimisation
             // check), and drop unused resources. Keep rules: proguard-rules.pro.
             isMinifyEnabled = true
