@@ -132,6 +132,27 @@
     For more details:
     * https://docs.flutter.dev/platform-integration/web/initialization
   -->
+  <!--
+    Live streams: always use hls.js. Newer Chrome reports built-in HLS
+    support, so media_kit skipped hls.js, and Chrome's built-in player
+    failed on some channels (through the HTTPS proxy) that hls.js plays
+    fine. Where MediaSource exists (desktop and Android browsers), report
+    no built-in HLS. Safari keeps its own player.
+  -->
+  <script>
+    (function () {
+      try {
+        var ua = navigator.userAgent;
+        var safari = /Safari/.test(ua) && !/Chrome|Chromium|Edg|OPR|Android/.test(ua);
+        if (safari || !window.MediaSource) return;
+        var canPlay = HTMLMediaElement.prototype.canPlayType;
+        HTMLMediaElement.prototype.canPlayType = function (type) {
+          if (/mpegurl/i.test(String(type))) return '';
+          return canPlay.call(this, type);
+        };
+      } catch (e) {}
+    })();
+  </script>
   <script src="flutter_bootstrap.js" async=""></script>
 
 

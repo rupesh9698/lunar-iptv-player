@@ -19,6 +19,7 @@ import '../../../services/web_proxy_client.dart';
 import '../../player/widgets/player_channel_guide.dart';
 import '../../player/widgets/player_loading_ring.dart';
 import '../../player/widgets/player_lock_overlay.dart';
+import '../../../services/stream_proxy_service.dart';
 
 /// Inline player for Live TV.
 /// Compact mode: video (16:9) + info pane.
@@ -1513,7 +1514,8 @@ class _ChannelSwitchOverlay extends StatelessWidget {
                 ClipRRect(
                   borderRadius: BorderRadius.circular(8),
                   child: CachedNetworkImage(
-                    imageUrl: channel.streamIcon!,
+                    imageUrl: StreamProxyService.resolveImage(channel.streamIcon!),
+                    imageRenderMethodForWeb: ImageRenderMethodForWeb.HttpGet,
                     cacheManager: AppCacheManager.instance,
                     width: 80,
                     height: 54,

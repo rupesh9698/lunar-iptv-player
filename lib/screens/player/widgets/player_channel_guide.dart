@@ -13,6 +13,7 @@ import '../../../models/xtream_models.dart';
 import '../../../providers/app_providers.dart';
 import '../../../providers/live_player_provider.dart';
 import '../../../providers/live_tv_provider.dart';
+import '../../../services/stream_proxy_service.dart';
 
 /// TV Guide panel — shown at the bottom of the maximized Live TV player.
 /// • Now / Next for the focused channel, with the live show's progress
@@ -683,7 +684,8 @@ class _ChannelItemState extends State<_ChannelItem> {
                   height: 36,
                   child: widget.channel.streamIcon?.isNotEmpty == true
                       ? CachedNetworkImage(
-                          imageUrl: widget.channel.streamIcon!,
+                          imageUrl: StreamProxyService.resolveImage(widget.channel.streamIcon!),
+                          imageRenderMethodForWeb: ImageRenderMethodForWeb.HttpGet,
                           cacheManager: AppCacheManager.instance,
                           fit: BoxFit.contain,
                           memCacheWidth: 110,

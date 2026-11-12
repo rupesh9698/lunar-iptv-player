@@ -1,38 +1,60 @@
+// Image widgets use HttpGet on web (see resolveImage); the enum lives in a
+// package cached_network_image depends on but doesn't re-export.
+// ignore: depend_on_referenced_packages
+export 'package:cached_network_image_platform_interface/cached_network_image_platform_interface.dart'
+    show ImageRenderMethodForWeb;
 import 'package:flutter/foundation.dart';
 
-/// Resolves the correct stream URL for each platform.
+/// Routes what the web app loads from IPTV servers through our HTTPS proxy
+/// (`mediaProxy` Cloud Function, see functions/index.js).
 ///
-/// Strategy:
-/// - Native (Android/iOS/Desktop): Direct HTTP is fine — use original URL.
-/// - Web: Route through our Firebase stream proxy which pipes the HTTP
-///   stream via HTTPS, eliminating Mixed Content block in Chrome.
+/// The web app is served over HTTPS, so the browser blocks:
+///  • plain-HTTP servers (mixed content) — API, playlists, streams, images;
+///  • servers without CORS headers — API calls, M3U downloads and HLS
+///    (hls.js fetches playlists and segments with XHR).
+/// The proxy relays over HTTPS with CORS, follows redirects and rewrites HLS
+/// playlists so every segment goes through it as well.
+///
+/// Native apps (Android, TV, desktop) never use it.
 class StreamProxyService {
   StreamProxyService._();
 
-  // Your Firebase Cloud Run stream proxy (deployed separately — see instructions)
-  static const _streamProxyBase =
-      'https://lunar-iptv-stream-proxy-870264865700.us-central1.run.app/proxy';
+  static const proxyBase =
+      'https://us-central1-projects-2000.cloudfunctions.net/mediaProxy';
 
-  // Your existing API proxy (Firebase Functions)
-  static const _apiProxyBase =
-      'https://us-central1-projects-2000.cloudfunctions.net/iptvProxy';
+  static String _via(String url) =>
+      '$proxyBase?url=${Uri.encodeComponent(url)}';
 
-  /// Resolves a stream URL (HLS/TS live, VOD, series episode).
-  /// On web: routes through the stream proxy.
-  /// On native: returns original URL.
-  static String resolveStream(String originalUrl) {
-    if (!kIsWeb) return originalUrl;
-    if (!originalUrl.startsWith('http://')) return originalUrl;
-    // Encode and route through Cloud Run proxy
-    return '$_streamProxyBase?url=${Uri.encodeComponent(originalUrl)}';
+  static bool _isProxied(String url) => url.startsWith(proxyBase);
+
+  /// API calls (player_api.php), M3U playlists, guides: always proxied on
+  /// web (HTTP sources are blocked, HTTPS ones rarely send CORS headers).
+  static String resolveApi(String url) {
+    if (!kIsWeb || _isProxied(url)) return url;
+    return _via(url);
   }
 
-  /// Resolves an API call URL (player_api.php).
-  /// On web: routes through Firebase Function proxy.
-  /// On native: returns original URL.
-  static String resolveApi(String originalUrl) {
-    if (!kIsWeb) return originalUrl;
-    return '$_apiProxyBase?url=${Uri.encodeComponent(originalUrl)}';
+  /// Live / VOD / episode streams. HTTP always goes through the proxy; HLS
+  /// does too (hls.js needs CORS). Other HTTPS files (mp4 …) play directly
+  /// in the browser's video element, which needs no CORS.
+  static String resolveStream(String url) {
+    if (!kIsWeb || _isProxied(url)) return url;
+    if (url.startsWith('http://') || url.toLowerCase().contains('m3u8')) {
+      return _via(url);
+    }
+    return url;
+  }
+
+  /// Posters / logos: on web the image widgets fetch the bytes
+  /// (ImageRenderMethodForWeb.HttpGet; the default <img> route drew some
+  /// proxied logos as black boxes) and that fetch needs CORS, so
+  /// image hosts without CORS headers (most IPTV logo / poster servers) and
+  /// plain-HTTP ones go through the proxy. The proxy marks images cacheable
+  /// for a week, so each is fetched once per browser.
+  static String resolveImage(String url) {
+    if (!kIsWeb || _isProxied(url)) return url;
+    if (!url.startsWith('http://') && !url.startsWith('https://')) return url;
+    return _via(url);
   }
 
   /// Returns true if the URL is an HTTP stream that needs proxying on web.

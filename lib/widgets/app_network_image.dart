@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import '../core/theme/app_theme.dart';
 import '../core/utils/performance.dart';
 import '../services/app_cache_manager.dart';
+import '../services/stream_proxy_service.dart';
 
 /// A robust network image widget with a light placeholder, error fallback,
 /// and proper caching. Use this everywhere instead of Image.network.
@@ -51,6 +52,7 @@ class AppNetworkImage extends StatelessWidget {
                   (constraints.hasBoundedWidth ? constraints.maxWidth : 200);
               return CachedNetworkImage(
                 imageUrl: cleanUrl,
+                imageRenderMethodForWeb: ImageRenderMethodForWeb.HttpGet,
                 fit: fit,
                 width: width,
                 height: height,
@@ -97,7 +99,7 @@ class AppNetworkImage extends StatelessWidget {
     if (raw == null || raw.trim().isEmpty) return null;
     final url = raw.trim();
     if (!url.startsWith('http://') && !url.startsWith('https://')) return null;
-    return url;
+    return StreamProxyService.resolveImage(url);
   }
 }
 

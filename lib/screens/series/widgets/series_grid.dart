@@ -7,6 +7,7 @@ import '../../../core/theme/app_theme.dart';
 import '../../../models/xtream_models.dart';
 import '../../../providers/app_providers.dart';
 import '../../../providers/series_provider.dart';
+import '../../../services/stream_proxy_service.dart';
 
 class SeriesGrid extends ConsumerWidget {
   final bool isMobile;
@@ -298,7 +299,8 @@ class _SeriesPosterCardState
     final cover = widget.series.cover;
     if (cover != null && cover.isNotEmpty) {
       return CachedNetworkImage(
-        imageUrl: cover,
+        imageUrl: StreamProxyService.resolveImage(cover),
+        imageRenderMethodForWeb: ImageRenderMethodForWeb.HttpGet,
         fit: BoxFit.cover,
         placeholder: (_, _) => _shimmer(),
         errorWidget: (_, _, _) => _placeholder(),

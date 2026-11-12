@@ -8,6 +8,7 @@ import '../../../models/xtream_models.dart';
 import '../../../providers/app_providers.dart';
 import '../../../providers/movies_provider.dart';
 import '../../player/player_screen.dart';
+import '../../../services/stream_proxy_service.dart';
 
 class MoviesGrid extends ConsumerWidget {
   final bool isMobile;
@@ -315,7 +316,8 @@ class _MoviePosterCardState
     final icon = widget.movie.streamIcon;
     if (icon != null && icon.isNotEmpty) {
       return CachedNetworkImage(
-        imageUrl: icon,
+        imageUrl: StreamProxyService.resolveImage(icon),
+        imageRenderMethodForWeb: ImageRenderMethodForWeb.HttpGet,
         fit: BoxFit.cover,
         placeholder: (_, _) => _placeholder(),
         errorWidget: (_, _, _) => _placeholder(),

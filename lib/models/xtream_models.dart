@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'package:flutter/foundation.dart';
 
 int _parseInt(dynamic v, [int d = 0]) {
   if (v == null) return d;
@@ -43,10 +44,14 @@ class Playlist {
   /// Returns the playback URL for a live channel.
   /// M3U: uses directSource stored in the channel.
   /// Xtream: constructs from server/username/password.
-  String getChannelUrl(LiveStream channel, {String format = 'ts'}) {
+  /// Live channel address. On web Xtream channels use HLS (.m3u8): the
+  /// browser's video element can't play MPEG-TS.
+  String getChannelUrl(LiveStream channel, {String? format}) {
     if (isM3u) return channel.directSource ?? '';
     return getLiveStreamUrl(channel.streamId, format: format);
   }
+
+  static String get defaultLiveFormat => kIsWeb ? 'm3u8' : 'ts';
 
   String get baseUrl {
     if (isM3u) return '';
@@ -59,8 +64,8 @@ class Playlist {
     return '${baseUrl}player_api.php?username=$username&password=$password';
   }
 
-  String getLiveStreamUrl(String streamId, {String format = 'ts'}) =>
-      '${baseUrl}live/$username/$password/$streamId.$format';
+  String getLiveStreamUrl(String streamId, {String? format}) =>
+      '${baseUrl}live/$username/$password/$streamId.${format ?? defaultLiveFormat}';
 
   String getVodStreamUrl(String streamId, String ext) =>
       '${baseUrl}movie/$username/$password/$streamId.$ext';

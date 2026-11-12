@@ -10,6 +10,7 @@ import '../../../core/utils/focus_utils.dart';
 import '../../../models/xtream_models.dart';
 import '../../../providers/live_tv_provider.dart';
 import '../../../services/behavior_service.dart';
+import '../../../services/stream_proxy_service.dart';
 
 /// Horizontal strip shown at the top of the Live TV channel list when
 /// the user has enough hourly-usage data.
@@ -175,7 +176,8 @@ class _TimeOfDayChipState extends ConsumerState<_TimeOfDayChip>
                       height: 28,
                       child: widget.channel.streamIcon?.isNotEmpty == true
                           ? CachedNetworkImage(
-                              imageUrl: widget.channel.streamIcon!,
+                              imageUrl: StreamProxyService.resolveImage(widget.channel.streamIcon!),
+                              imageRenderMethodForWeb: ImageRenderMethodForWeb.HttpGet,
                               cacheManager: AppCacheManager.instance,
                               fit: BoxFit.contain,
                               memCacheWidth: 80,

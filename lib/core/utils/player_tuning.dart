@@ -82,7 +82,9 @@ class PlayerTuning {
 
     for (final e in props.entries) {
       try {
-        await native.setProperty(e.key, e.value);
+        // Dynamic call: the web build's NativePlayer stub has no
+        // setProperty (this never runs on web, see the kIsWeb guard).
+        await (native as dynamic).setProperty(e.key, e.value);
       } catch (err) {
         debugPrint('mpv ${e.key}=${e.value} rejected: $err');
       }

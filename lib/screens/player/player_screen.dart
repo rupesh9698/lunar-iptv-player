@@ -22,6 +22,7 @@ import '../../providers/live_tv_provider.dart';
 import '../../services/web_proxy_client.dart';
 import 'widgets/player_loading_ring.dart';
 import 'widgets/player_lock_overlay.dart';
+import '../../services/stream_proxy_service.dart';
 
 class PlayerScreen extends ConsumerStatefulWidget {
   final String title;
@@ -182,6 +183,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
     _holdSeekTimer?.cancel();
     _holdArmTimer?.cancel();
     _singleTapTimer?.cancel();
+    _webErrorCheck?.cancel();
     _seekCommitTimer?.cancel();
     _skipHideTimer?.cancel();
     _finalSaveAndRefresh(); // any other exit path (e.g. route replaced)
@@ -211,18 +213,13 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
     super.dispose();
   }
 
+  /// The address to play: on web, through the HTTPS proxy when needed.
+  String get _streamUrl => StreamProxyService.resolveStream(widget.url);
+
   // ── Player init with IPTV optimizations ──────────────────────────────
   Future<void> _initPlayer() async {
-    // Web: HTTP stream blocked by browser Mixed Content policy
-    if (WebProxyClient.isWebHttpStream(widget.url)) {
-      if (mounted) {
-        setState(() {
-          _error = WebProxyClient.webHttpStreamError;
-          _buffering = false;
-        });
-      }
-      return;
-    }
+    // Web: HTTP / HLS streams play through the HTTPS proxy (see
+    // StreamProxyService); native platforms use the URL as is.
 
     // Shared, device-aware tuning (see PlayerTuning for the rationale —
     // the previous hand-rolled mpv option list never actually applied).
@@ -248,6 +245,11 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
         final secondChanged = v.inSeconds != _pos.inSeconds;
         _pos = v; // always keep the latest value (used for saving)
         _checkResume(v);
+        // Web: the video element doesn't always report the end of
+        // buffering; time moving forward means it plays.
+        if (kIsWeb && _buffering && v > Duration.zero) {
+          setState(() => _buffering = false);
+        }
         // Rebuild only when the on-screen time changes and the OSD shows it.
         if (secondChanged && _ctrlVisible && !_isLive) setState(() {});
       }),
@@ -273,7 +275,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
       // pausing (Play would make media_kit rewind to the start).
       _player.stream.completed.listen((done) {
         if (!done || !_isLive || !mounted || _playerDisposed) return;
-        _player.open(Media(widget.url));
+        _player.open(Media(_streamUrl));
       }),
       _player.stream.error.listen((e) {
         if (e.isEmpty || !mounted) return;
@@ -289,7 +291,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
       _resumeAt = Duration(seconds: widget.startPosition.round());
     }
 
-    await _player.open(Media(widget.url, start: _resumeAt));
+    await _player.open(Media(_streamUrl, start: _resumeAt));
     await PlatformUtils.enableWakelock();
 
     // ── Behavior tracking ─────────────────────────────────────────────────────
@@ -309,9 +311,26 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
     _resetHideTimer();
   }
 
+  Timer? _webErrorCheck;
+  bool _webErrorConfirmed = false;
+
   // ── Auto-reconnect for live streams ──────────────────────────────────
   void _handleStreamError(String error) {
     if (!mounted) return;
+    if (kIsWeb && !_webErrorConfirmed) {
+      // The browser reports errors on hiccups while the video keeps
+      // playing; only act if playback has really stopped moving.
+      final at = _player.state.position;
+      _webErrorCheck?.cancel();
+      _webErrorCheck = Timer(const Duration(seconds: 4), () {
+        if (!mounted || _playerDisposed) return;
+        if (_player.state.position > at) return;
+        _webErrorConfirmed = true;
+        _handleStreamError(error);
+        _webErrorConfirmed = false;
+      });
+      return;
+    }
 
     if (_isLive && _reconnectAttempt < _maxReconnects) {
       _reconnectAttempt++;
@@ -325,7 +344,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
       _reconnectTimer = Timer(delay, () {
         if (!mounted) return;
         setState(() => _isReconnecting = false);
-        _player.open(Media(widget.url));
+        _player.open(Media(_streamUrl));
       });
     } else {
       setState(() {
@@ -342,7 +361,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
       _reconnectAttempt = 0;
       _isReconnecting = false;
     });
-    _player.open(Media(widget.url));
+    _player.open(Media(_streamUrl));
   }
 
   // ── System UI ─────────────────────────────────────────────────────────
@@ -987,8 +1006,12 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
                 SafeArea(
                   child: Center(
                     child: PlayerLoadingRing(
-                      percent: _player.stream.bufferingPercentage,
-                      initialPercent: _player.state.bufferingPercentage < 100
+                      // The web player never reports a percentage.
+                      percent: kIsWeb
+                          ? null
+                          : _player.stream.bufferingPercentage,
+                      initialPercent:
+                          !kIsWeb && _player.state.bufferingPercentage < 100
                           ? _player.state.bufferingPercentage
                           : null,
                       // The play button covers the middle while the

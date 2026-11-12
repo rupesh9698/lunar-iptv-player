@@ -128,4 +128,38 @@ void main() {
       expect(r.every((e) => e.rating == 9.5), isTrue);
     });
   });
+
+  group('duplicates', () {
+    test('same title in several categories shows once', () {
+      final lib = [
+        for (var i = 0; i < 4; i++)
+          RecItem(
+            id: 'dog$i',
+            name: "A Dog's Perfect Christmas (2026)",
+            categoryId: 'c$i',
+            rating: 10,
+          ),
+        RecItem(id: 'x', name: 'Other Film', categoryId: 'c0', rating: 9),
+      ];
+      final r = recommendFor(const TasteProfile(), lib, max: 5);
+      expect(r.map((e) => e.name).toSet().length, r.length);
+      expect(r.length, 2);
+    });
+
+    test('copies of a watched title are not recommended', () {
+      final lib = [
+        RecItem(id: 'a1', name: 'K.G.F: Chapter 1 (2018)', categoryId: 'x'),
+        RecItem(id: 'a2', name: 'KGF Chapter 1 (2018)', categoryId: 'y'),
+        RecItem(id: 'b', name: 'Salaar (2023)', categoryId: 'x'),
+      ];
+      final byId = {for (final x in lib) x.id: x};
+      final taste = TasteProfile.build([const TasteSignal('a1', 3)], byId);
+      final ids = recommendFor(taste, lib).map((e) => e.id).toList();
+      expect(ids, isNot(contains('a2')));
+      expect(ids, contains('b'));
+      // More like this: never another copy of the film itself.
+      final like = moreLikeThis(lib.first, lib).map((e) => e.id).toList();
+      expect(like, isNot(contains('a2')));
+    });
+  });
 }

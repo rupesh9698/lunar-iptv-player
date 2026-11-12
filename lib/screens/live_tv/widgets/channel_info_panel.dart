@@ -8,6 +8,7 @@ import '../../../core/utils/focus_utils.dart';
 import '../../../models/xtream_models.dart';
 import '../../../providers/live_tv_provider.dart';
 import '../live_tv_screen.dart';
+import '../../../services/stream_proxy_service.dart';
 
 class ChannelInfoPanel extends ConsumerWidget {
   final double width;
@@ -113,7 +114,8 @@ class ChannelInfoPanel extends ConsumerWidget {
                   color: AppTheme.surfaceVariant,
                   child: channel.streamIcon != null
                       ? CachedNetworkImage(
-                          imageUrl: channel.streamIcon!,
+                          imageUrl: StreamProxyService.resolveImage(channel.streamIcon!),
+                          imageRenderMethodForWeb: ImageRenderMethodForWeb.HttpGet,
                           fit: BoxFit.contain,
                           placeholder: (_, _) =>
                               const Icon(Icons.tv, color: AppTheme.textMuted),

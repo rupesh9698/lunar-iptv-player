@@ -3,6 +3,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
+import '../services/stream_proxy_service.dart';
 
 /// Platform-aware muted mini video player.
 /// Native → real media_kit playback.
@@ -87,7 +88,8 @@ class _MiniPlayerState extends State<MiniPlayer> {
     final url = widget.thumbnailUrl;
     if (url != null && url.isNotEmpty) {
       return CachedNetworkImage(
-        imageUrl: url,
+        imageUrl: StreamProxyService.resolveImage(url),
+        imageRenderMethodForWeb: ImageRenderMethodForWeb.HttpGet,
         fit: BoxFit.cover,
         errorWidget: (_, _, _) => _blackBox(),
       );
@@ -116,7 +118,8 @@ class _StaticPreview extends StatelessWidget {
       child: Stack(fit: StackFit.expand, children: [
         if (thumbnailUrl != null && thumbnailUrl!.isNotEmpty)
           CachedNetworkImage(
-            imageUrl: thumbnailUrl!,
+            imageUrl: StreamProxyService.resolveImage(thumbnailUrl!),
+            imageRenderMethodForWeb: ImageRenderMethodForWeb.HttpGet,
             fit: BoxFit.cover,
             errorWidget: (_, _, _) => const SizedBox.shrink(),
           ),

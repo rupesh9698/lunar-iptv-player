@@ -9,6 +9,7 @@ import 'package:go_router/go_router.dart';
 import '../core/theme/app_theme.dart';
 import '../core/utils/focus_utils.dart';
 import '../providers/behavior_providers.dart';
+import '../services/stream_proxy_service.dart';
 
 /// Horizontal "Continue Watching" row shown on the home screen.
 /// Fully keyboard / TV-remote / touch / cursor navigable.
@@ -231,7 +232,8 @@ class _ContinueCardState extends State<_ContinueCard> {
               children: [
                 imageUrl != null && imageUrl.isNotEmpty
                     ? CachedNetworkImage(
-                  imageUrl: imageUrl,
+                  imageUrl: StreamProxyService.resolveImage(imageUrl),
+                  imageRenderMethodForWeb: ImageRenderMethodForWeb.HttpGet,
                   cacheManager: AppCacheManager.instance,
                   fit: BoxFit.cover,
                   memCacheWidth: 420, // card is 212 px wide

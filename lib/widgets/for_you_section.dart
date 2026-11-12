@@ -5,6 +5,7 @@ import 'package:flutter_animate/flutter_animate.dart';
 
 import '../core/theme/app_theme.dart';
 import '../core/utils/focus_utils.dart';
+import '../services/stream_proxy_service.dart';
 
 /// Generic horizontal "For You" recommendation row.
 /// Works for both VodStream and Series.
@@ -162,7 +163,8 @@ class _ForYouCardState extends State<_ForYouCard> {
               children: [
                 item.imageUrl?.isNotEmpty == true
                     ? CachedNetworkImage(
-                  imageUrl: item.imageUrl!,
+                  imageUrl: StreamProxyService.resolveImage(item.imageUrl!),
+                  imageRenderMethodForWeb: ImageRenderMethodForWeb.HttpGet,
                   cacheManager: AppCacheManager.instance,
                   fit: BoxFit.cover,
                   memCacheWidth: 200, // tile is 94 px wide

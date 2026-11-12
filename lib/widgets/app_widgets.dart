@@ -5,6 +5,7 @@ import 'package:shimmer/shimmer.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import '../core/theme/app_theme.dart';
 import '../models/xtream_models.dart';
+import '../services/stream_proxy_service.dart';
 
 // ============================================================
 // POSTER CARD (for Movies, Series, and Live)
@@ -191,7 +192,8 @@ class _PosterCardState extends State<PosterCard> {
       );
     }
     return CachedNetworkImage(
-      imageUrl: widget.imageUrl!,
+      imageUrl: StreamProxyService.resolveImage(widget.imageUrl!),
+      imageRenderMethodForWeb: ImageRenderMethodForWeb.HttpGet,
       fit: BoxFit.cover,
       placeholder: (context, url) => _shimmerPlaceholder(),
       errorWidget: (context, url, error) => Container(
@@ -291,7 +293,8 @@ class ChannelListTile extends StatelessWidget {
                 child:
                     channel.streamIcon != null && channel.streamIcon!.isNotEmpty
                     ? CachedNetworkImage(
-                        imageUrl: channel.streamIcon!,
+                        imageUrl: StreamProxyService.resolveImage(channel.streamIcon!),
+                        imageRenderMethodForWeb: ImageRenderMethodForWeb.HttpGet,
                         fit: BoxFit.contain,
                         placeholder: (_, _) => _logoPlaceholder(),
                         errorWidget: (_, _, _) => _logoPlaceholder(),

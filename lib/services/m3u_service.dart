@@ -1,6 +1,8 @@
 import 'dart:convert';
+import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import '../models/xtream_models.dart';
+import 'stream_proxy_service.dart';
 
 class M3uService {
   M3uService._();
@@ -12,9 +14,11 @@ class M3uService {
     String url, {
     Duration timeout = const Duration(seconds: 60),
   }) async {
-    final uri = Uri.parse(url.trim());
+    // Web: through the HTTPS proxy (HTTP lists and lists without CORS
+    // headers are blocked by the browser). Browsers can't set User-Agent.
+    final uri = Uri.parse(StreamProxyService.resolveApi(url.trim()));
     final response = await _client
-        .get(uri, headers: {'User-Agent': 'LunarIPTV/1.0'})
+        .get(uri, headers: kIsWeb ? null : {'User-Agent': 'LunarIPTV/1.0'})
         .timeout(timeout);
 
     if (response.statusCode != 200) {

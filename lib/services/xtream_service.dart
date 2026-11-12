@@ -186,7 +186,7 @@ class XtreamService {
   }
 
   // ── Stream URLs ──────────────────────────────────────────────
-  String getLiveUrl(String streamId, {String format = 'ts'}) =>
+  String getLiveUrl(String streamId, {String? format}) =>
       playlist.getLiveStreamUrl(streamId, format: format);
 
   String getVodUrl(String streamId, String ext) =>

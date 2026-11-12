@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:lunar_iptv_player/services/stream_proxy_service.dart';
 import 'package:media_kit/media_kit.dart';
@@ -71,11 +72,12 @@ class LivePlayerNotifier extends StateNotifier<LivePlayerState> {
   /// How full the buffer is before playback resumes (0–100), for the
   /// loading ring. Null before the player exists.
   Stream<double>? get bufferingPercentage =>
-      _player?.stream.bufferingPercentage;
+      kIsWeb ? null : _player?.stream.bufferingPercentage;
 
   /// Last known value of [bufferingPercentage]; null when it's stale (a
   /// finished earlier fill reads 100).
   double? get bufferingPercentageNow {
+    if (kIsWeb) return null; // the web player never reports it
     final v = _player?.state.bufferingPercentage;
     return v == null || v >= 100 ? null : v;
   }
@@ -134,6 +136,15 @@ class LivePlayerNotifier extends StateNotifier<LivePlayerState> {
       p.stream.buffering.listen((v) {
         if (mounted) state = state.copyWith(isBuffering: v);
       }),
+      // Web: the browser's video element doesn't always report the end of
+      // buffering (the ring stayed over a playing picture). Time moving
+      // forward means it plays.
+      if (kIsWeb)
+        p.stream.position.listen((pos) {
+          if (mounted && state.isBuffering && pos > Duration.zero) {
+            state = state.copyWith(isBuffering: false);
+          }
+        }),
       p.stream.videoParams.listen((v) {
         if (!mounted) return;
         final w = (v.dw ?? 0).round();
@@ -158,6 +169,7 @@ class LivePlayerNotifier extends StateNotifier<LivePlayerState> {
   Future<void> openChannel(String url) async {
     _ensureInitialized();
     _reconnectTimer?.cancel();
+    _webErrorCheck?.cancel();
     if (!mounted) return;
 
     // On web, proxy HTTP streams through Cloud Run (HLS/TS compatible)
@@ -183,8 +195,28 @@ class LivePlayerNotifier extends StateNotifier<LivePlayerState> {
     }
   }
 
+  Timer? _webErrorCheck;
+
   void _handleError(String error) {
     if (!mounted) return;
+    if (kIsWeb) {
+      // The browser reports errors on source switches and hiccups while
+      // the picture keeps playing (a "Reconnecting" box sat over a working
+      // stream). Only reconnect if playback has really stopped moving.
+      final at = _player?.state.position ?? Duration.zero;
+      _webErrorCheck?.cancel();
+      _webErrorCheck = Timer(const Duration(seconds: 4), () {
+        if (!mounted) return;
+        final now = _player?.state.position ?? Duration.zero;
+        if (now > at) return;
+        _reconnect();
+      });
+      return;
+    }
+    _reconnect();
+  }
+
+  void _reconnect() {
     final attempt = state.reconnectAttempt;
     if (attempt < _maxReconnects && state.currentUrl != null) {
       final next = attempt + 1;
@@ -256,6 +288,7 @@ class LivePlayerNotifier extends StateNotifier<LivePlayerState> {
   @override
   void dispose() {
     _reconnectTimer?.cancel();
+    _webErrorCheck?.cancel();
     for (final s in _subs) {
       s.cancel();
     }

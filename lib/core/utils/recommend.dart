@@ -76,6 +76,13 @@ int? titleYear(String name) {
   return y;
 }
 
+/// The same title however a provider spells it ("K.G.F: Chapter 1 (2018)",
+/// "KGF Chapter 1 (2018)"): letters and digits only, lower case. Providers
+/// list one film under several categories with different ids; picks are
+/// de-duplicated on this.
+String titleKey(String name) =>
+    name.toLowerCase().replaceAll(RegExp(r'[^a-z0-9\u00C0-\uFFFF]+'), '');
+
 /// Genres from a comma / slash separated field, lower case.
 Set<String> splitGenres(String? raw) {
   if (raw == null || raw.trim().isEmpty) return const {};
@@ -99,8 +106,10 @@ List<RecItem> moreLikeThis(
 }) {
   final seedTokens = titleTokens(seed.name);
   final seedYear = titleYear(seed.name);
+  final seedKey = titleKey(seed.name);
   final genres = {...seed.genres, ...seedGenres};
   final top = <(RecItem, double)>[];
+  final pool = max * 3; // room for duplicates removed below
 
   for (final x in all) {
     if (x.id == seed.id) continue;
@@ -125,9 +134,17 @@ List<RecItem> moreLikeThis(
       score += math.max(0, 1 - (seedYear - y).abs() / 8);
     }
     score += 0.8 * (x.rating / 10).clamp(0, 1);
-    _pushTop(top, (x, score), max);
+    _pushTop(top, (x, score), pool);
   }
-  return [for (final e in top) e.$1];
+  // One entry per title, and never another copy of the seed itself.
+  final seen = <String>{seedKey};
+  final out = <RecItem>[];
+  for (final (x, _) in top) {
+    if (!seen.add(titleKey(x.name))) continue;
+    out.add(x);
+    if (out.length >= max) break;
+  }
+  return out;
 }
 
 // ── Recommended for you ──────────────────────────────────────────────────────
@@ -155,11 +172,15 @@ class TasteProfile {
   /// Ids already watched / in progress / favourite (not recommended again).
   final Set<String> seen;
 
+  /// Their titles (see [titleKey]): other copies aren't recommended either.
+  final Set<String> seenTitles;
+
   const TasteProfile({
     this.categories = const {},
     this.genres = const {},
     this.tokens = const {},
     this.seen = const {},
+    this.seenTitles = const {},
   });
 
   bool get isEmpty => categories.isEmpty && genres.isEmpty;
@@ -173,10 +194,12 @@ class TasteProfile {
     final genres = <String, double>{};
     final tokenWeight = <String, double>{};
     final seen = <String>{};
+    final seenTitles = <String>{};
     for (final s in signals) {
       seen.add(s.id);
       final item = byId[s.id];
       if (item == null) continue;
+      seenTitles.add(titleKey(item.name));
       final c = item.categoryId;
       if (c != null) cats[c] = (cats[c] ?? 0) + s.weight;
       for (final g in item.genres) {
@@ -207,6 +230,7 @@ class TasteProfile {
       genres: norm(genres),
       tokens: strongTokens,
       seen: seen,
+      seenTitles: seenTitles,
     );
   }
 }
@@ -286,10 +310,13 @@ List<RecItem> recommendFor(
     _pushTop(pool, (x, score), poolSize);
   }
 
-  // Variety: no more than [perCategory] from one category.
+  // Variety: one entry per title, no copies of what was watched, and no
+  // more than [perCategory] from one category.
   final perCat = <String?, int>{};
+  final titles = <String>{...taste.seenTitles};
   final out = <RecItem>[];
   for (final (x, _) in pool) {
+    if (!titles.add(titleKey(x.name))) continue;
     final n = perCat[x.categoryId] ?? 0;
     if (n >= perCategory) continue;
     perCat[x.categoryId] = n + 1;

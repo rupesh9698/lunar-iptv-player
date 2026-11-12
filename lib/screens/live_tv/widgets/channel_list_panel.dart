@@ -10,6 +10,7 @@ import '../../../models/xtream_models.dart';
 import '../../../providers/app_providers.dart';
 import '../../../providers/live_tv_provider.dart';
 import '../live_tv_screen.dart';
+import '../../../services/stream_proxy_service.dart';
 
 class ChannelListPanel extends ConsumerStatefulWidget {
   const ChannelListPanel({super.key});
@@ -351,7 +352,8 @@ class _ChannelTileState extends State<_ChannelTile> {
                       widget.channel.streamIcon != null &&
                           widget.channel.streamIcon!.isNotEmpty
                       ? CachedNetworkImage(
-                          imageUrl: widget.channel.streamIcon!,
+                          imageUrl: StreamProxyService.resolveImage(widget.channel.streamIcon!),
+                          imageRenderMethodForWeb: ImageRenderMethodForWeb.HttpGet,
                           fit: BoxFit.contain,
                           placeholder: (_, _) => const Center(
                             child: Icon(
