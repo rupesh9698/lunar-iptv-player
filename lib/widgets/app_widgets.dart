@@ -193,7 +193,7 @@ class _PosterCardState extends State<PosterCard> {
     }
     return CachedNetworkImage(
       imageUrl: StreamProxyService.resolveImage(widget.imageUrl!),
-      imageRenderMethodForWeb: ImageRenderMethodForWeb.HttpGet,
+      imageRenderMethodForWeb: StreamProxyService.imageMethod,
       fit: BoxFit.cover,
       placeholder: (context, url) => _shimmerPlaceholder(),
       errorWidget: (context, url, error) => Container(
@@ -294,7 +294,7 @@ class ChannelListTile extends StatelessWidget {
                     channel.streamIcon != null && channel.streamIcon!.isNotEmpty
                     ? CachedNetworkImage(
                         imageUrl: StreamProxyService.resolveImage(channel.streamIcon!),
-                        imageRenderMethodForWeb: ImageRenderMethodForWeb.HttpGet,
+                        imageRenderMethodForWeb: StreamProxyService.imageMethod,
                         fit: BoxFit.contain,
                         placeholder: (_, _) => _logoPlaceholder(),
                         errorWidget: (_, _, _) => _logoPlaceholder(),

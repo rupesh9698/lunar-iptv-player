@@ -300,7 +300,7 @@ class _SeriesPosterCardState
     if (cover != null && cover.isNotEmpty) {
       return CachedNetworkImage(
         imageUrl: StreamProxyService.resolveImage(cover),
-        imageRenderMethodForWeb: ImageRenderMethodForWeb.HttpGet,
+        imageRenderMethodForWeb: StreamProxyService.imageMethod,
         fit: BoxFit.cover,
         placeholder: (_, _) => _shimmer(),
         errorWidget: (_, _, _) => _placeholder(),

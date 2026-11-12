@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:lunar_iptv_player/services/stream_proxy_service.dart';
+import 'package:lunar_iptv_player/services/web_proxy_client.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
 
@@ -171,6 +172,17 @@ class LivePlayerNotifier extends StateNotifier<LivePlayerState> {
     _reconnectTimer?.cancel();
     _webErrorCheck?.cancel();
     if (!mounted) return;
+
+    // Website with the proxy off: browsers block http:// streams.
+    if (StreamProxyService.blocksHttp(url)) {
+      state = state.copyWith(
+        currentUrl: url,
+        isBuffering: false,
+        isReconnecting: false,
+        error: WebProxyClient.webHttpStreamError,
+      );
+      return;
+    }
 
     // On web, proxy HTTP streams through Cloud Run (HLS/TS compatible)
     final resolvedUrl = StreamProxyService.resolveStream(url);

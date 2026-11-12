@@ -52,7 +52,7 @@ class AppNetworkImage extends StatelessWidget {
                   (constraints.hasBoundedWidth ? constraints.maxWidth : 200);
               return CachedNetworkImage(
                 imageUrl: cleanUrl,
-                imageRenderMethodForWeb: ImageRenderMethodForWeb.HttpGet,
+                imageRenderMethodForWeb: StreamProxyService.imageMethod,
                 fit: fit,
                 width: width,
                 height: height,

@@ -177,7 +177,7 @@ class _TimeOfDayChipState extends ConsumerState<_TimeOfDayChip>
                       child: widget.channel.streamIcon?.isNotEmpty == true
                           ? CachedNetworkImage(
                               imageUrl: StreamProxyService.resolveImage(widget.channel.streamIcon!),
-                              imageRenderMethodForWeb: ImageRenderMethodForWeb.HttpGet,
+                              imageRenderMethodForWeb: StreamProxyService.imageMethod,
                               cacheManager: AppCacheManager.instance,
                               fit: BoxFit.contain,
                               memCacheWidth: 80,

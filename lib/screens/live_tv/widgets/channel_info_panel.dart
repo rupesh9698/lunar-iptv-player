@@ -115,7 +115,7 @@ class ChannelInfoPanel extends ConsumerWidget {
                   child: channel.streamIcon != null
                       ? CachedNetworkImage(
                           imageUrl: StreamProxyService.resolveImage(channel.streamIcon!),
-                          imageRenderMethodForWeb: ImageRenderMethodForWeb.HttpGet,
+                          imageRenderMethodForWeb: StreamProxyService.imageMethod,
                           fit: BoxFit.contain,
                           placeholder: (_, _) =>
                               const Icon(Icons.tv, color: AppTheme.textMuted),

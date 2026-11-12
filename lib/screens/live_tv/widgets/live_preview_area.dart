@@ -818,17 +818,27 @@ class _VideoArea extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    if (ps.error.isNotEmpty && ps.error != WebProxyClient.webHttpStreamError) {
+    if (ps.error.isNotEmpty) {
+      final http = ps.error == WebProxyClient.webHttpStreamError;
       return Container(
         color: Colors.black,
-        child: const Column(
+        padding: const EdgeInsets.symmetric(horizontal: 16),
+        child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(Icons.error_outline, color: Colors.white54, size: 32),
-            SizedBox(height: 8),
+            Icon(
+              http ? Icons.no_encryption_outlined : Icons.error_outline,
+              color: http ? AppTheme.warning : Colors.white54,
+              size: 32,
+            ),
+            const SizedBox(height: 8),
             Text(
-              'Stream unavailable',
-              style: TextStyle(color: Colors.white70, fontSize: 12),
+              http
+                  ? 'Browsers block this http:// channel.\n'
+                        'Watch it in the Lunar IPTV app.'
+                  : 'Stream unavailable',
+              textAlign: TextAlign.center,
+              style: const TextStyle(color: Colors.white70, fontSize: 12),
             ),
           ],
         ),
@@ -1515,7 +1525,7 @@ class _ChannelSwitchOverlay extends StatelessWidget {
                   borderRadius: BorderRadius.circular(8),
                   child: CachedNetworkImage(
                     imageUrl: StreamProxyService.resolveImage(channel.streamIcon!),
-                    imageRenderMethodForWeb: ImageRenderMethodForWeb.HttpGet,
+                    imageRenderMethodForWeb: StreamProxyService.imageMethod,
                     cacheManager: AppCacheManager.instance,
                     width: 80,
                     height: 54,

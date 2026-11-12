@@ -317,7 +317,7 @@ class _MoviePosterCardState
     if (icon != null && icon.isNotEmpty) {
       return CachedNetworkImage(
         imageUrl: StreamProxyService.resolveImage(icon),
-        imageRenderMethodForWeb: ImageRenderMethodForWeb.HttpGet,
+        imageRenderMethodForWeb: StreamProxyService.imageMethod,
         fit: BoxFit.cover,
         placeholder: (_, _) => _placeholder(),
         errorWidget: (_, _, _) => _placeholder(),

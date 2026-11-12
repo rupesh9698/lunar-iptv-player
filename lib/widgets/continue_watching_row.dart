@@ -233,7 +233,7 @@ class _ContinueCardState extends State<_ContinueCard> {
                 imageUrl != null && imageUrl.isNotEmpty
                     ? CachedNetworkImage(
                   imageUrl: StreamProxyService.resolveImage(imageUrl),
-                  imageRenderMethodForWeb: ImageRenderMethodForWeb.HttpGet,
+                  imageRenderMethodForWeb: StreamProxyService.imageMethod,
                   cacheManager: AppCacheManager.instance,
                   fit: BoxFit.cover,
                   memCacheWidth: 420, // card is 212 px wide

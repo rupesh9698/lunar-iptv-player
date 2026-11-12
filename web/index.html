@@ -253,7 +253,49 @@
       } catch (e) {}
     })();
   </script>
-  <script src="flutter_bootstrap.js?v=20261113b" async=""></script>
+  <!--
+    Maximizing the Live TV player moves the video to a new place on the
+    page, and the browser pauses any video that leaves the page, even for a
+    moment. A pause nobody asked for (no pause() call) is undone as soon as
+    the video is back on the page; a player that was closed stays stopped.
+  -->
+  <script>
+    (function () {
+      try {
+        var P = HTMLMediaElement.prototype;
+        var play = P.play, pause = P.pause;
+        var asked = function (m) {
+          return Date.now() - (m.__lunarPausedAt || 0) < 1000;
+        };
+        var watch = function (m) {
+          if (m.__lunarWatch) return;
+          m.__lunarWatch = true;
+          m.addEventListener('pause', function () {
+            if (m.ended || asked(m)) return;
+            var tries = 0;
+            (function again() {
+              if (!m.paused || m.ended || asked(m)) return;
+              if (m.isConnected) {
+                var p = play.call(m);
+                if (p && p.catch) p.catch(function () {});
+              } else if (++tries < 50) {
+                setTimeout(again, 100);
+              }
+            })();
+          });
+        };
+        P.pause = function () {
+          this.__lunarPausedAt = Date.now();
+          return pause.apply(this, arguments);
+        };
+        P.play = function () {
+          watch(this);
+          return play.apply(this, arguments);
+        };
+      } catch (e) {}
+    })();
+  </script>
+  <script src="flutter_bootstrap.js?v=20261113c" async=""></script>
 
 
 </body></html>

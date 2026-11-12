@@ -89,7 +89,7 @@ class _MiniPlayerState extends State<MiniPlayer> {
     if (url != null && url.isNotEmpty) {
       return CachedNetworkImage(
         imageUrl: StreamProxyService.resolveImage(url),
-        imageRenderMethodForWeb: ImageRenderMethodForWeb.HttpGet,
+        imageRenderMethodForWeb: StreamProxyService.imageMethod,
         fit: BoxFit.cover,
         errorWidget: (_, _, _) => _blackBox(),
       );
@@ -119,7 +119,7 @@ class _StaticPreview extends StatelessWidget {
         if (thumbnailUrl != null && thumbnailUrl!.isNotEmpty)
           CachedNetworkImage(
             imageUrl: StreamProxyService.resolveImage(thumbnailUrl!),
-            imageRenderMethodForWeb: ImageRenderMethodForWeb.HttpGet,
+            imageRenderMethodForWeb: StreamProxyService.imageMethod,
             fit: BoxFit.cover,
             errorWidget: (_, _, _) => const SizedBox.shrink(),
           ),

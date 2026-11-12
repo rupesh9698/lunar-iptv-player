@@ -685,7 +685,7 @@ class _ChannelItemState extends State<_ChannelItem> {
                   child: widget.channel.streamIcon?.isNotEmpty == true
                       ? CachedNetworkImage(
                           imageUrl: StreamProxyService.resolveImage(widget.channel.streamIcon!),
-                          imageRenderMethodForWeb: ImageRenderMethodForWeb.HttpGet,
+                          imageRenderMethodForWeb: StreamProxyService.imageMethod,
                           cacheManager: AppCacheManager.instance,
                           fit: BoxFit.contain,
                           memCacheWidth: 110,

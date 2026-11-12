@@ -353,7 +353,7 @@ class _ChannelTileState extends State<_ChannelTile> {
                           widget.channel.streamIcon!.isNotEmpty
                       ? CachedNetworkImage(
                           imageUrl: StreamProxyService.resolveImage(widget.channel.streamIcon!),
-                          imageRenderMethodForWeb: ImageRenderMethodForWeb.HttpGet,
+                          imageRenderMethodForWeb: StreamProxyService.imageMethod,
                           fit: BoxFit.contain,
                           placeholder: (_, _) => const Center(
                             child: Icon(

@@ -285,6 +285,14 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
 
     await _player.setVolume(100);
 
+    // Website with the proxy off: browsers block http:// streams.
+    if (StreamProxyService.blocksHttp(widget.url)) {
+      if (mounted) {
+        setState(() => _error = WebProxyClient.webHttpStreamError);
+      }
+      return;
+    }
+
     // Open media — VOD resume: start straight at the saved position
     // (mpv `start`), then [_checkResume] makes sure it got there.
     if (!_isLive && widget.startPosition > 3.0) {

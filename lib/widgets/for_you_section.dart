@@ -164,7 +164,7 @@ class _ForYouCardState extends State<_ForYouCard> {
                 item.imageUrl?.isNotEmpty == true
                     ? CachedNetworkImage(
                   imageUrl: StreamProxyService.resolveImage(item.imageUrl!),
-                  imageRenderMethodForWeb: ImageRenderMethodForWeb.HttpGet,
+                  imageRenderMethodForWeb: StreamProxyService.imageMethod,
                   cacheManager: AppCacheManager.instance,
                   fit: BoxFit.cover,
                   memCacheWidth: 200, // tile is 94 px wide
