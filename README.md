@@ -24,11 +24,15 @@ Live TV with a real programme guide, movies and series that remember where you s
 
 <div align="center">
 
-![Live TV with the mini player and programme guide](screenshots/live_tv_screen.png)
+![Live TV with the mini player and programme guide](play-store/2-live-tv.png)
 
-| Movies | Series |
+| Home | Movies |
 | :---: | :---: |
-| ![Movies](screenshots/movies_screen.png) | ![Series](screenshots/series_screen.png) |
+| ![Home](play-store/1-home.png) | ![Movies](play-store/3-movies.png) |
+| **Player** | **My Stats** |
+| ![Player](play-store/4-player.png) | ![My Stats](play-store/5-my-stats.png) |
+
+<sub>Screens show sample channels and titles made up for these images. The app plays whatever is in your own playlist.</sub>
 
 </div>
 

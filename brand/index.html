@@ -8,7 +8,7 @@
 <meta name="theme-color" content="#0A0C14">
 <meta property="og:title" content="Lunar IPTV Player">
 <meta property="og:description" content="Your playlist, beautifully played. Free on Android, Android TV, Windows and the web.">
-<meta property="og:image" content="https://lunar-iptv.web.app/assets/live_tv.jpg">
+<meta property="og:image" content="https://lunar-iptv.web.app/assets/og.png">
 <meta property="og:type" content="website">
 <link rel="icon" type="image/png" href="assets/favicon-48.png">
 <link rel="apple-touch-icon" href="assets/logo-256.png">
@@ -240,12 +240,6 @@ section{position:relative}
 .step h3{font-family:var(--display);font-size:21px;margin-bottom:8px}
 .step p{color:var(--text2);font-size:15px;max-width:300px;margin:0 auto}
 
-/* NUMBERS */
-.numbers{display:grid;grid-template-columns:repeat(4,1fr);gap:18px}
-.stat{padding:30px 26px;border-radius:var(--radius);border:1px solid var(--divider);background:rgba(20,24,36,.7)}
-.stat b{display:block;font-family:var(--display);font-size:clamp(34px,4vw,48px);line-height:1;letter-spacing:-1px;margin-bottom:10px}
-.stat span{color:var(--text2);font-size:14.5px}
-
 /* PLATFORMS */
 .plats{display:grid;grid-template-columns:repeat(4,1fr);gap:18px}
 .plat{display:flex;flex-direction:column;padding:28px;border-radius:var(--radius);border:1px solid var(--divider);background:linear-gradient(180deg,rgba(28,33,48,.8),rgba(20,24,36,.8));text-decoration:none;transition:transform .3s,border-color .3s,box-shadow .3s}
@@ -299,9 +293,9 @@ footer{border-top:1px solid var(--divider);margin-top:110px;padding:50px 0 40px;
   .stage{max-width:640px;margin:0 auto;width:100%}
   .span-4,.span-3,.span-2{grid-column:span 6}
   .gallery{grid-template-columns:1fr}
-  .tabs{grid-template-columns:repeat(3,1fr)}
+  .tabs{grid-template-columns:repeat(4,1fr)}
   .tab p{display:none}
-  .plats,.numbers{grid-template-columns:repeat(2,1fr)}
+  .plats{grid-template-columns:repeat(2,1fr)}
   .foot{grid-template-columns:1fr 1fr}
   .foot>div:first-child{grid-column:span 2}
 }
@@ -319,7 +313,7 @@ footer{border-top:1px solid var(--divider);margin-top:110px;padding:50px 0 40px;
   .steps::before,.steps::after{display:none}
   .tabs{grid-template-columns:1fr}
   .tab{padding:14px 16px}
-  .plats,.numbers{grid-template-columns:1fr}
+  .plats{grid-template-columns:1fr}
   .foot{grid-template-columns:1fr}
   .foot>div:first-child{grid-column:auto}
   .cta{padding:60px 20px;border-radius:24px}
@@ -538,28 +532,18 @@ footer{border-top:1px solid var(--divider);margin-top:110px;padding:50px 0 40px;
     <div class="gallery">
       <div class="tabs rv" role="tablist">
         <button class="tab on" role="tab" data-i="0"><h4>Live TV</h4><p>Mini player, channel list and the guide side by side. Maximize with one press.</p><span class="bar"></span></button>
-        <button class="tab" role="tab" data-i="1"><h4>Movies</h4><p>Big poster grids, Recently Added and picks made for you, all in one scroll.</p><span class="bar"></span></button>
-        <button class="tab" role="tab" data-i="2"><h4>Series</h4><p>Seasons, episodes and the exact minute you stopped, ready when you are.</p><span class="bar"></span></button>
+        <button class="tab" role="tab" data-i="1"><h4>Movies</h4><p>Big poster grids and details that resume at the exact second you stopped.</p><span class="bar"></span></button>
+        <button class="tab" role="tab" data-i="2"><h4>Player</h4><p>Audio and subtitles by language name, plus a screen lock.</p><span class="bar"></span></button>
+        <button class="tab" role="tab" data-i="3"><h4>My Stats</h4><p>Watch time, streaks and top genres, updated while you watch.</p><span class="bar"></span></button>
       </div>
       <div class="screen rv" style="--d:.1s">
         <div class="shots" id="shots">
           <img class="on" src="assets/live_tv.jpg" alt="Live TV with mini player and programme guide" loading="lazy" width="1366" height="768">
           <img src="assets/movies.jpg" alt="Movies poster grid" loading="lazy" width="1366" height="768">
-          <img src="assets/series.jpg" alt="Series poster grid" loading="lazy" width="1366" height="768">
+          <img src="assets/player.jpg" alt="Player with audio and subtitle choices" loading="lazy" width="1366" height="768">
+          <img src="assets/stats.jpg" alt="My Stats with live charts" loading="lazy" width="1366" height="768">
         </div>
       </div>
-    </div>
-  </div>
-</section>
-
-<!-- NUMBERS -->
-<section class="sec" style="padding-top:20px">
-  <div class="wrap">
-    <div class="numbers">
-      <div class="stat rv"><b class="grad-text">Any size</b><span>small or huge playlists, cached on your device after the first sync</span></div>
-      <div class="stat rv" style="--d:.06s"><b>4K</b><span>Ultra HD channels on devices that can play them</span></div>
-      <div class="stat rv" style="--d:.12s"><b><span data-count="0">0</span></b><span>ads, accounts or trackers, on every platform</span></div>
-      <div class="stat rv" style="--d:.18s"><b><span data-count="2" data-suffix=" GB">0</span></b><span>is all a TV box needs, with performance mode on</span></div>
     </div>
   </div>
 </section>
